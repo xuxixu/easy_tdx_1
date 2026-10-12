@@ -21,7 +21,7 @@ import {
   type OverseasSymbol,
 } from '../api'
 import { dirClass, fmtAmount, fmtPctSigned, fmtVolShares } from '../format'
-import { loadIndicatorParams, type IndicatorParams } from '../indicatorParams'
+import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
 import { enabledIndices } from '../indexIndicators'
 import {
   inUsSessionFilter,
@@ -36,7 +36,7 @@ import {
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, BoardRow } from '../types'
 import BoardDialog from './BoardDialog.vue'
-import IndicatorEditor from './IndicatorEditor.vue'
+import IndicatorChips from './IndicatorChips.vue'
 import MoodRadar from './MoodRadar.vue'
 import SourceBadge from './SourceBadge.vue'
 import Sparkline from './Sparkline.vue'
@@ -216,9 +216,26 @@ const shownBars = computed(() => {
 /** 当前 K 线数据源（bars 首根的 source 标记）。 */
 const barsSource = computed(() => bars.value[0]?.source)
 
-// ── 指标参数（全局共用，编辑器写入 localStorage 后这里同步） ────────────────
+// ── 指标参数（全局共用，技术指标设置页写入后这里同步） ────────────────
 const indParams = ref<IndicatorParams>(loadIndicatorParams())
-const showIndEditor = ref(false)
+const unsubscribeInd = subscribeIndicatorParams((p) => {
+  indParams.value = { ...p }
+})
+onBeforeUnmount(unsubscribeInd)
+
+/** 主图叠加多选 + 副图切换：写回全局指标配置（各 K 线图/技术指标页共用）。 */
+function toggleOverlay(v: string) {
+  const cur = indParams.value.overlays ?? []
+  const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
+  indParams.value.overlays = next
+  indParams.value.overlay = next[0] ?? 'ma'
+  saveIndicatorParams(indParams.value)
+}
+
+function setSubPane(v: string) {
+  indParams.value.subPane = v
+  saveIndicatorParams(indParams.value)
+}
 const dialog = ref<Focal | null>(null)
 
 /** 美股真指数 → 追踪 ETF（指数 K 线只有快照时一键切换看完整 K 线）。 */
@@ -567,7 +584,12 @@ onBeforeUnmount(() => {
             {{ c.label }}
           </button>
         </span>
-        <button class="chip ind-edit" title="编辑指标参数" @click="showIndEditor = true">⚙ 指标</button>
+        <IndicatorChips
+          :overlays="indParams.overlays ?? []"
+          :sub="indParams.subPane"
+          @toggle-overlay="toggleOverlay"
+          @select-sub="setSubPane"
+        />
         <!-- 美股时段切换（分钟数据按 夜盘/盘前/盘中/盘后 过滤查看） -->
         <span v-if="props.market === 'US'" class="k-cats session-cats">
           <button
@@ -800,7 +822,6 @@ onBeforeUnmount(() => {
       :name="boardDialog.name"
       @close="boardDialog = null"
     />
-    <IndicatorEditor v-if="showIndEditor" v-model="indParams" @close="showIndEditor = false" />
   </div>
 </template>
 
@@ -943,6 +964,10 @@ onBeforeUnmount(() => {
   font-weight: 400;
 }
 .k-cats {
+  display: inline-flex;
+  gap: 4px;
+}
+.ind-group {
   display: inline-flex;
   gap: 4px;
 }

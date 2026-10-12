@@ -194,10 +194,13 @@ class TdxConnection:
                 header_buf = self._recv_exact(HEADER_SIZE)
                 header = parse_header(header_buf)
                 raw_body = self._recv_exact(header.zipsize)
-            except OSError as e:
+            except (OSError, TdxConnectionError) as e:
                 # 关键：通信失败后必须作废这条连接。否则下一次 execute() 会复用一条
                 # 流里仍残留着上一条响应字节的 socket，把残片当成新帧头解析
                 # ——产出价格/日期错误的"合法"数据，或卡满超时的死连接。
+                # OSError: 发送/接收超时等底层故障；
+                # TdxConnectionError: 帧头/正文解析时流已失步或连接被服务器关闭
+                # （_recv_exact_sock / parse_header 抛出，不继承 OSError）。
                 self._close_socket_unlocked()
                 raise TdxConnectionError(f"通信错误: {e}") from e
             body = decompress_body(header, raw_body)
@@ -271,7 +274,10 @@ class TdxConnection:
                     hdr = parse_header(hdr_buf)
                     if hdr.zipsize > 0:
                         _recv_exact_sock(self._sock, hdr.zipsize)
-                except OSError:
+                except (OSError, TdxConnectionError):
+                    # OSError: 发送/接收失败；TdxConnectionError: 心跳期服务器关闭
+                    # 连接或流已失步（_recv_exact_sock / parse_header 抛出）。两者
+                    # 均说明该连接已失效，作废 socket 让外层检测到并清理，重起心跳线程。
                     try:
                         self._sock.close()
                     except OSError:

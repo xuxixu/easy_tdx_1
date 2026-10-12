@@ -12,7 +12,7 @@ MAOBV 平滑后的趋势比原始 OBV 更稳定，适合过滤噪声。
     easy-tdx backtest SZ 000001 --strategy-file strategies/obv_trend.py --count 500 --table
 """
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest import Strategy
 
 
@@ -24,8 +24,8 @@ class OBVTrendStrategy(Strategy):
     obv_buffer: float = 0.02   # OBV 入场缓冲带（2%）
 
     def init(self) -> None:
-        self.obv = self.I(MyTT.OBV, self.data.close, self.data.vol)
-        self.maobv = self.I(MyTT.MA, self.obv, self.maobv_period)
+        self.obv = self.I(ta.OBV, self.data.close, self.data.vol)
+        self.maobv = self.I(ta.MA, self.obv, self.maobv_period)
 
     def next(self) -> None:
         idx = self._bar_index

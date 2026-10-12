@@ -14,8 +14,11 @@ import type {
   CcpmProductsResponse,
   CcpmRankResponse,
   DataFrameResponse,
+  FormulaValidateResponse,
   HotspotCorrelationResp,
   HotspotResp,
+  KlineOptionRequest,
+  KlineOptionResponse,
   LimitUpEcologyResp,
   LimitUpHistoryRow,
   LlmChatResponse,
@@ -95,15 +98,17 @@ export async function fetchBars(
   category: Category,
   startDate?: string,
   endDate?: string,
+  count = 800,
 ): Promise<Bar[]> {
+  const perPage = Math.min(Math.max(count || 800, 1), 800)
   let allBars: Bar[] = []
   for (let page = 0; page < MAX_PAGES; page++) {
     const params = new URLSearchParams({
       market,
       code,
       category,
-      count: '800',
-      start: String(page * 800),
+      count: String(perPage),
+      start: String(page * perPage),
     })
     const resp = await fetch(`${BASE}/bars?${params}`)
     if (!resp.ok) await throwError(resp)
@@ -120,8 +125,8 @@ export async function fetchBars(
       const oldest = pageBars[0].datetime.slice(0, 10)
       if (oldest <= startDate) break
     }
-    // 不足 800 根说明已到数据起点
-    if (pageBars.length < 800) break
+    // 不足单页说明已到数据起点
+    if (pageBars.length < perPage) break
   }
 
     // 按日期范围过滤（闭区间）
@@ -720,8 +725,9 @@ export async function fetchIndexBars(
   market: string,
   code: string,
   count = 250,
+  category = 'DAY',
 ): Promise<Bar[]> {
-  const params = new URLSearchParams({ market, code, category: 'DAY', count: String(count) })
+  const params = new URLSearchParams({ market, code, category, count: String(count) })
   const resp = await fetch(`${BASE}/bars/index?${params}`)
   if (!resp.ok) await throwError(resp)
   const body = (await resp.json()) as DataFrameResponse
@@ -1263,4 +1269,32 @@ export async function sendSignalPush(
   })
   if (!resp.ok) await throwError(resp)
   return (await resp.json()) as PushSendResult & { title: string; content: string }
+}
+
+// ── 通达信公式 ──────────────────────────────────────────────────────────────
+
+/** 校验公式语法（无需行情）：返回信号/数值输出归类或错误信息。 */
+export async function validateFormula(text: string): Promise<FormulaValidateResponse> {
+  const resp = await fetch(`${BASE}/formula/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as FormulaValidateResponse
+}
+
+/** 服务端组装 K 线图 option（pyecharts）：K 线 + 指标条目发过去，拿回完整 option。 */
+export async function fetchKlineOption(
+  req: KlineOptionRequest,
+  signal?: AbortSignal,
+): Promise<KlineOptionResponse> {
+  const resp = await fetch(`${BASE}/chart/kline-option`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    signal,
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as KlineOptionResponse
 }

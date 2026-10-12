@@ -31,13 +31,13 @@ easy-tdx backtest SH 600519 --strategy-file strategies/macd_cross.py --cash 5000
 
 ```python
 from easy_tdx.backtest import Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class MyStrategy(Strategy):
     def init(self):
         # 注册指标
-        self.ma = self.I(MyTT.MA, self.data.close, 10)
+        self.ma = self.I(ta.MA, self.data.close, 10)
 
     def next(self):
         # 每根 K 线调用一次

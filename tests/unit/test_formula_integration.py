@@ -201,3 +201,54 @@ def test_pick_signal_columns_ignores_ratio_value_column():
     buy, sell = pick_signal_columns(result)
     assert buy == "强弱"  # 旧码 signals 含「比率」且排在首位，被误选为买入列
     assert sell is None
+
+
+def test_rest_formula_compute_full_series():
+    """full_series 返回与 K 线等长的全量数值序列（图表绘制用）。"""
+    client = _client()
+    r = client.post(
+        "/api/v1/formula/compute",
+        json={
+            "text": "买入: CROSS(MA(C,5), MA(C,20)); 均线5: MA(C,5); 均线20: MA(C,20);",
+            "ohlcv": _ohlcv(100),
+            "tail": 0,
+            "full_series": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["series_columns"] == ["均线5", "均线20"]
+    series = body["series"]
+    assert len(series) == 100
+    # 首行在预热期内 → None；末行与 last_row 一致
+    assert series[0]["均线5"] is None and series[0]["均线20"] is None
+    assert series[-1]["均线5"] == body["last_row"]["均线5"]
+    assert series[0]["date"] == "2024-01-01"
+    # 序列 JSON 可序列化（NaN 已清洗，否则 Starlette 直接 500）
+    import json
+
+    json.dumps(body)
+
+
+def test_rest_formula_compute_full_series_pure_signal():
+    """纯信号公式：无数值列时 series 为空（前端只展示信号态）。"""
+    client = _client()
+    r = client.post(
+        "/api/v1/formula/compute",
+        json={"text": "买入: C > REF(C, 1);", "ohlcv": _ohlcv(60), "full_series": True},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["series_columns"] == []
+    assert body["series"] == []
+
+
+def test_rest_formula_compute_no_full_series_by_default():
+    """默认不返回 series（老调用方 payload 不变）。"""
+    client = _client()
+    r = client.post(
+        "/api/v1/formula/compute",
+        json={"text": "值: MA(C, 5);", "ohlcv": _ohlcv(60), "tail": 0},
+    )
+    assert r.status_code == 200, r.text
+    assert "series" not in r.json()

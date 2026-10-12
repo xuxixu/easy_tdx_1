@@ -188,6 +188,11 @@ const errOpen = ref(false)
   padding: 0 14px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
+  /* 压在页面级弹窗（z-index 1000）之上：顶栏是会话级工具，个股/板块等
+     弹窗打开期间仍需可达——否则遮罩会把 🎨 / 🐛 一起盖掉，主题和异常
+     入口只在「没有弹窗」时才够得着。层级规范见 style.css 顶部注释。 */
+  position: relative;
+  z-index: 1100;
 }
 .seg {
   display: flex;

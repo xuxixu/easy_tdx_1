@@ -4,10 +4,12 @@ import BacktestView from './views/BacktestView.vue'
 import BoardOverviewView from './views/BoardOverviewView.vue'
 import CcpmView from './views/CcpmView.vue'
 import CompareView from './views/CompareView.vue'
+import CustomIndicatorsView from './views/CustomIndicatorsView.vue'
 import DashboardView from './views/DashboardView.vue'
 import HotspotView from './views/HotspotView.vue'
 import IndexCalendarView from './views/IndexCalendarView.vue'
 import IndexSettingsView from './views/IndexSettingsView.vue'
+import IndicatorSettingsView from './views/IndicatorSettingsView.vue'
 import LimitUpView from './views/LimitUpView.vue'
 import LlmHistoryView from './views/LlmHistoryView.vue'
 import LlmSettingsView from './views/LlmSettingsView.vue'
@@ -50,6 +52,8 @@ const routes = [
   { path: '/signals', name: 'signals', component: SignalRadarView },
   { path: '/settings', name: 'settings', component: ServerSettingsView },
   { path: '/index-settings', name: 'index-settings', component: IndexSettingsView },
+  { path: '/indicator-settings', name: 'indicator-settings', component: IndicatorSettingsView, meta: { label: '技术指标' } },
+  { path: '/custom-indicators', name: 'custom-indicators', component: CustomIndicatorsView, meta: { label: '自定义指标' } },
   { path: '/push', name: 'push', component: PushSettingsView },
   { path: '/llm', name: 'llm', component: LlmSettingsView },
   // AI 解读历史（每次「直接解读」自动归档）

@@ -4,7 +4,7 @@
 // 板块代码 881xxx/885xxx（沪市板块指数），分时与日K走与个股相同的
 // /minute、/bars 接口（协议天然支持板块）。
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import {
   addWatchItem,
@@ -17,12 +17,12 @@ import {
   removeWatchItem,
 } from '../api'
 import { dirClass, fmt2, fmtPctSigned } from '../format'
-import { loadIndicatorParams, saveIndicatorParams, type IndicatorParams } from '../indicatorParams'
+import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, MinutePoint, RankRow } from '../types'
-import IndicatorEditor from './IndicatorEditor.vue'
+import IndicatorChips from './IndicatorChips.vue'
 import IntradayChart from './IntradayChart.vue'
-import StockKline, { type Overlay, type SubPane } from './StockKline.vue'
+import StockKline from './StockKline.vue'
 import StockDialog from './StockDialog.vue'
 
 const props = defineProps<{
@@ -52,17 +52,19 @@ const changePct = computed(() => {
 })
 
 const tab = ref<'minute' | 'daily'>('minute')
-// 主图叠加由 indParams.overlays 统一驱动（见 toggleOverlay）；此前这里还有一个
-// 从未被赋值的 overlay ref 并被当作 :overlay 传入 StockKline，导致 effOverlays
-// 恒为 ['ma']、MA/BOLL/EMA 三个 chip 点了没反应。
-const subPane = ref<SubPane>('macd')
+// 主图叠加由 indParams.overlays 统一驱动（见 toggleOverlay）。
+const subPane = ref<string>('macd')
 
-// ── 指标参数（全局共用） ────────────────────────────────────────────────────
+// ── 指标参数（全局共用，技术指标设置页写入后这里同步） ────────────────
 const indParams = ref<IndicatorParams>(loadIndicatorParams())
-const showIndEditor = ref(false)
+const unsubscribeInd = subscribeIndicatorParams((p) => {
+  indParams.value = { ...p }
+  subPane.value = p.subPane
+})
+onUnmounted(unsubscribeInd)
 
 /** 主图叠加多选（写回全局指标配置，与个股弹窗同一套）。 */
-function toggleOverlay(v: Overlay) {
+function toggleOverlay(v: string) {
   const cur = indParams.value.overlays ?? []
   const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
   indParams.value.overlays = next
@@ -70,17 +72,12 @@ function toggleOverlay(v: Overlay) {
   saveIndicatorParams(indParams.value)
 }
 
-const overlayOptions: Array<{ value: Overlay; label: string }> = [
-  { value: 'ma', label: 'MA' },
-  { value: 'boll', label: 'BOLL' },
-  { value: 'ema', label: 'EMA' },
-]
-const subOptions: Array<{ value: SubPane; label: string }> = [
-  { value: 'macd', label: 'MACD' },
-  { value: 'kdj', label: 'KDJ' },
-  { value: 'rsi', label: 'RSI' },
-  { value: 'none', label: '副图无' },
-]
+/** 副图切换：写回全局配置（与技术指标页/各 K 线图共用）。 */
+function setSubPane(v: string) {
+  subPane.value = v
+  indParams.value.subPane = v
+  saveIndicatorParams(indParams.value)
+}
 
 const minutePoints = ref<MinutePoint[]>([])
 const dailyBars = ref<Bar[]>([])
@@ -260,31 +257,12 @@ function openMember(r: RankRow) {
               <button :class="{ active: tab === 'minute' }" @click="tab = 'minute'">分时</button>
               <button :class="{ active: tab === 'daily' }" @click="tab = 'daily'">日K</button>
               <template v-if="tab === 'daily'">
-                <span class="ind-group">
-                  <button
-                    v-for="opt in overlayOptions"
-                    :key="opt.value"
-                    class="chip"
-                    :class="{ on: (indParams.overlays ?? []).includes(opt.value) }"
-                    @click="toggleOverlay(opt.value)"
-                  >
-                    {{ opt.label }}
-                  </button>
-                </span>
-                <span class="ind-group">
-                  <button
-                    v-for="opt in subOptions"
-                    :key="opt.value"
-                    class="chip"
-                    :class="{ on: subPane === opt.value }"
-                    @click="subPane = opt.value; indParams.subPane = opt.value"
-                  >
-                    {{ opt.label }}
-                  </button>
-                </span>
-                <button class="chip ind-edit" title="编辑指标参数" @click="showIndEditor = true">
-                  ⚙ 指标
-                </button>
+                <IndicatorChips
+                  :overlays="indParams.overlays ?? []"
+                  :sub="subPane"
+                  @toggle-overlay="toggleOverlay"
+                  @select-sub="setSubPane"
+                />
               </template>
             </div>
             <div v-if="loading" class="chart-msg">加载中…</div>
@@ -344,7 +322,6 @@ function openMember(r: RankRow) {
       @close="stockDlg = null"
       @watchlist-changed="emit('watchlist-changed')"
     />
-    <IndicatorEditor v-if="showIndEditor" v-model="indParams" @close="showIndEditor = false" />
   </teleport>
 </template>
 
@@ -356,7 +333,7 @@ function openMember(r: RankRow) {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1000;
 }
 .dlg {
   width: min(1280px, 96vw);

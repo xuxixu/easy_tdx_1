@@ -101,6 +101,58 @@ async def test_mock_tdx_minute_and_stat() -> None:
         assert col in stat.columns
 
 
+async def test_mock_minute_skips_lunch_break() -> None:
+    """分时时间戳必须跳过午休（09:30~11:29 + 13:00~14:59）。
+
+    与真实客户端 ``_add_minute_datetime`` 同口径：若连续累加，11:30~13:00
+    这段非交易时间会被画进图里，分时图横轴就是错的。
+    """
+    client = MockTdxClient()
+    minute = await client.get_minute_time_data(Market.SH, "000001")
+    hhmm = minute["datetime"].dt.strftime("%H:%M").tolist()
+    assert hhmm[0] == "09:30"
+    assert hhmm[119] == "11:29"
+    assert hhmm[120] == "13:00"
+    assert hhmm[239] == "14:59"
+    # 午休段不得出现：11:30 ~ 12:59 一根都没有
+    assert not any("11:30" <= t <= "12:59" for t in hhmm)
+
+
+async def test_mock_minute_datetime_serializes_like_production() -> None:
+    """datetime 必须是 pd.Timestamp，序列化成前端期望的 "YYYY-MM-DDTHH:MM:SS"。
+
+    DataFrameResponse 走 ``value.isoformat()``；前端 IntradayChart 用
+    ``slice(11, 16)`` 取时分，格式不符则横轴/时段过滤全部失效。
+    """
+    client = MockTdxClient()
+    minute = await client.get_minute_time_data(Market.SH, "000001")
+    first = minute["datetime"].iloc[0]
+    assert isinstance(first, pd.Timestamp)
+    iso = first.isoformat()
+    assert len(iso) >= 19 and iso[10] == "T"
+    assert iso[11:16] == "09:30"
+
+
+async def test_mock_history_minute_available_and_date_scoped() -> None:
+    """/minute/history 链路可用（此前 mock 缺该方法，E2E 直接抛 AttributeError）。
+
+    多日分时靠逐日拉取再拼接，每天必须落在各自日期上且互不相同。
+    """
+    client = MockTdxClient()
+    d1 = await client.get_history_minute_time_data(Market.SH, "000001", 20260909)
+    d2 = await client.get_history_minute_time_data(Market.SH, "000001", 20260910)
+
+    assert len(d1) == 240 and len(d2) == 240
+    assert d1["datetime"].iloc[0].strftime("%Y-%m-%d") == "2026-09-09"
+    assert d2["datetime"].iloc[0].strftime("%Y-%m-%d") == "2026-09-10"
+    # 同标的两天曲线必须不同，否则多日拼接后每天形状完全重合
+    assert d1["price"].tolist() != d2["price"].tolist()
+
+    # 确定性：同参数重复调用结果一致
+    again = await client.get_history_minute_time_data(Market.SH, "000001", 20260909)
+    assert again["price"].tolist() == d1["price"].tolist()
+
+
 async def test_mock_mac_kline_contract() -> None:
     """MAC get_stock_kline：datetime 列 + float_shares（bars 路由规整依赖）。"""
     client = MockMacClient()

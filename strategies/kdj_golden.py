@@ -8,7 +8,7 @@ K 上穿 D 且 J < 20（低位金叉）买入，K 下穿 D 且 J > 80（高位�
 """
 
 from easy_tdx.backtest import Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class KDJStrategy(Strategy):
@@ -16,7 +16,7 @@ class KDJStrategy(Strategy):
 
     def init(self) -> None:
         self.k, self.d, self.j = self.I(
-            MyTT.KDJ, self.data.close, self.data.high, self.data.low
+            ta.KDJ, self.data.close, self.data.high, self.data.low
         )
         self.k_cross_up = crossover(self.k, self.d)
         self.k_cross_down = crossover(self.d, self.k)

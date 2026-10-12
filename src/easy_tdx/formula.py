@@ -21,9 +21,11 @@
   逻辑 ``AND OR NOT``（兼容 ``&& || !``）、括号、一元负号；
 - 序列名：``C/CLOSE, O/OPEN, H/HIGH, L/LOW, V/VOL/VOL, AMOUNT/AMT``；
 - 函数白名单（全部后视函数，**无未来数据**）：MA/EMA/SMA/WMA/DMA/HHV/LLV/
-  REF/SUM/COUNT/CROSS/LONGCROSS/EXIST/EVERY/BARSLAST/IF/MAX/MIN/ABS/POW/
+  HHVBARS/LLVBARS/REF/SUM/COUNT/CROSS/LONGCROSS/EXIST/EVERY/BARSLAST/
+  BARSLASTCOUNT/BARSSINCEN/LAST/BETWEEN/VALUEWHEN/CONST/DIFF/SLOPE/FORCAST/
+  SIN/COS/TAN/ATAN/STDP/REVERSE/RD/IF/MAX/MIN/ABS/POW/
   SQRT/LN/LOG/EXP/STD/AVEDEV/MACD/KDJ/RSI/BOLL/CCI/ATR/OBM/DMI 等
-  （映射到 MyTT 与 numpy，见 :data:`_FUNCTIONS`）；
+  （映射到 TA-Lib 引擎 :mod:`easy_tdx.ta` 与 numpy，见 :data:`_FUNCTIONS`）；
 - 输出归类：布尔表达式（比较/逻辑/CROSS 等）的命名输出 → **信号列**
   （``signals``）；数值表达式 → **数值列**（``values``，用于排名/阈值）。
 
@@ -55,7 +57,7 @@ _TOKEN_RE = re.compile(
   | (?P<comment>\{[^}]*\})
   | (?P<num>\d+\.\d+|\.\d+|\d+)
   | (?P<name>[A-Za-z_\u4e00-\u9fff][A-Za-z0-9_\u4e00-\u9fff]*)
-  | (?P<op>:=|>=|<=|==|&&|\|\||[-+*/(),:;><!=])
+  | (?P<op>:=|>=|<=|==|!=|&&|\|\||[-+*/(),:;><!=])
     """,
     re.VERBOSE,
 )
@@ -146,9 +148,15 @@ class _Parser:
                 self._next()
                 continue
             if tok.kind != "name":
-                raise FormulaError(
-                    f"期望变量名开头，得到 {tok.value!r}（位置 {tok.pos}）", pos=tok.pos
+                # 匿名输出：数字/括号/一元运算符开头的裸表达式（如参考线 `0;`、
+                # 包络 `(HHV(H,50)-C);`）。不能开启表达式的记号仍由下级解析报错。
+                anonymous += 1
+                expr = self.parse_expression()
+                self._expect_op(";")
+                stmts.append(
+                    _Statement(name=f"OUTPUT_{anonymous}", expr=expr, is_output=True, pos=tok.pos)
                 )
+                continue
             # NAME := expr | NAME : expr | 裸表达式
             if (
                 self._tokens[self._i + 1].kind == "op"
@@ -203,7 +211,7 @@ class _Parser:
 
     def _parse_cmp(self) -> _Node:
         left = self._parse_add()
-        while tok := self._match_op(">", "<", ">=", "<=", "=", "=="):
+        while tok := self._match_op(">", "<", ">=", "<=", "=", "==", "!="):
             right = self._parse_add()
             op = "==" if tok.value in ("=", "==") else tok.value
             left = _Node(kind="cmp", value=op, children=[left, right])
@@ -246,7 +254,7 @@ class _Parser:
         if tok.kind == "num":
             self._next()
             v = float(tok.value)
-            # 整数字面量保持 int（MyTT 窗口/周期参数要求 int）
+            # 整数字面量保持 int（窗口/周期参数要求 int）
             if v.is_integer() and abs(v) < 1e15:
                 v = int(v)
             return _Node(kind="num", value=v)
@@ -295,12 +303,12 @@ _SERIES_ALIASES: dict[str, str] = {
     "成交额": "amount",
 }
 
-_BOOL_FUNCS = {"CROSS", "LONGCROSS", "EXIST", "EVERY"}  # 返回布尔的函数
+_BOOL_FUNCS = {"CROSS", "LONGCROSS", "EXIST", "EVERY", "LAST"}  # 返回布尔的函数
 
 
 def _build_functions() -> dict[str, Callable[..., Any]]:
-    """函数白名单：MyTT 后视函数 + numpy 补齐（不透传任意 Python）。"""
-    import easy_tdx.MyTT as mytt
+    """函数白名单：TA-Lib 引擎原语 + numpy 补齐（不透传任意 Python）。"""
+    import easy_tdx.ta as engine
 
     fns: dict[str, Callable[..., Any]] = {}
     for name in (
@@ -311,6 +319,8 @@ def _build_functions() -> dict[str, Callable[..., Any]]:
         "DMA",
         "HHV",
         "LLV",
+        "HHVBARS",
+        "LLVBARS",
         "REF",
         "SUM",
         "COUNT",
@@ -319,6 +329,18 @@ def _build_functions() -> dict[str, Callable[..., Any]]:
         "EXIST",
         "EVERY",
         "BARSLAST",
+        "BARSLASTCOUNT",
+        "BARSSINCEN",
+        "LAST",
+        "BETWEEN",
+        "VALUEWHEN",
+        "CONST",
+        "DIFF",
+        "SLOPE",
+        "FORCAST",
+        "SIN",
+        "COS",
+        "TAN",
         "IF",
         "MAX",
         "MIN",
@@ -334,20 +356,36 @@ def _build_functions() -> dict[str, Callable[..., Any]]:
         "OBV",
         "DMI",
         "FILTER",
+        "RD",
     ):
-        if hasattr(mytt, name):
-            fns[name] = getattr(mytt, name)
+        if hasattr(engine, name):
+            fns[name] = getattr(engine, name)
 
     # REF 负移位 = 引用未来数据（未来函数），显式禁止。此前仅靠负数字面量
-    # 经一元负号转成 float 在 pandas 层报错这一巧合拦截。MyTT 库内直调
+    # 经一元负号转成 float 在 pandas 层报错这一巧合拦截。引擎内直调
     # （如 ICHIMOKU 迟行带画图 REF(C, -SHIFT)）不走公式白名单，不受影响。
     def _ref_no_lookahead(S: Any, N: Any = 1) -> Any:
         n_arr = np.asarray(N)
         if n_arr.size and float(np.min(n_arr)) < 0:
             raise FormulaError(f"REF 不允许负移位（引用未来数据）：N={N}")
-        return mytt.REF(S, N)
+        return engine.REF(S, N)
 
     fns["REF"] = _ref_no_lookahead
+
+    def _atan(S: Any) -> Any:
+        return np.arctan(np.asarray(S, dtype=float))
+
+    def _stdp(S: Any, N: Any) -> Any:
+        # STDP 总体标准差：与 STD 同口径（ddof=0），别名补齐
+        return engine.STD(S, N)
+
+    def _reverse(S: Any) -> Any:
+        # REVERSE 取反显示：数值上等于取负
+        return -np.asarray(S, dtype=float)
+
+    fns["ATAN"] = _atan
+    fns["STDP"] = _stdp
+    fns["REVERSE"] = _reverse
 
     # numpy 补齐（TDX 语义）
     fns["POW"] = np.power
@@ -394,6 +432,9 @@ class _Evaluator:
                 self._vars[stmt.name.upper()] = val
             if stmt.is_output and stmt.name is not None:
                 arr = np.asarray(val, dtype=float)
+                if arr.ndim == 0:
+                    # 纯量输出（如参考线 `0;`）广播为全长常量列
+                    arr = np.full(self._n, float(arr), dtype=float)
                 result.columns[stmt.name] = arr
                 if self._is_boolean(stmt.expr, val):
                     result.signals.append(stmt.name)
@@ -479,6 +520,8 @@ class _Evaluator:
                     out = a >= b
                 elif op == "<=":
                     out = a <= b
+                elif op == "!=":
+                    out = np.logical_not(np.isclose(a, b))
                 else:  # ==
                     out = np.isclose(a, b)
             return out.astype(float)  # NaN 参与比较 → False（0）

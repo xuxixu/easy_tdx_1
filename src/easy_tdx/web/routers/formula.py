@@ -39,6 +39,10 @@ class FormulaComputeRequest(FormulaValidateRequest):
     category: str = "DAY"
     count: int = Field(default=250, ge=20, le=2000)
     tail: int = Field(default=10, ge=0, le=100, description="附带最近 N 根输出明细")
+    full_series: bool = Field(
+        default=False,
+        description="返回全量数值序列（供图表绘制：与 K 线等长，含 date + 各数值列）",
+    )
 
 
 class FormulaBacktestRequest(FormulaComputeRequest):
@@ -71,7 +75,7 @@ async def validate_formula(req: FormulaValidateRequest) -> FormulaValidateRespon
         signals: list[str] = []
         values: list[str] = []
         bool_kinds = {"cmp", "logic"}
-        bool_funcs = {"CROSS", "LONGCROSS", "EXIST", "EVERY"}
+        bool_funcs = {"CROSS", "LONGCROSS", "EXIST", "EVERY", "LAST"}
         for stmt in compiled._statements:  # noqa: SLF001 — 同包内部协定
             if stmt.is_output and stmt.name:
                 if stmt.expr.kind in bool_kinds or (
@@ -117,7 +121,47 @@ async def compute_formula(
             0, "date", [str(pd.Timestamp(d).date()) for d in df[dt_col].iloc[-req.tail :]]
         )
         payload["recent"] = recent.to_dict(orient="records")
+    if req.full_series:
+        # 全量数值序列（图表绘制用）：与 K 线等长，前缀不可算点为 None。
+        # 仅含数值输出列；纯信号公式返回空序列（调用方展示信号态即可）。
+        payload["series_columns"] = list(result.values)
+        frame = result.to_frame()
+        cols = [c for c in result.values if c in frame.columns]
+        payload["series"] = _full_series(df, frame, cols) if cols else []
     return payload
+
+
+def _clean_num(v: Any) -> float | None:
+    """数值清洗为 JSON 原生 float（NaN/±inf/非法 → None）。
+
+    Starlette 以 allow_nan=False 序列化，NaN 漏出去整个响应 500。
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f or f in (float("inf"), float("-inf")):
+        return None
+    return f
+
+
+def _full_series(df: Any, frame: Any, cols: list[str]) -> list[dict[str, Any]]:
+    """公式全量数值序列：[{date, <数值列>: number|null}, ...]（与 K 线等长）。
+
+    ``frame`` 为结果 DataFrame，``cols`` 为要输出的数值列（Any 标注避免
+    路由层硬依赖公式引擎与 pandas 类型）。
+    """
+    import pandas as pd
+
+    dt_col = "datetime" if "datetime" in df.columns else "date"
+    dates = [str(pd.Timestamp(d).date()) for d in df[dt_col]]
+    rows: list[dict[str, Any]] = []
+    for i, d in enumerate(dates):
+        row: dict[str, Any] = {"date": d}
+        for col in cols:
+            row[col] = _clean_num(frame[col].iloc[i])
+        rows.append(row)
+    return rows
 
 
 @router.post("/formula/backtest/run/async", status_code=202)

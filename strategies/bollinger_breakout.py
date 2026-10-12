@@ -8,14 +8,14 @@
 """
 
 from easy_tdx.backtest import Strategy
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class BollingerStrategy(Strategy):
     """布林带突破策略。"""
 
     def init(self) -> None:
-        self.upper, self.mid, self.lower = self.I(MyTT.BOLL, self.data.close, 20)
+        self.upper, self.mid, self.lower = self.I(ta.BOLL, self.data.close, 20)
 
     def next(self) -> None:
         cur = self.data.close[0]

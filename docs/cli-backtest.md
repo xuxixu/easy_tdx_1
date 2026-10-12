@@ -319,12 +319,12 @@ python -X utf8 run_all_strategies.py SH 600519 --count 2000 --cash 1000000 --adj
 
 ```python
 from easy_tdx.backtest import Strategy
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class MyStrategy(Strategy):
     def init(self):
-        self.ma = self.I(MyTT.MA, self.data.close, 10)
+        self.ma = self.I(ta.MA, self.data.close, 10)
 
     def next(self):
         if self.data.close[0] > self.ma[self._bar_index]:

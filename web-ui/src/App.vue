@@ -83,6 +83,8 @@ const sseLabel: Record<string, string> = {
           <div class="nav-group">系统</div>
           <RouterLink to="/settings" active-class="active">服务器设置</RouterLink>
           <RouterLink to="/index-settings" active-class="active">指数设置</RouterLink>
+          <RouterLink to="/indicator-settings" active-class="active">技术指标</RouterLink>
+          <RouterLink to="/custom-indicators" active-class="active">自定义指标</RouterLink>
           <RouterLink to="/push" active-class="active">推送设置</RouterLink>
           <RouterLink to="/llm" active-class="active">AI 设置</RouterLink>
         </nav>

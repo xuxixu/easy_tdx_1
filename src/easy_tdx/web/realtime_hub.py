@@ -17,6 +17,16 @@
 - 盘外时段由 RealtimeDataFeed 自带的交易时段过滤兜底（只睡不拉）。
 
 背压：队列满（连接消费慢）时丢最旧保最新——行情快照旧帧无价值。
+
+**两把锁的分工**（不要合并成一把）：
+
+- ``_lock``（asyncio.Lock）——只管「订阅生命周期」这一串会 await 的操作
+  （subscribe/unsubscribe/disconnect/shutdown → _sync_feed → _stop_feed）。
+  它们必须互斥，否则并发订阅会各自重启一遍 feed。
+- ``_state_lock``（threading.RLock）——只管三张共享表 ``_queues`` / ``_subs`` /
+  ``_refcount`` 的同步读写。_on_event 是 EventBus 的同步回调，拿不到 await，
+  只能用普通线程锁；异步侧改动这几张表时持同一把锁，两边才真正互斥。
+  选 RLock 而非 Lock：fan-out 链路可重入（handler 里再 publish 又回到 _on_event）。
 """
 
 from __future__ import annotations
@@ -24,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import threading
 import time
 from typing import Any
 
@@ -106,6 +117,10 @@ class RealtimeStreamHub:
         self._feed_task: asyncio.Task[None] | None = None
         self._polling: list[tuple[int, str]] = []  # 当前 feed 正在轮询的集合
         self._lock = asyncio.Lock()
+        # 只护 _queues / _subs / _refcount 三张表的同步读写（见模块 docstring）。
+        # 与 _lock 分工：_lock 管会 await 的生命周期，_state_lock 管数据表本身，
+        # 因为 _on_event 是同步回调，不能用 asyncio.Lock。
+        self._state_lock = threading.RLock()
 
     # ── 订阅管理（WS 端点调用） ──────────────────────────────────────────
 
@@ -113,8 +128,9 @@ class RealtimeStreamHub:
         """注册一个连接；返回 (cid, queue)。queue 是该连接唯一的推送出口。"""
         cid = next(self._ids)
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._queue_size)
-        self._queues[cid] = q
-        self._subs[cid] = set()
+        with self._state_lock:
+            self._queues[cid] = q
+            self._subs[cid] = set()
         return cid, q
 
     async def subscribe(self, cid: int, symbol: str) -> None:
@@ -126,32 +142,38 @@ class RealtimeStreamHub:
         parse_realtime_symbol(symbol)  # 先做格式校验（不持锁）
         key = symbol.strip().upper()
         async with self._lock:
-            if key in self._subs[cid]:
-                return  # 幂等：同连接重复订阅同一标的
-            if self._refcount.get(key, 0) == 0 and len(self._active_symbols()) >= MAX_WS_SYMBOLS:
-                raise ValueError(
-                    f"订阅标的总数已达上限 {MAX_WS_SYMBOLS}（get_stock_quotes 单次上限）"
-                )
-            self._subs[cid].add(key)
-            self._refcount[key] = self._refcount.get(key, 0) + 1
+            with self._state_lock:
+                if key in self._subs[cid]:
+                    return  # 幂等：同连接重复订阅同一标的
+                if (
+                    self._refcount.get(key, 0) == 0
+                    and len(self._active_symbols()) >= MAX_WS_SYMBOLS
+                ):
+                    raise ValueError(
+                        f"订阅标的总数已达上限 {MAX_WS_SYMBOLS}（get_stock_quotes 单次上限）"
+                    )
+                self._subs[cid].add(key)
+                self._refcount[key] = self._refcount.get(key, 0) + 1
             await self._sync_feed()
 
     async def unsubscribe(self, cid: int, symbol: str) -> None:
         """连接 cid 退订 symbol（引用计数 -1；归零则移出轮询集合）。"""
         key = symbol.strip().upper()
         async with self._lock:
-            if key not in self._subs[cid]:
-                return
-            self._subs[cid].discard(key)
-            self._dec_ref(key)
+            with self._state_lock:
+                if key not in self._subs[cid]:
+                    return
+                self._subs[cid].discard(key)
+                self._dec_ref(key)
             await self._sync_feed()
 
     async def disconnect(self, cid: int) -> None:
         """连接断开：退订其全部标的并同步轮询集合。"""
         async with self._lock:
-            for key in self._subs.pop(cid, set()):
-                self._dec_ref(key)
-            self._queues.pop(cid, None)
+            with self._state_lock:
+                for key in self._subs.pop(cid, set()):
+                    self._dec_ref(key)
+                self._queues.pop(cid, None)
             await self._sync_feed()
 
     # ── 生命周期 ──────────────────────────────────────────────────────────
@@ -159,18 +181,21 @@ class RealtimeStreamHub:
     async def shutdown(self) -> None:
         """lifespan 关闭时调用：停止轮询任务（feed 正常退出，非 cancel）。"""
         async with self._lock:
-            self._refcount.clear()
+            with self._state_lock:
+                self._refcount.clear()
             await self._stop_feed()
 
     @property
     def poll_symbols(self) -> list[str]:
         """当前去重后的订阅集合（诊断/测试用）。"""
-        return self._active_symbols()
+        with self._state_lock:
+            return self._active_symbols()
 
     @property
     def subscriber_count(self) -> int:
         """当前连接数。"""
-        return len(self._queues)
+        with self._state_lock:
+            return len(self._queues)
 
     @property
     def polling(self) -> bool:
@@ -180,7 +205,10 @@ class RealtimeStreamHub:
     # ── 内部 ──────────────────────────────────────────────────────────────
 
     def _active_symbols(self) -> list[str]:
-        """引用计数 > 0 的标的（排序保证 feed 重启的参数确定性）。"""
+        """引用计数 > 0 的标的（排序保证 feed 重启的参数确定性）。
+
+        调用方须已持 ``_state_lock``（本方法自身不加锁，避免与调用方死锁）。
+        """
         return sorted(s for s, c in self._refcount.items() if c > 0)
 
     def _dec_ref(self, key: str) -> None:
@@ -226,13 +254,25 @@ class RealtimeStreamHub:
         self._polling = []
 
     def _on_event(self, event: MarketEvent) -> None:
-        """EventBus 回调：按各连接的订阅集合 fan-out（丢最旧保最新）。"""
-        if not self._queues:
+        """EventBus 回调：按各连接的订阅集合 fan-out（丢最旧保最新）。
+
+        在 ``_state_lock`` 内快照 ``_queues`` / ``_subs`` 的拷贝再迭代：_on_event 由
+        EventBus 同步回调（不能 await，只能用线程锁），可能与 disconnect 的
+        pop 并发，直接迭代会在连接断开时触发 KeyError 或 dict-changed-
+        during-iteration 竞态。
+
+        注意这里不是 ``self._lock``（asyncio.Lock）——同步回调里没有 await 的位置，
+        用 ``with async_lock`` 会直接抛 TypeError。
+        """
+        with self._state_lock:
+            queues = dict(self._queues)
+            subs = dict(self._subs)
+        if not queues:
             return
         key = f"{event.market}{event.code}"
         frame = _event_to_frame(event)
-        for cid, q in list(self._queues.items()):
-            if key not in self._subs.get(cid, set()):
+        for cid, q in queues.items():
+            if key not in subs.get(cid, set()):
                 continue
             try:
                 q.put_nowait(frame)

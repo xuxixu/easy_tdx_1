@@ -75,7 +75,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1150;
 }
 .modal {
   background: var(--bg-panel);

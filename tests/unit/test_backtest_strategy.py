@@ -293,7 +293,7 @@ class TestStrategyBase:
 
     def test_I_registers_indicator(self) -> None:
         """测试 self.I() 注册指标。"""
-        from easy_tdx.MyTT import MA
+        from easy_tdx.ta import MA
 
         class IndicatorStrategy(Strategy):
             def init(self) -> None:

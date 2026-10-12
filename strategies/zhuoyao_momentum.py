@@ -18,7 +18,7 @@
     easy-tdx backtest SZ 000001 --strategy-file strategies/zhuoyao_momentum.py --count 2000 --table
 """
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest import Strategy
 
 
@@ -28,7 +28,7 @@ class ZhuoyaoStrategy(Strategy):
     def init(self) -> None:
         # ZHUOYAO 返回 4 个数组: LONG, MID, SHORT, TREND
         self.long, self.mid, self.short, self.trend = self.I(
-            MyTT.ZHUOYAO, self.data.close,
+            ta.ZHUOYAO, self.data.close,
         )
 
     def next(self) -> None:

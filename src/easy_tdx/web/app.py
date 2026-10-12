@@ -410,6 +410,7 @@ def _create_app(
     from easy_tdx.web.routers.board_mac import router as board_mac_router
     from easy_tdx.web.routers.ccpm import router as ccpm_router
     from easy_tdx.web.routers.chanlun import router as chanlun_router
+    from easy_tdx.web.routers.chart import router as chart_router
     from easy_tdx.web.routers.ex_market import router as ex_market_router
     from easy_tdx.web.routers.finance import router as finance_router
     from easy_tdx.web.routers.formula import router as formula_router
@@ -445,6 +446,8 @@ def _create_app(
     app.include_router(overseas_router, prefix="/api/v1")
     # 技术指标路由
     app.include_router(indicator_router, prefix="/api/v1")
+    # K 线图 option 路由（服务端组装 ECharts option，前端照画，无行情依赖）
+    app.include_router(chart_router, prefix="/api/v1")
     # 公告检索路由（巨潮资讯网，独立数据源）
     app.include_router(announcement_router, prefix="/api/v1")
     # 新浪财报三表路由（独立数据源）

@@ -218,8 +218,8 @@ def _ma_cross_instance():  # noqa: ANN202
 
 
 def _expected_cross_dates(df: pd.DataFrame, direction: str) -> list[str]:
-    """用 MyTT 独立算出金叉/死叉所在日期（作为期望值，与被测代码解耦）。"""
-    from easy_tdx.MyTT import CROSS, MA
+    """用 ta 独立算出金叉/死叉所在日期（作为期望值，与被测代码解耦）。"""
+    from easy_tdx.ta import CROSS, MA
 
     close = df["close"].to_numpy()
     fast, slow = MA(close, 5), MA(close, 20)

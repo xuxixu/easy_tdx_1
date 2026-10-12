@@ -35,14 +35,14 @@
 ```python
 import pandas as pd
 from easy_tdx.backtest import BacktestEngine, Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 # 1. 定义策略
 class DualMAStrategy(Strategy):
     def init(self):
-        self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-        self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+        self.ma5 = self.I(ta.MA, self.data.close, 5)
+        self.ma20 = self.I(ta.MA, self.data.close, 20)
         self.cross = crossover(self.ma5, self.ma20)
 
     def next(self):
@@ -141,18 +141,18 @@ close_array = self.data.close.raw    # numpy ndarray
 使用 `self.I()` 在 `init()` 中注册指标。`_SeriesAccessor` 参数会自动解包为 numpy 数组：
 
 ```python
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 def init(self):
     # 均线
-    self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-    self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+    self.ma5 = self.I(ta.MA, self.data.close, 5)
+    self.ma20 = self.I(ta.MA, self.data.close, 20)
 
     # MACD
-    self.dif, self.dea, self.macd = self.I(MyTT.MACD, self.data.close)
+    self.dif, self.dea, self.macd = self.I(ta.MACD, self.data.close)
 
     # 布林带
-    self.upper, self.mid, self.lower = self.I(MyTT.BOLL, self.data.close, 20)
+    self.upper, self.mid, self.lower = self.I(ta.BOLL, self.data.close, 20)
 
 def next(self):
     # 用索引访问指标值
@@ -168,8 +168,8 @@ def next(self):
 from easy_tdx.backtest import crossover
 
 def init(self):
-    self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-    self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+    self.ma5 = self.I(ta.MA, self.data.close, 5)
+    self.ma20 = self.I(ta.MA, self.data.close, 20)
     self.golden = crossover(self.ma5, self.ma20)   # 金叉：ma5 上穿 ma20
     self.death = crossover(self.ma20, self.ma5)    # 死叉：ma20 上穿 ma5
 
@@ -458,14 +458,14 @@ CLI 的 `--strategy-file` 加载 Python 文件，文件中必须包含一个 `St
 ```python
 # my_strategy.py
 from easy_tdx.backtest import Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class MyStrategy(Strategy):
     """双均线策略。"""
     def init(self):
-        self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-        self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+        self.ma5 = self.I(ta.MA, self.data.close, 5)
+        self.ma20 = self.I(ta.MA, self.data.close, 20)
         self.cross = crossover(self.ma5, self.ma20)
 
     def next(self):

@@ -18,7 +18,7 @@ from easy_tdx.backtest.strategies.registry import (
     ParametrizedStrategy,
     register_strategy,
 )
-from easy_tdx.MyTT import (
+from easy_tdx.ta import (
     AD,
     AROON,
     ASI,

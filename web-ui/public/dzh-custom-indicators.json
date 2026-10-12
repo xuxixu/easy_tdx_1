@@ -1,0 +1,818 @@
+{
+ "version": 1,
+ "source": "桌面「大智慧指标」目录（文华WH6转通达信语法）批量转换",
+ "generated": "2026-10-12",
+ "count": 52,
+ "indicators": [
+  {
+   "name": "ANGLE",
+   "kind": "sub",
+   "formula": "{参数为原公式未给默认值的占位，转换时注入}\nN:=10;\nA1:=MA(C,N);\nSS:=A1/REF(A1,1)-1;\nATAN(SS*100)*180/3.1416;\n0;\n-50;\n50;",
+   "note": "注入参数 N=10",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_3",
+    "OUTPUT_4"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "ANGLE.txt",
+   "candle": []
+  },
+  {
+   "name": "ATS",
+   "kind": "sub",
+   "formula": "RCA:(H-L)/L*100;\nHR:HHV(RCA,120);",
+   "note": "直转",
+   "outputs": [
+    "RCA",
+    "HR"
+   ],
+   "signals": [],
+   "source_file": "ATS.txt",
+   "candle": []
+  },
+  {
+   "name": "BBIANDMA60",
+   "kind": "overlay",
+   "formula": "BBI:(MA(CLOSE,3)+MA(CLOSE,6)+MA(CLOSE,12)+MA(CLOSE,24))/4;\nMA60:MA(CLOSE,60);\n上穿条件:CROSS(BBI,MA60);\n下穿条件:CROSS(MA60,BBI);",
+   "note": "剔除绘图 DRAWICON；剔除绘图 DRAWICON",
+   "outputs": [
+    "BBI",
+    "MA60"
+   ],
+   "signals": [
+    "上穿条件",
+    "下穿条件"
+   ],
+   "source_file": "BBIANDMA60.txt",
+   "candle": []
+  },
+  {
+   "name": "BDL",
+   "kind": "sub",
+   "formula": "TR:=MAX(MAX((HIGH-LOW),ABS(REF(CLOSE,1)-HIGH)),ABS(REF(CLOSE,1)-LOW));\nATR:=MA(TR,14);\nVOLAT:=ATR;\nLC:=REF(CLOSE,1);\nRSI1:=SMA(MAX(CLOSE-LC,0),14,1)/SMA(ABS(CLOSE-LC),14,1)*100;\nRSI_VALUE:=RSI1;\nFEAR_GREED_RAW:=(VOLAT / REF(VOLAT, 20)) * 50 + (RSI_VALUE - 50)*V;\nFEAR_GREED_NORMALIZED:=(FEAR_GREED_RAW - LLV(FEAR_GREED_RAW,20)) / (HHV(FEAR_GREED_RAW, 20) - LLV(FEAR_GREED_RAW, 20)) * 100;\nROYAL_KING:FEAR_GREED_NORMALIZED*V;\nMA(ROYAL_KING,200);\n0;\n(HHV(ROYAL_KING,250)+LLV(ROYAL_KING,250))/2;\nHHV(V,250);",
+   "note": "直转",
+   "outputs": [
+    "ROYAL_KING",
+    "OUTPUT_1",
+    "OUTPUT_3",
+    "OUTPUT_4"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "BDL.txt",
+   "candle": []
+  },
+  {
+   "name": "BIGMONEY",
+   "kind": "overlay",
+   "formula": "A1:=EMA((EMA(CLOSE,1)+EMA(CLOSE,3)+EMA(CLOSE,5))/3,3);\nA2:=EMA((EMA(CLOSE,3)+EMA(CLOSE,5)+EMA( CLOSE,7))/3,3);\nA3:=EMA((EMA(CLOSE,5)+EMA(CLOSE,7)+EMA( CLOSE,9))/3,3);\nA4:=EMA((EMA(CLOSE,7)+EMA(CLOSE,9)+EMA( CLOSE,11))/3,3);\nA5:=EMA((EMA(CLOSE,9)+EMA(CLOSE,11)+EMA( CLOSE,13))/3,3);\nA6:=EMA((EMA(CLOSE,11)+EMA(CLOSE,13)+EMA( CLOSE,15))/3,3);\nA7:=EMA((EMA(CLOSE,13)+EMA(CLOSE,15)+EMA( CLOSE,17))/3,3);\nA8:=EMA((EMA(CLOSE,15)+EMA(CLOSE,17)+EMA( CLOSE,19))/3,3);\nA9:=EMA((EMA(CLOSE,17)+EMA(CLOSE,19)+EMA( CLOSE,21))/3,3);\nA10:=EMA((EMA(CLOSE,19)+EMA(CLOSE,21)+EMA( CLOSE,23))/3,3);\nA11:=EMA((EMA(CLOSE,21)+EMA(CLOSE,23)+EMA( CLOSE,25))/3,3);\nA:=EMA((EMA(CLOSE,29)+EMA(CLOSE,31)+EMA(CLOSE,33))/3,3);\nB:=REF(A,1);\nA16:=A-(A2-A);\nA17:=A-(A3-A);\nA18:=A-(A4-A);\nA19:=A-(A5-A);\nA20:=A-(A6-A);\nA21:=A-(A7-A);\nA22:=A-(A8-A);\nA23:=A-(A9-A);\nA24:=A-(A10-A);\nKL:A-(A1-A*0.999);\nKT:A-(A11-A*0.999);\nC;",
+   "note": "直转",
+   "outputs": [
+    "KL",
+    "KT",
+    "OUTPUT_1"
+   ],
+   "signals": [],
+   "source_file": "BIGMONEY.txt",
+   "candle": []
+  },
+  {
+   "name": "BLB",
+   "kind": "sub",
+   "formula": "BDL:STD(C,20);\nBDNL:LLV(BDL,200);\nBDNL1:LLV(BDL,250);",
+   "note": "剔除绘图 STICKLINE",
+   "outputs": [
+    "BDL",
+    "BDNL",
+    "BDNL1"
+   ],
+   "signals": [],
+   "source_file": "BLB.txt",
+   "candle": []
+  },
+  {
+   "name": "C-EMA200",
+   "kind": "sub",
+   "formula": "EMA200:=EMA(CLOSE, 200);\n差值线:CLOSE - EMA200;\n零轴:0;",
+   "note": "剔除绘图 STICKLINE；剔除绘图 STICKLINE",
+   "outputs": [
+    "差值线"
+   ],
+   "signals": [
+    "零轴"
+   ],
+   "source_file": "C-EMA200.txt",
+   "candle": []
+  },
+  {
+   "name": "CTA",
+   "kind": "sub",
+   "formula": "CTA1:=(O-REF(C,1))/REF(C,1);\nCTA2:=(C-O)/O;\nCTA3:=(H-O)/O;\nCTA4:=(C-H)/H;\nCTA5:=(L-O)/O;\nCTA6:=(C-L)/L;\nCTAT:CTA1+CTA2+CTA3+CTA4+CTA5+CTA6;\n0;",
+   "note": "直转",
+   "outputs": [
+    "CTAT"
+   ],
+   "signals": [
+    "OUTPUT_1"
+   ],
+   "source_file": "CTA.txt",
+   "candle": []
+  },
+  {
+   "name": "DJIEV",
+   "kind": "overlay",
+   "formula": "A1:EMA(C,144);\nA2:A1-A1*0.02;\nA3:A1-A1*0.28;\nA4:A1-A1*0.30;\nA5:A1+A1*0.22;\nA6:A1+A1*0.24;\nA7:=A1+A1*0.54;\nA8:=A1+A1*0.52;\nA9:A1+A1*0.70;\nA10:A1+A1*0.72;\nA11:A1+A1*1.16;\nA12:A1+A1*1.14;",
+   "note": "剔除不可复刻 ZIGZAG",
+   "outputs": [
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A9",
+    "A10",
+    "A11",
+    "A12"
+   ],
+   "signals": [],
+   "source_file": "DJIEV.txt",
+   "candle": []
+  },
+  {
+   "name": "DKZJL",
+   "kind": "sub",
+   "formula": "D:=C-REF(C,1);\nK:=(REF(C,1)-C);\nD1:=D/REF(C,1);\nK1:=K/REF(C,1);\nDT:=(V*D1)*100;\nKT:=(V*K1)*100;\nSUM(DT-KT,10);\n0;",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "DKZJL.txt",
+   "candle": []
+  },
+  {
+   "name": "DROP",
+   "kind": "sub",
+   "formula": "AMOUNT:=C*V;\nA1:=IF(C>REF(C,1),(C*V)/10000,0);\nA2:=IF(C<REF(C,1),-(C*V)/10000,0);\n强弱识别:SUM(A1+A2,0);\n强弱识别;\n0;",
+   "note": "直转",
+   "outputs": [
+    "强弱识别",
+    "OUTPUT_1"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "DROP.txt",
+   "candle": []
+  },
+  {
+   "name": "DTR",
+   "kind": "sub",
+   "formula": "DIFF:=EMA(CLOSE,12) - EMA(CLOSE,26);\nDEA:=EMA(DIFF,9);\nMACD:=2*(DIFF-DEA);\nJC:=CROSS(MACD,0);\nSC:=CROSS(0,MACD);\nJB:=BARSLAST(JC);\nSB:=BARSLAST(SC);\nJT:=IF(JB<SB,1,IF(SB<JB,2,0));\nJP:=IF(JT=1,JB,SB);\nJCH:=VALUEWHEN(JC,HIGH);\nJCL:=VALUEWHEN(SC,LOW);\nJBH:=CLOSE>JCH AND JT=1;\nJHC:=COUNT(JBH,30);\nFHC:JBH AND JHC=1;\nSBL:=CLOSE<JCL AND JT=2;\nSLC:=COUNT(SBL,30);\nFLC:SBL AND SLC=1;\n信号1:JC;\n信号2:SC;",
+   "note": "动态REF→VALUEWHEN(信号当根值)；预替换近似；剔除绘图 STICKLINE；剔除绘图 DRAWTEXT；剔除绘图 STICKLINE；剔除绘图 DRAWTEXT；剔除绘图 STICKLINE；剔除绘图 DRAWTEXT；剔除绘图 STICKLINE；剔除绘图 DRAWTEXT；动态窗口→30近似；动态窗口→30近似；DRAWTEXT条件→信号1；DRAWTEXT条件→信号2",
+   "outputs": [],
+   "signals": [
+    "FHC",
+    "FLC",
+    "信号1",
+    "信号2"
+   ],
+   "source_file": "DTR.txt",
+   "candle": []
+  },
+  {
+   "name": "FILL",
+   "kind": "sub",
+   "formula": "AVG:=MA(C,20);\nUPPER:=AVG+2*STD(AVG,20);\nLOWER:=AVG-2*STD(AVG,20);\nFI:=(CLOSE-LOWER)/(UPPER-LOWER);\nFI;\n0;\n-2;\nFI;",
+   "note": "剔除绘图 STICKLINE；剔除绘图 STICKLINE",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_3",
+    "OUTPUT_4"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "FILL.txt",
+   "candle": []
+  },
+  {
+   "name": "FVG",
+   "kind": "sub",
+   "formula": "A1:=O>C AND REF(C,1) > C;\nCON_3阴:=REF(A1,1) AND REF(A1,2) AND REF(A1,3);\nCOND3:=REF(H,1) < REF(L,3);\nCOND4:=C>O AND C>REF(H,1);\nSIGNAL:CON_3阴 AND COND3 AND COND4;\nA2:=O<C AND REF(C,1) <C;\nCON_3阳:=REF(A2,1) AND REF(A2,2) AND REF(A2,3);\nCOND31:=REF(L,1) > REF(H,3);\nCOND41:=C<O AND C<REF(L,1);\nSIGNAL1:CON_3阳 AND  COND31 AND COND41;",
+   "note": "剔除绘图 DRAWICON；剔除绘图 DRAWICON；提升输出 SIGNAL,SIGNAL1",
+   "outputs": [],
+   "signals": [
+    "SIGNAL",
+    "SIGNAL1"
+   ],
+   "source_file": "FVG.txt",
+   "candle": []
+  },
+  {
+   "name": "H52",
+   "kind": "overlay",
+   "formula": "REF(HHV(HIGH,52),1);",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1"
+   ],
+   "signals": [],
+   "source_file": "H52.txt",
+   "candle": []
+  },
+  {
+   "name": "HPS",
+   "kind": "overlay",
+   "formula": "EMA(H,15);\nEMA(L,15);\nEMA(C,200);",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_2",
+    "OUTPUT_3"
+   ],
+   "signals": [],
+   "source_file": "HPS.txt",
+   "candle": []
+  },
+  {
+   "name": "JCJY",
+   "kind": "overlay",
+   "formula": "C10:MA(C,10);\nH10:MA(H,10);\nL10:MA(L,10);\nTR:=MAX(MAX((HIGH-LOW),ABS(REF(CLOSE,1)-HIGH)),ABS(REF(CLOSE,1)-LOW));\nATR:=MA(TR,20);\nMA(C,10)+ATR;\nMA(C,10)-ATR;",
+   "note": "剔除不可复刻 REFX；剔除绘图 FILLRGN；剔除绘图 FILLRGN",
+   "outputs": [
+    "C10",
+    "H10",
+    "L10",
+    "OUTPUT_1",
+    "OUTPUT_2"
+   ],
+   "signals": [],
+   "source_file": "JCJY.txt",
+   "candle": []
+  },
+  {
+   "name": "KAGI",
+   "kind": "sub",
+   "formula": "A:C>REF(C,1)*1.01;\nB:C<REF(C,1)*0.99;",
+   "note": "剔除绘图 DRAWLINE；剔除绘图 DRAWLINE；提升输出 A,B",
+   "outputs": [],
+   "signals": [
+    "A",
+    "B"
+   ],
+   "source_file": "KAGI.txt",
+   "candle": []
+  },
+  {
+   "name": "LCS",
+   "kind": "sub",
+   "formula": "A1:=(C-LLV(L,5))/LLV(L,5)*100;\nA2:=(C-REF(C,1))/REF(C,1)*100;\nLCS:(A1-A2);\n关键位置:30;",
+   "note": "直转",
+   "outputs": [
+    "LCS",
+    "关键位置"
+   ],
+   "signals": [],
+   "source_file": "LCS.txt",
+   "candle": []
+  },
+  {
+   "name": "Rking",
+   "kind": "sub",
+   "formula": "A1:=EMA(C,5);\nA2:=EMA(C,10);\nA3:=EMA(C,20);\nA4:=EMA(C,60);\nEE:CROSS(C,A1) AND CROSS(C,A2) AND CROSS(C,A3) AND CROSS(C,A4);\nDD:CROSS(C,A1) AND CROSS(C,A2) AND CROSS(C,A3);\nFF:CROSS(A1,C) AND CROSS(A2,C) AND CROSS(A3,C);\nGG:CROSS(A1,C) AND CROSS(A2,C) AND CROSS(A3,C) AND CROSS(A4,C);",
+   "note": "剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；提升输出 EE,DD,FF,GG",
+   "outputs": [],
+   "signals": [
+    "EE",
+    "DD",
+    "FF",
+    "GG"
+   ],
+   "source_file": "Rking.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC001",
+   "kind": "overlay",
+   "formula": "N:=1;\nXOPEN:=(REF(O,N)+REF(C,N))/2;\nXCLOSE:=CLOSE;\nXHIGH:=MAX(HIGH,XOPEN);\nXLOW:=MIN(LOW,XOPEN);\nVOLALITY:=MA(XHIGH-XLOW,8);\nUP:MA(XCLOSE,5)+VOLALITY/2;\nDOWN:MA(XCLOSE,5)-VOLALITY/2;\nUP1:MA(XCLOSE,5)+VOLALITY;\nDOWN1:MA(XCLOSE,5)-VOLALITY;\nBU:=CROSS(XCLOSE,UP);\nSEL:=CROSS(DOWN,XCLOSE);\nVAR1:=BARSLAST(BU);\nVAR2:=BARSLAST(SEL);\n信号1:REF(VAR1,1)>VAR2 AND VAR1=0;\n信号2:REF(VAR2,1)>VAR1 AND VAR2=0;\nKO:XOPEN;\nKH:XHIGH;\nKL:XLOW;\nKC:XCLOSE;",
+   "note": "剔除绘图 DRAWICON；剔除绘图 DRAWICON；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；DRAWICON条件→信号1；DRAWICON条件→信号2；平均K线列→叠加K线(KO/KH/KL/KC)",
+   "outputs": [
+    "UP",
+    "DOWN",
+    "UP1",
+    "DOWN1",
+    "KO",
+    "KH",
+    "KL",
+    "KC"
+   ],
+   "signals": [
+    "信号1",
+    "信号2"
+   ],
+   "source_file": "RVC001.txt",
+   "candle": [
+    "KO",
+    "KH",
+    "KL",
+    "KC"
+   ]
+  },
+  {
+   "name": "RVC002",
+   "kind": "sub",
+   "formula": "TR:=MAX(MAX((HIGH-LOW),ABS(REF(CLOSE,1)-HIGH)),ABS(REF(CLOSE,1)-LOW));\nATR:MA(TR,20);",
+   "note": "剔除不可复刻 跨市场引用；剔除不可复刻 PERIOD；剔除不可复刻 PERIOD；剔除不可复刻 PERIOD；剔除绘图 DRAWNUMBER1；剔除绘图 DRAWNUMBER1；剔除绘图 DRAWNUMBER1；剔除绘图 DRAWCOLORKLINE；剔除绘图 DRAWCOLORKLINE；剔除绘图 DRAWCOLORKLINE；剔除绘图 DRAWTEXT；剔除绘图 DRAWTEXT；提升输出 ATR",
+   "outputs": [
+    "ATR"
+   ],
+   "signals": [],
+   "source_file": "RVC002.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC004",
+   "kind": "sub",
+   "formula": "MID:=(HIGH+LOW+CLOSE)/3;\nN:=20;\nSD:=C>0;\nROYAL_INDEX:SUM(MAX(0,HIGH-REF(MID,1)),N)/SUM(MAX(0,REF(MID,1)-LOW),N)*100;\nIF(SD>0,ROYAL_INDEX,(0/0));\nIF(SD>0,300,(0/0));\nIF(SD>0,200,(0/0));\nIF(SD>0,100,(0/0));\nIF(SD>0,50,(0/0));",
+   "note": "核心线提升为输出；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值",
+   "outputs": [
+    "ROYAL_INDEX",
+    "OUTPUT_1",
+    "OUTPUT_2",
+    "OUTPUT_3",
+    "OUTPUT_4",
+    "OUTPUT_5"
+   ],
+   "signals": [],
+   "source_file": "RVC004.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC005",
+   "kind": "sub",
+   "formula": "{参数为原公式未给默认值的占位，转换时注入}\nM:=10;\nSUM((C-REF(C,1))/REF(C,1)*100,M);\n0;\n50;\n10;",
+   "note": "剔除不可复刻 跨市场引用；剔除不可复刻 WINNER；级联剔除 匿名；注入参数 M=10",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_3",
+    "OUTPUT_4"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "RVC005.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC006",
+   "kind": "sub",
+   "formula": "HH:=HHV(H,20);\nLL:=LLV(L,20);\nH1:=REF(HH,1);\nL1:=REF(LL,1);\nDH:(C-H1)/H1*100;\n0;\nDL:(L1-C)/C*100;\nDI:DH+DL;",
+   "note": "直转",
+   "outputs": [
+    "DH",
+    "DL",
+    "DI"
+   ],
+   "signals": [
+    "OUTPUT_1"
+   ],
+   "source_file": "RVC006.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC009",
+   "kind": "overlay",
+   "formula": "A1:=REF(C,2)*REF(C,1)/C;\nA2:=(A1+MA(C,5))/2;\nFTI:IF(C>=A2,L-L*0.3/100,H+H*0.3/100);",
+   "note": "剔除绘图 PARTLINE",
+   "outputs": [
+    "FTI"
+   ],
+   "signals": [],
+   "source_file": "RVC009.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC010",
+   "kind": "sub",
+   "formula": "(HHV(H,50)-C);\nC-MA(C,200);\n0;",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_2"
+   ],
+   "signals": [
+    "OUTPUT_3"
+   ],
+   "source_file": "RVC010.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC011",
+   "kind": "sub",
+   "formula": "H1:=HHV(H,28);\nH2:=HHV(H,49);\nP1:=(H1-C)/(H1-LLV(L,28))*100;\nP2:=(H2-C)/(H2-LLV(L,49))*100;\nP3:=(P1+P2)/2;\nMA(P3,4);\n50;",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_2"
+   ],
+   "signals": [],
+   "source_file": "RVC011.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC012",
+   "kind": "sub",
+   "formula": "ZF:=(C-REF(C,1))/REF(C,1)*100;\nX5F:=MA(ZF,5);\nX30F:=MA(ZF,20);\nCML:(X5F-X30F)*V;\nV;\n0;\nREVERSE(V);",
+   "note": "剔除绘图 DRAWCOLORLINE",
+   "outputs": [
+    "CML",
+    "OUTPUT_1",
+    "OUTPUT_3"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "RVC012.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC013",
+   "kind": "overlay",
+   "formula": "EMA(C,5);\nEMA(O,5);",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_2"
+   ],
+   "signals": [],
+   "source_file": "RVC013.txt",
+   "candle": []
+  },
+  {
+   "name": "RVC018",
+   "kind": "sub",
+   "formula": "主力:(C-EMA(C,250));\n散户:REVERSE(C-EMA(C,60));\n0;\n总合:主力+散户;",
+   "note": "直转",
+   "outputs": [
+    "主力",
+    "散户",
+    "总合"
+   ],
+   "signals": [
+    "OUTPUT_1"
+   ],
+   "source_file": "RVC018.txt",
+   "candle": []
+  },
+  {
+   "name": "RVOL",
+   "kind": "sub",
+   "formula": "{参数为原公式未给默认值的占位，转换时注入}\nN:=10;\nMV20:MA(V,20);\nD20:MV20/N;\nM20:MV20 * N;\n信号1:V<D20;",
+   "note": "剔除不可复刻 CJLVOL；剔除绘图 DRAWICON；注入参数 N=10；DRAWICON条件→信号1",
+   "outputs": [
+    "MV20",
+    "D20",
+    "M20"
+   ],
+   "signals": [
+    "信号1"
+   ],
+   "source_file": "RVOL.txt",
+   "candle": []
+  },
+  {
+   "name": "SD",
+   "kind": "sub",
+   "formula": "X10:=REF(MA(C,10),10);\nXSD:STD(C,20);\n80;\n30;\n信号1:CROSS(X10,C);\n信号2:CROSS(C,X10);",
+   "note": "剔除绘图 VERTLINE；剔除绘图 DRAWICON；剔除绘图 DRAWICON；DRAWICON条件→信号1；DRAWICON条件→信号2",
+   "outputs": [
+    "XSD",
+    "OUTPUT_1",
+    "OUTPUT_2"
+   ],
+   "signals": [
+    "信号1",
+    "信号2"
+   ],
+   "source_file": "SD.txt",
+   "candle": []
+  },
+  {
+   "name": "SDC",
+   "kind": "sub",
+   "formula": "SD:STD(C,20);",
+   "note": "直转",
+   "outputs": [
+    "SD"
+   ],
+   "signals": [],
+   "source_file": "SDC.txt",
+   "candle": []
+  },
+  {
+   "name": "SEV-RVC",
+   "kind": "overlay",
+   "formula": "A1:=EMA(C,144);\nA7:A1+A1*0.54;\nA8:A1+A1*0.52;",
+   "note": "剔除不可复刻 PERIOD；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；DRAWNULL→空值；级联剔除 A2；级联剔除 A21；级联剔除 A3；级联剔除 A4；级联剔除 A5；级联剔除 A6；级联剔除 A9；级联剔除 A10；级联剔除 A11；级联剔除 A12；级联剔除 匿名；级联剔除 匿名；提升输出 A7,A8",
+   "outputs": [
+    "A7",
+    "A8"
+   ],
+   "signals": [],
+   "source_file": "SEV-RVC.txt",
+   "candle": []
+  },
+  {
+   "name": "SIGMA",
+   "kind": "sub",
+   "formula": "{参数为原公式未给默认值的占位，转换时注入}\nN:=10;\nZDB:=IF(C>O,V*C/100000000,0);\nZDS:=IF(C<O,V*C/100000000,0);\nSUM(ZDB-ZDS,N);\n0;",
+   "note": "注入参数 N=10",
+   "outputs": [
+    "OUTPUT_1"
+   ],
+   "signals": [
+    "OUTPUT_2"
+   ],
+   "source_file": "SIGMA.txt",
+   "candle": []
+  },
+  {
+   "name": "SPIR",
+   "kind": "sub",
+   "formula": "TR:MAX(MAX((HIGH-LOW),ABS(REF(CLOSE,1)-HIGH)),ABS(REF(CLOSE,1)-LOW));\nATR:MA(TR,20);\nBF:=(C-0)/0;\nSPIR:(BF/ATR)/(V/MA(V,20))*100;\n1;\n10;",
+   "note": "直转；恒为空列(SPIR，原公式该路恒除零/恒假)仅作占位",
+   "outputs": [
+    "TR",
+    "ATR",
+    "SPIR",
+    "OUTPUT_2"
+   ],
+   "signals": [
+    "OUTPUT_1"
+   ],
+   "source_file": "SPIR.txt",
+   "candle": []
+  },
+  {
+   "name": "TC",
+   "kind": "sub",
+   "formula": "MC:=20;\nYC:=240;\nMH:=MA(H,MC);\nML:=MA(L,MC);\nMM:=STD(C,MC);\nPR:C;\nVWAP:SUM(C*V,MC)/SUM(V,MC);\nVWAP+MM;\nVWAP-MM;\nVWAP+MM*2;\nVWAP-MM*2;\nVWAP+MM*3;\nVWAP-MM*3;",
+   "note": "按月复位窗口→MC=20近似；按年复位窗口→YC=240近似；剔除绘图 VERTLINE；剔除绘图 VERTLINE",
+   "outputs": [
+    "PR",
+    "VWAP",
+    "OUTPUT_1",
+    "OUTPUT_2",
+    "OUTPUT_3",
+    "OUTPUT_4",
+    "OUTPUT_5",
+    "OUTPUT_6"
+   ],
+   "signals": [],
+   "source_file": "TC.txt",
+   "candle": []
+  },
+  {
+   "name": "TCY",
+   "kind": "sub",
+   "formula": "MC:=20;\nYC:=240;\nMH:=MA(H,MC);\nML:=MA(L,MC);\nMM:=STD(C,MC);\nPR:C;\nYY:=STD(C,YC);\nVWAPY:SUM(C*V,YC)/SUM(V,YC);\nVWAPY+YY;\nVWAPY-YY;\nVWAPY+YY*2;\nVWAPY-YY*2;\nVWAPY+YY*3;\nVWAPY-YY*3;",
+   "note": "按月复位窗口→MC=20近似；按年复位窗口→YC=240近似；剔除绘图 VERTLINE",
+   "outputs": [
+    "PR",
+    "VWAPY",
+    "OUTPUT_1",
+    "OUTPUT_2",
+    "OUTPUT_3",
+    "OUTPUT_4",
+    "OUTPUT_5",
+    "OUTPUT_6"
+   ],
+   "signals": [],
+   "source_file": "TCY.txt",
+   "candle": []
+  },
+  {
+   "name": "TT",
+   "kind": "sub",
+   "formula": "TYT:100+SUM(C-REF(C,1),0)/SUM(C,0)*C;",
+   "note": "直转",
+   "outputs": [
+    "TYT"
+   ],
+   "signals": [],
+   "source_file": "TT.txt",
+   "candle": []
+  },
+  {
+   "name": "VOL20",
+   "kind": "sub",
+   "formula": "MA(VOL,20);",
+   "note": "剔除不可复刻 CJLVOL",
+   "outputs": [
+    "OUTPUT_1"
+   ],
+   "signals": [],
+   "source_file": "VOL20.txt",
+   "candle": []
+  },
+  {
+   "name": "VWAP",
+   "kind": "sub",
+   "formula": "{参数为原公式未给默认值的占位，转换时注入}\nN:=10;\nDC:=20;\nVWAPY:SUM(C*V,DC)/SUM(V,DC);\nSTDY:=IF(N,0,STD(C,DC));\nU1:VWAPY+STDY;\nD1:VWAPY-STDY;\nU2:VWAPY+2*STDY;\nD2:VWAPY-2*STDY;\nU3:VWAPY+3*STDY;\nD3:VWAPY-3*STDY;\nC;",
+   "note": "按日复位窗口→DC=20近似；预替换近似；剔除绘图 VERTLINE；注入参数 N=10",
+   "outputs": [
+    "VWAPY",
+    "U1",
+    "D1",
+    "U2",
+    "D2",
+    "U3",
+    "D3",
+    "OUTPUT_1"
+   ],
+   "signals": [],
+   "source_file": "VWAP.txt",
+   "candle": []
+  },
+  {
+   "name": "WUYANYUAN1964",
+   "kind": "overlay",
+   "formula": "{参数为原公式未给默认值的占位，转换时注入}\nF:=8;\nM:=10;\nN:=1;\nXOPEN:=(REF(O,N)+REF(C,N))/2;\nXCLOSE:=CLOSE;\nXHIGH:=MAX(HIGH,XOPEN);\nXLOW:=MIN(LOW,XOPEN);\nVOLALITY:=MA(XHIGH-XLOW,F);\nUP:=MA(XCLOSE,M)+VOLALITY/2;\nDOWN:=MA(XCLOSE,M)-VOLALITY/2;\nUP1:MA(XCLOSE,M)+VOLALITY;\nDOWN1:MA(XCLOSE,M)-VOLALITY;\nBU:=CROSS(XCLOSE,UP);\nSEL:=CROSS(DOWN,XCLOSE);\nVAR1:BARSLAST(BU);\nVAR2:BARSLAST(SEL);\nKO:XOPEN;\nKH:XHIGH;\nKL:XLOW;\nKC:XCLOSE;",
+   "note": "剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；剔除绘图 STICKLINE；注入参数 F=8,M=10；提升输出 UP1,DOWN1,VAR1,VAR2；平均K线列→叠加K线(KO/KH/KL/KC)",
+   "outputs": [
+    "UP1",
+    "DOWN1",
+    "VAR1",
+    "VAR2",
+    "KO",
+    "KH",
+    "KL",
+    "KC"
+   ],
+   "signals": [],
+   "source_file": "WUYANYUAN1964.txt",
+   "candle": [
+    "KO",
+    "KH",
+    "KL",
+    "KC"
+   ]
+  },
+  {
+   "name": "WWW",
+   "kind": "sub",
+   "formula": "MA(H-L,20);\nMA(H-L,60);\nMA(H-L,120);\nMA(H-L,240);",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_2",
+    "OUTPUT_3",
+    "OUTPUT_4"
+   ],
+   "signals": [],
+   "source_file": "WWW.txt",
+   "candle": []
+  },
+  {
+   "name": "ZSCORE",
+   "kind": "sub",
+   "formula": "ZSCORE:(C-MA(C,20))/STD(C,20);\n零轴:0;\n强势线:1.5;\n风险线:2;\n异常线:3;",
+   "note": "直转",
+   "outputs": [
+    "ZSCORE",
+    "强势线",
+    "风险线",
+    "异常线"
+   ],
+   "signals": [
+    "零轴"
+   ],
+   "source_file": "ZSCORE.txt",
+   "candle": []
+  },
+  {
+   "name": "主宰V1",
+   "kind": "overlay",
+   "formula": "REF(C,2);\nREF(C,3);\nREF(C,4);\nREF(C,5);\nREF(C,6);\nREF(C,7);\nREF(C,8);\nREF(C,9);\nREF(C,10);\nC;",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_2",
+    "OUTPUT_3",
+    "OUTPUT_4",
+    "OUTPUT_5",
+    "OUTPUT_6",
+    "OUTPUT_7",
+    "OUTPUT_8",
+    "OUTPUT_9",
+    "OUTPUT_10"
+   ],
+   "signals": [],
+   "source_file": "主宰V1.txt",
+   "candle": []
+  },
+  {
+   "name": "全换手",
+   "kind": "overlay",
+   "formula": "CC:(H+L+O+C*3)/6;",
+   "note": "剔除不可复刻 CAPITAL；剔除不可复刻 SUMBARS；级联剔除 HS；级联剔除 HSM；提升输出 CC",
+   "outputs": [
+    "CC"
+   ],
+   "signals": [],
+   "source_file": "全换手.txt",
+   "candle": []
+  },
+  {
+   "name": "基准点趋势分析指标",
+   "kind": "overlay",
+   "formula": "PARAM:=20;\nRISING_BASIS_POINT:=REF(LLV(L, PARAM), 1);\nFALLING_BASIS_POINT:=REF(HHV(H, PARAM), 1);\nBASIS_POINT_TREND_RISING:=RISING_BASIS_POINT > REF(RISING_BASIS_POINT, 1);\nBASIS_POINT_TREND_FALLING:=FALLING_BASIS_POINT < REF(FALLING_BASIS_POINT, 1);\nPOSITION_REL_TO_RISING_BP:=(C - RISING_BASIS_POINT) / RISING_BASIS_POINT * 100;\nPOSITION_REL_TO_FALLING_BP:=(C - FALLING_BASIS_POINT) / FALLING_BASIS_POINT * 100;\nRISING_BP:RISING_BASIS_POINT;\nFALLING_BP:FALLING_BASIS_POINT;\nCLOSE_PRICE:C;\nWARNING_DOWN_BREAK:=C < RISING_BASIS_POINT;\nWARNING_UP_BREAK:=C > FALLING_BASIS_POINT;",
+   "note": "剔除绘图 DRAWLINE；剔除绘图 DRAWLINE；剔除绘图 DRAWTEXT；剔除绘图 DRAWTEXT",
+   "outputs": [
+    "RISING_BP",
+    "FALLING_BP",
+    "CLOSE_PRICE"
+   ],
+   "signals": [],
+   "source_file": "基准点趋势分析指标.txt",
+   "candle": []
+  },
+  {
+   "name": "知行趋势线",
+   "kind": "overlay",
+   "formula": "{参数为原公式未给默认值的占位，转换时注入}\nM1:=5;\nM2:=10;\nM3:=20;\nM4:=60;\n知行短期趋势线:EMA(EMA(C,10),10);\nMA1:=MA(CLOSE,60);\nMA2:=EMA(CLOSE,13);\n知行多空线:(MA(CLOSE,M1)+MA(CLOSE,M2)+MA(CLOSE,M3)+MA(CLOSE,M4))/4;",
+   "note": "注入参数 M1=5,M2=10,M3=20,M4=60",
+   "outputs": [
+    "知行短期趋势线",
+    "知行多空线"
+   ],
+   "signals": [],
+   "source_file": "知行趋势线.txt",
+   "candle": []
+  },
+  {
+   "name": "箱体",
+   "kind": "overlay",
+   "formula": "REF(HHV(L,52),1);\nREF(LLV(H,52),1);\n(REF(HHV(L,52),1)+REF(LLV(H,52),1))/2;",
+   "note": "直转",
+   "outputs": [
+    "OUTPUT_1",
+    "OUTPUT_2",
+    "OUTPUT_3"
+   ],
+   "signals": [],
+   "source_file": "箱体.txt",
+   "candle": []
+  },
+  {
+   "name": "趋势识别",
+   "kind": "overlay",
+   "formula": "收盘价:CLOSE;\nBBI:(MA(CLOSE,3)+MA(CLOSE,6)+MA(CLOSE,12)+MA(CLOSE,24))/4;\n长周期BBI:(MA(CLOSE,14)+MA(CLOSE,28)+MA(CLOSE,57)+MA(CLOSE,114))/4;\nRSV:=(CLOSE-LLV(LOW,9))/(HHV(HIGH,9)-LLV(LOW,9))*100;\nK:=SMA(RSV,3,1);\nD:=SMA(K,3,1);\nJ:=3*K-2*D;\n趋势条件:=BBI > 长周期BBI AND 长周期BBI >= REF(长周期BBI,3)*0.995;\n收盘价限制:=REF(CLOSE,1) >= 长周期BBI;\n有过买入信号:=COUNT(CROSS(BBI, 长周期BBI) OR (趋势条件 AND J<5 AND 收盘价限制), 100) > 0;\n线下2日清仓条件:=CLOSE < 长周期BBI AND REF(CLOSE,1) < 长周期BBI AND REF(CLOSE,2) >= 长周期BBI AND 有过买入信号;\n信号1:CROSS(BBI, 长周期BBI);\n信号2:趋势条件 AND J<5 AND 收盘价限制;\n信号3:趋势条件 AND J>95;\n信号4:线下2日清仓条件;\n信号5:CROSS(长周期BBI, BBI);",
+   "note": "剔除绘图 DRAWTEXT；剔除绘图 DRAWTEXT；剔除绘图 DRAWTEXT；剔除绘图 DRAWTEXT；剔除绘图 DRAWTEXT；DRAWTEXT条件→信号1；DRAWTEXT条件→信号2；DRAWTEXT条件→信号3；DRAWTEXT条件→信号4；DRAWTEXT条件→信号5",
+   "outputs": [
+    "收盘价",
+    "BBI",
+    "长周期BBI"
+   ],
+   "signals": [
+    "信号1",
+    "信号2",
+    "信号3",
+    "信号4",
+    "信号5"
+   ],
+   "source_file": "趋势识别.txt",
+   "candle": []
+  },
+  {
+   "name": "通道组合",
+   "kind": "overlay",
+   "formula": "EMA8:EMA(C,8);\nEMA13:EMA(C,13);\nEMA21:EMA(C,21);\nEMA55:EMA(C,55);\nEMA144:EMA(C,144);\nEMA169:EMA(C,169);\nEMA288:EMA(C,288);\nEMA338:EMA(C,338);\n信号1:CROSS(EMA8, EMA13);\n信号2:CROSS(EMA13, EMA8);",
+   "note": "剔除绘图 DRAWICON；剔除绘图 DRAWICON；DRAWICON条件→信号1；DRAWICON条件→信号2",
+   "outputs": [
+    "EMA8",
+    "EMA13",
+    "EMA21",
+    "EMA55",
+    "EMA144",
+    "EMA169",
+    "EMA288",
+    "EMA338"
+   ],
+   "signals": [
+    "信号1",
+    "信号2"
+   ],
+   "source_file": "通道组合.txt",
+   "candle": []
+  }
+ ]
+}

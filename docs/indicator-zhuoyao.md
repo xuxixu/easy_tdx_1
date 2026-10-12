@@ -17,7 +17,7 @@
 ## 调用方式
 
 ```python
-from easy_tdx.MyTT import ZHUOYAO
+from easy_tdx.ta import ZHUOYAO
 
 # close: numpy 数组，至少 120+ 个数据点
 LONG, MID, SHORT, TREND = ZHUOYAO(close)

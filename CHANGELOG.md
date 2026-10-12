@@ -4,6 +4,69 @@
 
 ## [未发布] — 2026-10-12
 
+### 大智慧指标包：一键导入 52 个自定义指标
+
+- **桌面「大智慧指标」62 个公式批量转换为引擎可识别的自定义指标**（[对照表](docs/dzh-indicators.md)，成功 52 / 跳过 10）：新增 `scripts/convert_dzh_indicators.py`（绘图语句剔除 / 跨市场-Level2-流通股本等不可复刻语义剔除并级联 / 未定义参数注入 / 动态窗口近似 / 合成 K 线试算验证），产物为随前端下发的 `web-ui/public/dzh-custom-indicators.json`。
+- **「系统 → 自定义指标」页新增一键导入 / 导出备份 / 从文件恢复**（[CustomList.vue](web-ui/src/components/CustomList.vue)，按显示名去重合并）；自定义上限 50→100。
+- **公式引擎方言补齐**（[formula.py](src/easy_tdx/formula.py)，全部后视、无未来数据）：白名单新增 `HHVBARS`/`LLVBARS`/`BARSLASTCOUNT`/`BARSSINCEN`/`LAST`/`BETWEEN`/`VALUEWHEN`/`CONST`/`DIFF`/`SLOPE`/`FORCAST`/`SIN`/`COS`/`TAN`/`ATAN`/`STDP`（同 `STD` 口径）/`REVERSE`（取负）/`RD`；比较新增 `!=`（`<>` 归一化）；匿名表达式输出（`0;` 参考线 / `(H-L);` 包络）；纯量输出广播为全长常量列。
+- 跳过的 10 个：BP 系列（`SCALE` 逐笔数据引擎无源）、HZ/SM5/SV5（跨市场引用）、HLP（`WINNER`）、NRTR（动态 `REF` 窗口）、RVC003/BP-V2（仅剩裸行情引用）。锁定测试 `tests/unit/test_dzh_indicators.py`（52 条逐条编译+试算 + 引擎新能力）。
+- DRAWICON/DRAWTEXT 首参数为触发条件的，抢救为 `信号N` 输出列（RVC001 的买卖点、DTR 的 JC/SC 等；`STICKLINE1` 文本归一化为 `STICKLINE`，仍按绘图剔除）。
+
+### 自定义指标“叠加K线显示”
+
+- 新增/编辑自定义指标时（仅主图）可打开“叠加K线显示”，指定 4 个输出列[开,高,低,收]，主图多画一组空心蜡烛、四列不再画线（`src/easy_tdx/kline_option.py` 的 `candle_cols` + `/chart/kline-option` 同名字段 + 前端表单列选择；校验通过后自动认 XOPEN/XCLOSE/XHIGH/XLOW）。
+- RVC001/WUYANYUAN1964 这类平均K线（XOPEN/XCLOSE/XHIGH/XLOW 齐备）转换时自动追加 KO/KH/KL/KC 输出并绑定叠加K线，包内即带 candle 映射，从文件恢复导入后直接在主图显示蜡烛；其他公式可在表单里手动指定四列。
+
+**技术指标引擎更换为 TA-Lib**——指标计算内核由内嵌的 `MyTT`（pandas 纯实现，784 行）整体替换为 [TA-Lib](https://ta-lib.org/) C 库，TA-Lib 未覆盖的中式指标改由项目自建。函数名与入参顺序保持不变（`easy_tdx.MyTT` → `easy_tdx.ta`），回测 54 个内置策略、因子引擎、公式引擎、Web API、CLI 五条通路同步切换。
+
+### 引擎替换
+
+- **新增 `easy_tdx.ta` 包（替代 `easy_tdx/MyTT.py`，该文件连同 `MyTT.pyi` 一并删除）**，三层结构：
+  - [core.py](src/easy_tdx/ta/core.py) — 0/1 级公式原语（`MA`/`EMA`/`SMA`/`REF`/`HHV`/`CROSS`/`BARSLAST`/`FILTER` …），**通达信方言**，是 `formula.py` 公式引擎的词汇表；数值口径完全等价的原语（`MA`/`WMA`/`STD`/`AVEDEV`/`SLOPE`/`FORCAST`）委托 TA-Lib，其余（`SMA`(中国式)、`DMA`、`REF`、`HHV` …）TA-Lib 无对应实现故自建。经逐位对拍，`MA`/`WMA`/`STD`/`AVEDEV`/`SLOPE`/`FORCAST`/`SMA`/`DMA`/`REF`/`HHV`/`LLV`/`SUM`/`COUNT`/`CROSS`/`BARSLAST`/`IF`/`MAX` 与旧实现**逐位一致**（浮点尾数 ≤ 1e-12）。
+  - [talib_ind.py](src/easy_tdx/ta/talib_ind.py) — 26 个 TA-Lib 原生指标适配（`MACD`/`RSI`/`BOLL`/`KDJ`/`ATR`/`OBV`/`MFI`/`CCI`/`WR`/`DMI`/`AROON`/`SAR`/`TRIX`/`ROC`/`MTM`/`DPO`/`AD`/`CMF`/`EFI`/`TSI`/`CMO`/`HMA`/`KAMA`/`SUPERTREND`/`TAQ`/`BBW`/`BBP`/`EXPMA`）。`talib.KDJ` 默认的 Wilder 平滑（`MA_Type.RMA`）恰等价通达信 `SMA(X,3,1)` 且原生输出 K/D/J 三线，`talib.TA(DONCHIAN)`/`HMA`/`ROC`/`MTM` 与旧实现逐位一致。
+  - [chinese.py](src/easy_tdx/ta/chinese.py) — 24 个 TA-Lib 未覆盖的中式指标自建实现（`BIAS`/`PSY`/`CR`/`EMV`/`BRAR`/`XSII`/`VR`/`BBI`/`DFMA`/`MASS`/`ASI`/`KTN`/`FSL`/`VWAP`/`CHANDELIER`/`ICHIMOKU`/`UOS`/`FISHER`/`SQUEEZE`/`CHOP`/`ZHUOYAO`/`BIAS_SIGNAL`/`FK`/`OUTPERFORM_20D`），公式定义逐条沿用通达信写法，语义不随引擎更换而变。
+- **`ta-lib` 进入核心依赖**（`pyproject.toml`，`>=0.8,<0.9`）：PyPI 提供 cp39~cp314 的 Windows / macOS / Linux 预编译轮子，无需本地编译器。**未安装即无法导入**（不做静默降级），旧 `MyTT.pyi` 类型存根随包删除——`ta/` 全量带内联标注，mypy strict 零错误。
+- **旧模块 `easy_tdx.MyTT` 已删除**，请改用 `from easy_tdx import ta`（调用方式不变，`ta.MA` ↔ `MyTT.MA`）。**快速失败好过静默失真**：旧导入路径直接 `ImportError`，不会有人拿两套引擎的数混着比。
+
+### 数值口径变更（TA-Lib 原生，指标层）
+
+| 指标 | 旧口径 | 新口径 |
+|------|--------|--------|
+| `MACD` 柱 | `(DIF-DEA)*2` | `DIF-DEA`（与通达信软件差 2 倍） |
+| `RSI` 默认周期 | 24 | 14（Wilder 平滑） |
+| `WR` | `0~100`（100=超卖） | `-100~0`（`WILLR`：0=超买 / -100=超卖） |
+| `OBV` | 累计量 ÷ 10000 | 原始累计成交量 |
+| `SUPERTREND` `ST_DIR` | `1` 多 / `-1` 空 | `-1` 多 / `1` 空 |
+| `KAMA` | 可配 `FAST`/`SLOW` | 固定 `2/30`，两参数不再生效 |
+| `EMA` 预热 | 首根即出值 | 前 `N-1` 根 `NaN`（Wilder 播种） |
+| `DMI`/`DPO`/`TRIX`/`CMO` | 自定义平滑 | TA-Lib 融合实现 |
+| 布尔类输出 | `bool` dtype | 统一 `float64`（`FILTER`/`FK`/`SQUEEZE`） |
+
+同步更新 `indicator.py` 的注册表默认值与描述（`RSI` 默认 `N` 24→14、`KAMA` 移除 `FAST`/`SLOW`），50 个指标的名称、输入输出列名、CLI/Web API 契约均不变。
+
+### 顺带修掉的缺陷
+
+- **`wr_reversal` 策略恢复可交易**（[builtin.py](src/easy_tdx/backtest/strategies/builtin.py)）：该策略阈值按通达信惯例取 `-80`/`-20`，而旧 `MyTT.WR` 是 `0~100` 刻度（100=超卖），刻度相反导致 entry 恒 `False`——默认参数及边界内任意合法参数下都**从不产生交易**，v1.32 曾以「已知例外」白名单 + `skip_bounds` 变通绕开对拍。改用 `WILLR` 刻度后两者重新对齐，黄金基线里该策略由 0 笔交易变为 12 笔（胜率 66.7%）。相关白名单与变通测试一并删除。
+- **`DMA` 不再把上游 NaN 永久带进整条序列**（[core.py](src/easy_tdx/ta/core.py)）：`out[i] = a[i]*s[i] + (1-a[i])*out[i-1]` 在 `a[i]>=1` 时计算 `0 * NaN`，IEEE 下仍是 `NaN`，整条曲线自此报废。旧 `MyTT.EMA` 首根即出值所以从未触发；换成带预热 `NaN` 的 TA-Lib `EMA` 后立刻暴露——`FSL` 指标（平滑因子恒为 1）的 `SWS` 整条为 `NaN`，`fsl` 策略零成交。现于权重为 0 时跳过前值相乘。
+- **`VR` 单边行情不再返回 `inf`**（[chinese.py](src/easy_tdx/ta/chinese.py)）：下跌日累计成交量为 0 时旧实现直出 `inf`，会污染下游排名与阈值比较，现返回 `NaN`。
+- **`FK` 测试暴露的退化语义**（[test_ta.py](tests/unit/test_ta.py)）：`slow = EMA(SLOPE(C,21)*20 + C, 42)` 中的 `*20` 恰好抵消 `EMA(42)` 的滞后量，**平稳趋势下快慢线数学上恒等**。旧测试「下跌行情 `FK=True`」断言的其实是浮点误差的巧合（两条 EMA 的舍入尾数使 `>` 恰好成立）。测试改用带噪声序列断言真实的「短期斜率 vs 中期斜率背离」语义，并把线性退化的行为显式固化。
+
+### 公式引擎口径（有意与指标层不同）
+
+`easy-tdx formula` 与 WebUI 图表预置指标走**通达信公式语义**，与上面的 TA-Lib 指标层**故意不一致**：TA-Lib 的 `MACD`/`KDJ`/`RSI` 是 C 融合实现，内部以更长的复合回看期做 SMA 播种，无法由 `talib.EMA` 等原语精确复现，因此手写公式 `EMA(C,12)-EMA(C,26)` 与 `talib.MACD` 在预热段长度与数值上都有可见差异（柱值另差 2 倍：公式 ×2、TA-Lib ×1）。
+
+- 原先断言「公式预设 == 指标引擎」的 3 个测试改为断言**公式方言自身**的语义（对独立的 pandas/numpy 参照做校验），并新增 [test_formula_vs_talib_indicator_divergence_is_intentional](tests/unit/test_formula.py) 把这一已知差异钉死，防止后人误以为二者应当一致而去「对齐」。
+- WebUI 图表的 MA/EMA/BOLL/MACD/KDJ/RSI 预置本就是**通达信公式文本**（`web-ui/src/presetFormulas.ts` → 后端 `/formula/compute`），因此图表显示的 MACD 柱仍是通达信口径的放大值，**用户观感不变**。
+
+### 验证
+
+- 后端单测 **1935 项全绿**（`pytest tests/unit`）；`ruff check src tests` / `ruff format --check src tests` / `mypy src`（strict）全绿。
+- 黄金回测基线（[backtest_metrics.json](tests/golden/backtest_metrics.json)）已重算并审计：**54 个策略中 36 个逐位不变**（指标未受影响的纯中式策略与 MA/BOLL 类），`rules`（固定止损/止盈/移动止损/百分比 bracket 等引擎规则场景）与 `meta` 段**完全不变**——撮合、费率、滑点、绩效层未被触碰；18 个变化全部来自指标数值（12 个成交笔数因交叉时点变化而不同）。逐项核对确认无策略因刻度变更而逻辑失效：其余均为纯 `CROSS` 比较或 `0~100` 量纲阈值（`rsi_reversal` 30/70、`mfi_reversal` 20/80、`cmo_reversal` ±50），阈值无需调整。
+- 单测重写：`test_mytt.py` → [test_ta.py](tests/unit/test_ta.py)，并按 TA-Lib 语义更新 `SAR`（首根 `NaN`、反转当根 `NaN`）、`AROON`（预热 `N` 根）、`SUPERTREND`（方向含 0）、`CHOP`（`TR[0]` 取 `H-L`，`N` 根窗口自第 `N-1` 根有效）等断言。
+- 向量化/逐 bar 对拍：移除 `wr_reversal` 的例外白名单后，**全部内置策略默认参数均可产生交易**，两条信号路径仍逐位一致。
+
+## [未发布] — 2026-10-12
+
 **全量代码审查（前后端）后的修复**——对 `src/easy_tdx`（280 个模块）与 `web-ui/src`（44 组件 / 22 视图 / 3 store）做前后端并行深审，本轮落地全部确认缺陷：协议层连接作废、组合回测交易成本被抹除、实时轮询时区错位、sqlite 短连接 fd 泄漏、推送地址 SSRF、前端长轮询无中止与图表叠加失效等。基线静态检查（ruff / mypy --strict / vue-tsc）与测试套件（~1800 项）在改动前后均全绿。
 
 ### 数据正确性（影响回测数字可信性）

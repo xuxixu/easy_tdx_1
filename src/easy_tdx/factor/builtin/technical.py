@@ -1,11 +1,11 @@
-"""技术指标因子 — 桥接 MyTT 指标库。"""
+"""技术指标因子 — 桥接 easy_tdx.ta 指标引擎。"""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.factor.base import Factor, register_factor
 
 
@@ -18,7 +18,7 @@ class MACDHistSignal(Factor):
 
     def compute(self, df: pd.DataFrame) -> pd.Series:
         close = df["close"].to_numpy(dtype=np.float64)
-        _, _, hist = MyTT.MACD(close, SHORT=12, LONG=26, M=9)
+        _, _, hist = ta.MACD(close, SHORT=12, LONG=26, M=9)
         hist_series = pd.Series(hist)
         rolling_std = hist_series.abs().rolling(20).mean().replace(0, np.nan)
         return (hist_series / rolling_std).fillna(0)
@@ -33,7 +33,7 @@ class RSI14(Factor):
 
     def compute(self, df: pd.DataFrame) -> pd.Series:
         close = df["close"].to_numpy(dtype=np.float64)
-        rsi = MyTT.RSI(close, N=14)
+        rsi = ta.RSI(close, N=14)
         return (pd.Series(rsi) - 50) / 50
 
 
@@ -46,7 +46,7 @@ class BollPosition(Factor):
 
     def compute(self, df: pd.DataFrame) -> pd.Series:
         close = df["close"].to_numpy(dtype=np.float64)
-        upper, mid, lower = MyTT.BOLL(close, N=20, P=2)
+        upper, mid, lower = ta.BOLL(close, N=20, P=2)
         upper = pd.Series(upper)
         lower = pd.Series(lower)
         close_s = pd.Series(close)

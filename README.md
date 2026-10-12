@@ -83,7 +83,7 @@
 
 ### 🔬 数据与指标
 
-- **34 个技术指标**：MACD/KDJ/RSI/BOLL/DMI/ATR 到捉妖大师（ZHUOYAO）、30 日乖离率信号（BIAS_SIGNAL），支持自定义参数与分钟线
+- **50 个技术指标**（[TA-Lib](https://ta-lib.org/) 内核 + 自建中式指标层）：MACD/KDJ/RSI/BOLL/DMI/ATR 到捉妖大师（ZHUOYAO）、30 日乖离率信号（BIAS_SIGNAL），支持自定义参数与分钟线
 - **缠论分析**：K线合并 → 分型 → 笔 → 中枢 → 线段 → 买卖点 → 背驰，一键出结果，支持多级别联立
 - **因子与组合**：19 个内置因子、IC/分层/衰减分析、4 种组合优化器 + 再平衡引擎、TWAP/VWAP 执行仿真与方根冲击滑点
 - **数据底座**：本地 K 线仓库（DuckDB 增量同步 + 临时 bar 状态机 + 健康自检）、通达信本地文件离线读写、财报三表 / 通达信 F10 / 巨潮公告 / 新浪财经
@@ -164,7 +164,7 @@ pip install -e ".[web]"             # Web API 模式（FastAPI + Uvicorn）
 | CLI | [cli.md](./docs/cli.md) | 全部命令速查表 + 按域导航 |
 | CLI | [cli-market.md](./docs/cli-market.md) | 报价 / K线 / 分时 / 板块 / 资金 / 中金所 / 扩展市场 |
 | CLI | [cli-finance.md](./docs/cli-finance.md) | 巨潮公告检索 / 财报三表 / 通达信 F10 |
-| CLI | [cli-indicators.md](./docs/cli-indicators.md) | 34 个技术指标 / 通达信公式 / 捉妖 / 乖离率 |
+| CLI | [cli-indicators.md](./docs/cli-indicators.md) | 50 个技术指标 / 通达信公式 / 口径变更说明 |
 | CLI | [cli-backtest.md](./docs/cli-backtest.md) | backtest / optimize / portfolio / run-all |
 | CLI | [cli-screen.md](./docs/cli-screen.md) | 全市场选股扫描 / 强势股排名 |
 | 教程 | [chanlun.md](./docs/chanlun.md) | 缠论分析（CLI + Python） |
@@ -195,7 +195,7 @@ pip install -e ".[web]"             # Web API 模式（FastAPI + Uvicorn）
 - [pytdx](https://github.com/rainx/pytdx) -- 离线数据读取模块借鉴自 pytdx 项目，感谢 rainx 及所有贡献者
 - [xmtdx](https://github.com/minionszyw/xmtdx) -- 本项目初始原型
 - [mootdx](https://github.com/mootdx/mootdx) -- 工程化封装参考
-- [MyTT](https://github.com/mpquant/MyTT) -- 麦语言技术指标算法库，技术指标计算基于此实现
+- [TA-Lib](https://ta-lib.org/) -- 技术分析指标库（指标引擎内核）；TA-Lib 未覆盖的中式指标由项目按通达信公式自建
 
 详见 [NOTICE](NOTICE) 和 [LICENSE](LICENSE)。
 

@@ -11,7 +11,7 @@ CCI 衡量价格偏离统计平均的程度：|CCI| > 100 代表偏离显著。
     easy-tdx backtest SZ 000001 --strategy-file strategies/cci_breakout.py --count 2000 --table
 """
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest import Strategy
 
 
@@ -20,7 +20,7 @@ class CCIBreakoutStrategy(Strategy):
 
     def init(self) -> None:
         self.cci = self.I(
-            MyTT.CCI, self.data.close, self.data.high, self.data.low,
+            ta.CCI, self.data.close, self.data.high, self.data.low,
         )
 
     def next(self) -> None:

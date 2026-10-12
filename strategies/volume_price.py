@@ -9,14 +9,14 @@
 """
 
 from easy_tdx.backtest import Strategy
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class VolumePriceStrategy(Strategy):
     """量价配合策略。"""
 
     def init(self) -> None:
-        self.vol_ma = self.I(MyTT.MA, self.data.vol, 5)
+        self.vol_ma = self.I(ta.MA, self.data.vol, 5)
 
     def next(self) -> None:
         cur_close = self.data.close[0]

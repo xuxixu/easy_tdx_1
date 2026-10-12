@@ -33,7 +33,7 @@ def _pool_df(n: int = 300, seed: int = 5, drift: float = 0.002) -> pd.DataFrame:
 
 
 def test_indicator_cache_hit_and_stats():
-    from easy_tdx.MyTT import MA
+    from easy_tdx.ta import MA
 
     df = _pool_df(100)
     arr = df["close"].to_numpy()
@@ -52,7 +52,7 @@ def test_indicator_cache_hit_and_stats():
 
 
 def test_indicator_cache_distinguishes_arrays():
-    from easy_tdx.MyTT import MA
+    from easy_tdx.ta import MA
 
     a = _pool_df(50, seed=1)["close"].to_numpy()
     b = _pool_df(50, seed=2)["close"].to_numpy()
@@ -68,7 +68,7 @@ def test_indicator_cache_hits_copied_array_with_same_content():
     回归：键曾用对象 id 做数组签名，引擎逐 run 重建数组对象导致寻优
     缓存全程 0 命中（两段式加速静默失效）。
     """
-    from easy_tdx.MyTT import MA
+    from easy_tdx.ta import MA
 
     arr = _pool_df(100)["close"].to_numpy()
     cache = IndicatorCache()

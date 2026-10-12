@@ -2,6 +2,8 @@
 
 ## 技术指标
 
+技术指标引擎为 **TA-Lib**（硬依赖，`pip install easy-tdx` 即包含）。TA-Lib 未覆盖的中式指标（乖离率、薛斯通道、捉妖大师等）由项目自建实现，公式定义遵循通达信写法。
+
 ```bash
 easy-tdx indicator-list --table                       # 列出所有可用指标
 easy-tdx indicator MACD -m SH -c 600519 --table       # MACD
@@ -10,7 +12,7 @@ easy-tdx indicator RSI -m SH -c 600519 --table        # RSI
 easy-tdx indicator BOLL -m SH -c 600519 --table       # BOLL 布林带
 easy-tdx indicator DMI -m SH -c 600519 --table        # DMI 动向指标
 easy-tdx indicator ATR -m SH -c 600519 --table        # ATR 真实波幅
-easy-tdx indicator WR -m SH -c 600519 --table         # WR 威廉指标
+easy-tdx indicator WR -m SH -c 600519 --table         # WR 威廉指标（-100~0）
 easy-tdx indicator CCI -m SH -c 600519 --table        # CCI 顺势指标
 easy-tdx indicator BIAS -m SZ -c 000001 --table       # BIAS 乖离率
 easy-tdx indicator BIAS_SIGNAL -m SH -c 600519 --table # 30日乖离率信号
@@ -28,6 +30,25 @@ easy-tdx indicator MACD -m SH -c 600519 --period 5MIN --count 50
 # 仅输出指标值（不含 OHLCV）
 easy-tdx indicator RSI -m SZ -c 000001 --no-ohlcv
 ```
+
+### 口径变更（自 v1.33.0 起，指标层采用 TA-Lib 原生定义）
+
+`indicator` 命令、Web `/api/indicator` 与回测内置策略的指标**一律使用 TA-Lib 原生口径**。与早期版本（内嵌 pandas 实现）的差异：
+
+| 指标 | 早期口径 | TA-Lib 原生口径 |
+|------|----------|----------------|
+| `MACD` 柱 | `(DIF - DEA) × 2` | `DIF - DEA`（**不乘 2**，与通达信软件差 2 倍） |
+| `RSI` 默认周期 | 24 | **14**（Wilder 平滑） |
+| `WR` | `0~100`（100=超卖） | **`-100~0`**（取自 `WILLR`：0=超买，-100=超卖） |
+| `OBV` | 累计成交量 ÷ 10000 | **原始累计成交量** |
+| `SUPERTREND` `ST_DIR` | `1` 多 / `-1` 空 | **`-1` 多 / `1` 空**（TA-Lib 约定） |
+| `KAMA` | 可配 `FAST`/`SLOW` | 快慢常量固定 `2/30`，两参数不再生效 |
+| `EMA` 预热 | 首根即出值 | 前 `N-1` 根为 `NaN`（Wilder 播种） |
+| `DMI`/`DPO`/`TRIX`/`CMO` | 自定义平滑 | TA-Lib 融合实现，数值不同 |
+
+依赖阈值的调用方需要同步调整，例如 WR 的超买超卖线应取 `-80` / `-20`（回测内置策略 `wr_reversal` 一直按此设定，此前因刻度相反而从不成交，本次更换后恢复）。
+
+> **与公式引擎的口径差异（有意为之）**：`easy-tdx formula` 走**通达信公式语义**，与上面的 TA-Lib 指标层**故意不同**——公式里 `EMA(C,12)` 首根即出值、`(DIF-DEA)*2` 柱值放大一倍。WebUI 图表的 MA/EMA/BOLL/MACD/KDJ/RSI 预置指标是**通达信公式文本**（`web-ui/src/presetFormulas.ts`），经后端公式引擎求值，因此图表仍显示通达信口径的 MACD 柱。
 
 ## 通达信公式（v1.27）
 
@@ -107,7 +128,7 @@ with MacClient.from_best_host() as c:
     #         + BS_X, BS_SMA, BS_LMA
 ```
 
-支持 34 个指标：MACD, KDJ, RSI, BOLL, DMI, ATR, WR, CCI, BIAS, BIAS_SIGNAL, OBV, VR, EMV, MFI, BRAR, ASI, TRIX, DPO, MTM, ROC, EXPMA, BBI, PSY, DFMA, CR, KTN, XSII, MASS, TAQ, ZHUOYAO, SAR, VWAP, AROON, FK。
+支持 50 个指标：MACD, KDJ, RSI, BOLL, DMI, ATR, WR, CCI, BIAS, BIAS_SIGNAL, OBV, VR, EMV, MFI, BRAR, ASI, TRIX, DPO, MTM, ROC, EXPMA, BBI, PSY, DFMA, CR, KTN, XSII, MASS, TAQ, ZHUOYAO, SAR, VWAP, AROON, FK, HMA, KAMA, SUPERTREND, CHANDELIER, ICHIMOKU, UOS, CMO, TSI, FISHER, SQUEEZE, CHOP, AD, CMF, EFI, BBP, BBW。
 
 ```python
 # Python API 用法
@@ -123,5 +144,5 @@ with MacClient.from_best_host() as c:
     #         + ZY_LONG, ZY_MID, ZY_SHORT, ZY_TREND
 ```
 
-支持 34 个指标：MACD, KDJ, RSI, BOLL, DMI, ATR, WR, CCI, BIAS, BIAS_SIGNAL, OBV, VR, EMV, MFI, BRAR, ASI, TRIX, DPO, MTM, ROC, EXPMA, BBI, PSY, DFMA, CR, KTN, XSII, MASS, TAQ, ZHUOYAO, SAR, VWAP, AROON, FK。
+支持 50 个指标：MACD, KDJ, RSI, BOLL, DMI, ATR, WR, CCI, BIAS, BIAS_SIGNAL, OBV, VR, EMV, MFI, BRAR, ASI, TRIX, DPO, MTM, ROC, EXPMA, BBI, PSY, DFMA, CR, KTN, XSII, MASS, TAQ, ZHUOYAO, SAR, VWAP, AROON, FK, HMA, KAMA, SUPERTREND, CHANDELIER, ICHIMOKU, UOS, CMO, TSI, FISHER, SQUEEZE, CHOP, AD, CMF, EFI, BBP, BBW。
 

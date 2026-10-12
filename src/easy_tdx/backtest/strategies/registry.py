@@ -13,8 +13,9 @@ CLI 枚举和回测路由使用。
 
 示例::
 
-    from easy_tdx.MyTT import MA, crossover
+    from easy_tdx.backtest import crossover
     from easy_tdx.backtest.strategies import ParametrizedStrategy, Param, register_strategy
+    from easy_tdx.ta import MA
 
     @register_strategy(name="ma_cross", label="双均线交叉", description="...")
     class MaCrossStrategy(ParametrizedStrategy):

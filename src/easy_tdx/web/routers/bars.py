@@ -30,9 +30,10 @@ router = APIRouter(tags=["bars"])
 # 规整后保持的列顺序（匹配旧 SecurityBar 输出契约）
 _NORMAL_COLS = ["open", "close", "high", "low", "vol", "amount"]
 
-# 120 分钟线的 category 别名（协议无此枚举，路由层特判）
+# 120/240 分钟线的 category 别名（协议无此枚举，路由层特判）
 _MIN_120_ALIASES = frozenset({"MIN_120", "120M", "120MIN"})
-# 标准 TdxClient 单次取数上限（60M×2 重采样路径的抓取上限）
+_MIN_240_ALIASES = frozenset({"MIN_240", "240M", "240MIN"})
+# 标准 TdxClient 单次取数上限（60M×N 重采样路径的抓取上限）
 _MAX_BARS_PER_FETCH = 800
 
 
@@ -80,26 +81,34 @@ def _normalize_mac_df(df: pd.DataFrame, daily_plus: bool) -> pd.DataFrame:
     return out[cols]
 
 
-def _resample_pairs(df: pd.DataFrame, count: int) -> pd.DataFrame:
-    """相邻两根分钟 bar 聚合成一根（60M×2 → 120M）。
+def _resample_pairs(df: pd.DataFrame, count: int, factor: int = 2) -> pd.DataFrame:
+    """相邻 N 根分钟 bar 聚合成一根（60M×N → 120M/240M）。
 
-    分组规则：从最新端对齐两两配对（奇数根丢最旧一根，保最新数据），
+    分组规则：从最新端对齐每 factor 根配对（余数丢最旧的余根，保最新数据），
     聚合口径 open=first / high=max / low=min / close=last / vol·amount=sum，
     时间列取配对中后一根。要求 df 按时间升序、含 datetime 列。
 
     Args:
         df: 已规整的 60M DataFrame（升序，datetime 列）。
-        count: 目标 120M 根数（超出的旧数据裁掉）。
+        count: 目标根数（超出的旧数据裁掉）。
+        factor: 聚合倍数（2=120M，4=240M）。
 
     Returns:
         重采样后的 DataFrame；输入为空时原样返回。
     """
     if df is None or df.empty:
         return df
+    if "datetime" not in df.columns:
+        # 如港股 HSI 的分钟请求落到腾讯快照（仅 date 列的单日行）：缺时间列
+        # groupby 会抛 KeyError → 500，提前转成 400 可读错误
+        raise ValueError("缺少 datetime 列，无法按时间重采样（该标的可能无此周期数据）")
+    if factor < 2:
+        raise ValueError(f"重采样倍数 factor 须 ≥2，实得 {factor}")
     out = df.reset_index(drop=True)
-    if len(out) % 2:
-        out = out.iloc[1:].reset_index(drop=True)  # 丢最旧一根，两两对齐
-    group = np.arange(len(out)) // 2
+    rest = len(out) % factor
+    if rest:
+        out = out.iloc[rest:].reset_index(drop=True)  # 丢最旧余根，整组对齐
+    group = np.arange(len(out)) // factor
 
     agg: dict[str, str] = {"datetime": "last"}
     for col, how in (
@@ -146,6 +155,89 @@ def _attach_derived(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+async def _fetch_resampled(
+    market: str,
+    code: str,
+    start: int,
+    count: int,
+    adjust: str,
+    bar_time: str,
+    minutes: int,
+    factor: int,
+    label: str,
+    mac_client: Any,
+    client: Any,
+) -> pd.DataFrame:
+    """长分钟 K 线（120M/240M）：MAC 原生 times=N 优先，N×60M 重采样兜底。
+
+    Args:
+        minutes: 目标周期分钟数（120/240）。
+        factor: 60M 重采样倍数（minutes/60）。
+        label: 日志/错误中的周期名（如 "MIN_120"）。
+    """
+    market_value = market_value_from_str(market)
+
+    if mac_client is not None:
+        from easy_tdx.mac.enums import Period
+
+        # 1) MAC 原生多分钟线（Period.MINS + times=N）
+        try:
+            df = await mac_client.get_stock_kline(
+                market_value,
+                code,
+                Period.MINS,
+                start,
+                count,
+                minutes,
+                adjust=adjust_from_str(adjust),
+                bar_time=bar_time,
+            )
+            if df is not None and not df.empty:
+                return _normalize_mac_df(df, daily_plus=False)
+            _logger.info("/bars %s 原生路径返回空，转 60M 重采样 (%s%s)", label, market, code)
+        except Exception as exc:  # noqa: BLE001 — 原生不可用时降级，不中断
+            _logger.warning(
+                "/bars %s 原生获取失败，转 60M 重采样 (%s%s): %s", label, market, code, exc
+            )
+
+        # 2) MAC 60M×N 重采样（自动分页，可一次取足 count×N）
+        try:
+            df = await mac_client.get_stock_kline(
+                market_value,
+                code,
+                Period.MIN_60,
+                start,
+                count * factor,
+                1,
+                adjust=adjust_from_str(adjust),
+                bar_time=bar_time,
+            )
+            res = _resample_pairs(_normalize_mac_df(df, daily_plus=False), count, factor)
+            if res is not None and not res.empty:
+                return res
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("/bars %s 60M重采样（MAC）失败 (%s%s): %s", label, market, code, exc)
+
+    # 3) 标准 TdxClient 60M×N（无 MAC；单次上限 800 根 → 最多 800/N 根目标）
+    fetch_n = min(count * factor, _MAX_BARS_PER_FETCH)
+    if fetch_n < count * factor:
+        _logger.info(
+            "/bars %s 回退路径单次上限 %d 根 60M，最多合成 %d 根目标",
+            label,
+            _MAX_BARS_PER_FETCH,
+            _MAX_BARS_PER_FETCH // factor,
+        )
+    df = await client.get_security_bars(
+        market_from_str(market),
+        code,
+        category_from_str("MIN_60"),
+        start,
+        fetch_n,
+        bar_time=bar_time,
+    )
+    return _resample_pairs(df, count, factor)
+
+
 async def _fetch_120m(
     market: str,
     code: str,
@@ -157,66 +249,57 @@ async def _fetch_120m(
     client: Any,
 ) -> pd.DataFrame:
     """120 分钟 K 线：MAC 原生 times=120 优先，2×60M 重采样兜底。"""
-    market_value = market_value_from_str(market)
-
-    if mac_client is not None:
-        from easy_tdx.mac.enums import Period
-
-        # 1) MAC 原生多分钟线（Period.MINS + times=120）
-        try:
-            df = await mac_client.get_stock_kline(
-                market_value,
-                code,
-                Period.MINS,
-                start,
-                count,
-                120,
-                adjust=adjust_from_str(adjust),
-                bar_time=bar_time,
-            )
-            if df is not None and not df.empty:
-                return _normalize_mac_df(df, daily_plus=False)
-            _logger.info("/bars MIN_120 原生路径返回空，转 60M 重采样 (%s%s)", market, code)
-        except Exception as exc:  # noqa: BLE001 — 原生不可用时降级，不中断
-            _logger.warning(
-                "/bars MIN_120 原生获取失败，转 60M 重采样 (%s%s): %s", market, code, exc
-            )
-
-        # 2) MAC 60M×2 重采样（自动分页，可一次取足 count×2）
-        try:
-            df = await mac_client.get_stock_kline(
-                market_value,
-                code,
-                Period.MIN_60,
-                start,
-                count * 2,
-                1,
-                adjust=adjust_from_str(adjust),
-                bar_time=bar_time,
-            )
-            res = _resample_pairs(_normalize_mac_df(df, daily_plus=False), count)
-            if res is not None and not res.empty:
-                return res
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("/bars MIN_120 60M重采样（MAC）失败 (%s%s): %s", market, code, exc)
-
-    # 3) 标准 TdxClient 60M×2（无 MAC；单次上限 800 根 → 最多 400 根 120M）
-    fetch_n = min(count * 2, _MAX_BARS_PER_FETCH)
-    if fetch_n < count * 2:
-        _logger.info(
-            "/bars MIN_120 回退路径单次上限 %d 根 60M，最多合成 %d 根 120M",
-            _MAX_BARS_PER_FETCH,
-            _MAX_BARS_PER_FETCH // 2,
-        )
-    df = await client.get_security_bars(
-        market_from_str(market),
-        code,
-        category_from_str("MIN_60"),
-        start,
-        fetch_n,
-        bar_time=bar_time,
+    return await _fetch_resampled(
+        market, code, start, count, adjust, bar_time, 120, 2, "MIN_120", mac_client, client
     )
-    return _resample_pairs(df, count)
+
+
+async def _fetch_240m(
+    market: str,
+    code: str,
+    start: int,
+    count: int,
+    adjust: str,
+    bar_time: str,
+    mac_client: Any,
+    client: Any,
+) -> pd.DataFrame:
+    """240 分钟（4 小时）K 线：MAC 原生 times=240 优先，4×60M 重采样兜底。"""
+    return await _fetch_resampled(
+        market, code, start, count, adjust, bar_time, 240, 4, "MIN_240", mac_client, client
+    )
+
+
+async def _fetch_ex_resampled(
+    gateway: Any,
+    market: str,
+    code: str,
+    start: int,
+    count: int,
+    factor: int,
+    label: str,
+    adjust: Any = None,
+) -> pd.DataFrame:
+    """港美股长分钟 K 线：网关 60M 取数后本地重采样（扩展栈无多分钟周期概念）。
+
+    Args:
+        gateway: 统一取数网关（bars 接口）。
+        factor: 聚合倍数（2=120M，4=240M）。
+    """
+    from easy_tdx.web.convert import category_from_str as _cat
+
+    raw = await gateway.bars(market, code, _cat("MIN_60"), start * factor, count * factor, adjust)
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+    if "datetime" not in raw.columns:
+        # 真指数快照源（如 HSI 落到腾讯快照）只有 date 列的单日行：没有 60M
+        # 可供合成，诚实 400 而不是把日线当 240M 返回
+        raise ValueError(f"标的 {market}{code} 暂无 60 分钟 K 线，无法合成{label}")
+    res = _resample_pairs(raw, count, factor)
+    if res is None or getattr(res, "empty", True):
+        _logger.info("/bars %s 港美股 60M 重采样返回空 (%s%s)", label, market, code)
+        return pd.DataFrame()
+    return res
 
 
 async def _baostock_last_resort(
@@ -285,7 +368,7 @@ async def security_bars(
         "DAY",
         description=(
             "K线周期: MIN_1, MIN_5, MIN_15, MIN_30, MIN_60, MIN_120(120分钟), "
-            "DAY, WEEK, MONTH, SEASON, YEAR"
+            "MIN_240(240分钟/4小时), DAY, WEEK, MONTH, SEASON, YEAR"
         ),
     ),
     start: int = Query(0, ge=0),
@@ -312,9 +395,11 @@ async def security_bars(
     响应带 ``source: "baostock"``，否则该字段为 null。
     输出契约与旧版一致：日线返回 ``date`` 列，分钟线返回 ``datetime`` 列。
 
-    ``category=MIN_120`` 为 120 分钟线：MAC 原生 ``Period.MINS × times=120``
-    优先，失败则取 2 倍 60M 数据相邻两根聚合（open=first/high=max/low=min/
-    close=last/vol·amount=sum），标准客户端回退路径最多合成 400 根。
+    ``category=MIN_120`` 为 120 分钟线、``category=MIN_240`` 为 240 分钟
+    （4 小时）线：MAC 原生 ``Period.MINS × times`` 优先，失败则取 N 倍 60M
+    数据相邻 N 根聚合（open=first/high=max/low=min/close=last/vol·amount=sum），
+    标准客户端回退路径单次最多合成 400 根（120M）/ 200 根（240M）。
+    港美股走网关 60M 取数后本地同口径重采样（扩展栈无多分钟周期概念）。
 
     每根 bar 附带衍生字段：``pre_close``（前收，首根=本根开盘）、``change``、
     ``change_pct``、``amplitude_pct``（振幅%）。pre_close ≤ 0.01 时按 0.01
@@ -323,8 +408,12 @@ async def security_bars(
     vol 单位：分钟线/日线 = 成交量(股)；周/月/季/年线服务端原样返回真实
     成交量/100，回退路径（标准 TdxClient）已 ×100 还原为股。
     """
-    cat = category_from_str(category)
     code = validate_code(code, market)
+    upper = category.upper()
+    # 长分钟周期先特判：协议无 MIN_120/MIN_240 枚举，category_from_str 会
+    # 直接抛错（此前 MIN_120 分支写在转换之后，实际不可达）。
+    resampled_factor = 2 if upper in _MIN_120_ALIASES else 4 if upper in _MIN_240_ALIASES else 0
+    resampled_label = "MIN_120" if resampled_factor == 2 else "MIN_240" if resampled_factor else ""
 
     # --- 港股 / 美股：独立协议栈，A股的回退链（复权/baostock）不适用 ---
     if is_ex(market):
@@ -334,12 +423,28 @@ async def security_bars(
                 detail=f"{market_label(market)}行情网关未初始化"
                 "（扩展市场协议栈 7727 不可用），请检查服务器设置",
             )
+        if resampled_factor:
+            ex_df = await _fetch_ex_resampled(
+                gateway,
+                market,
+                code,
+                start,
+                count,
+                resampled_factor,
+                resampled_label,
+                adjust_from_str(adjust),
+            )
+            return _bars_resp(_attach_derived(ex_df), None)
+        cat = category_from_str(category)
         ex_df = await gateway.bars(market, code, cat, start, count, adjust=adjust_from_str(adjust))
         return _bars_resp(_attach_derived(ex_df), None)
 
-    if category.upper() in _MIN_120_ALIASES:
+    if resampled_factor == 2:
         df120 = await _fetch_120m(market, code, start, count, adjust, bar_time, mac_client, client)
         return _bars_resp(_attach_derived(df120), None)
+    if resampled_factor == 4:
+        df240 = await _fetch_240m(market, code, start, count, adjust, bar_time, mac_client, client)
+        return _bars_resp(_attach_derived(df240), None)
 
     cat = category_from_str(category)
     df: pd.DataFrame | None = None
@@ -415,12 +520,33 @@ async def index_bars(
     指数K线并非所有 TDX 服务器都提供：失败/为空时自动兜底 baostock
     （仅日线及以上，见 /bars 说明），命中时响应带 ``source: "baostock"``。
 
+    分钟周期（MIN_5/15/30/60）走协议原生；MIN_120/MIN_240 取 N 倍 60M
+    数据同口径重聚合（与 /bars 一致）。
+
     vol 单位：日线/周线/月线/季线/年线 = 成交量(手)（周及以上周期服务端
     原样返回真实成交量/100，已 ×100 还原）；**分钟线协议不提供成交量**
     （报文中该字段实为成交额/100），vol 为 ``null``，请勿当作成交量使用。
 
     每根 bar 同样附带 ``pre_close/change/change_pct/amplitude_pct`` 衍生字段。
     """
+    upper = category.upper()
+    idx_factor = 2 if upper in _MIN_120_ALIASES else 4 if upper in _MIN_240_ALIASES else 0
+    if idx_factor:
+        # 协议无 120/240 枚举：60M 取数后本地重采样（category_from_str 会抛错，
+        # 不可先转换）。单次上限 800 根 60M，最多合成 400/200 根。
+        try:
+            raw = await client.get_index_bars(
+                market_from_str(market),
+                code,
+                category_from_str("MIN_60"),
+                start,
+                min(count * idx_factor, _MAX_BARS_PER_FETCH),
+                bar_time=bar_time,
+            )
+            return _bars_resp(_attach_derived(_resample_pairs(raw, count, idx_factor)), None)
+        except Exception as exc:  # noqa: BLE001 — 指数长分钟线失败即如实报错
+            _logger.warning("/bars/index 长分钟线获取失败 (%s%s): %s", market, code, exc)
+            raise exc
     df: pd.DataFrame | None = None
     source: str | None = None
     last_exc: Exception | None = None

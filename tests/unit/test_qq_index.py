@@ -26,15 +26,20 @@ def _fake_urlopen_factory(payload: bytes):
 def test_sina_quote_hk(monkeypatch):
     from easy_tdx.sources import qq_index as Q
 
+    # 实盘格式：今开,昨收,最高,最低,今收（今收-昨收==涨跌额）。
+    # 之前把 parts[2]/parts[3] 当昨收/今开写反，导致涨跌幅全错。
     body = (
-        'var hq_str_rt_hkHSCEI="HSCEI,恒生中国企业指数,8057.420,8057.420,'
-        '8147.870,8055.560,8147.871,137.290,1.710,0,0,62562443.888,2134122718";'
+        'var hq_str_rt_hkHSCEI="HSCEI,恒生中国企业指数,8229.320,8147.871,'
+        '8235.690,8143.110,8145.609,-2.262,-0.030,0,0,23458646.422,781786623";'
     ).encode("gbk")
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen_factory(body))
     q = Q.fetch_quote("HK", "HSCEI")
     assert q["code"] == "HSCEI"
-    assert q["price"] == 8147.871
-    assert q["pre_close"] == 8057.42
+    assert q["price"] == 8145.609
+    assert q["pre_close"] == 8147.871
+    assert q["open"] == 8229.32
+    # 自洽：现价-昨收 ≈ 涨跌额（-2.262）
+    assert abs((q["price"] - q["pre_close"]) - (-2.262)) < 0.01
 
 
 def test_sina_quote_us(monkeypatch):
@@ -47,7 +52,9 @@ def test_sina_quote_us(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen_factory(body))
     q = Q.fetch_quote("US", "SPX")
     assert q["price"] == 7811.54
-    assert q["pre_close"] == 7786.3599
+    # 昨收 = 今收 - 涨跌额（7811.54-46.18=7765.36），parts[5] 是今开不是昨收
+    assert abs(q["pre_close"] - 7765.36) < 1e-6
+    assert q["open"] == 7786.3599
 
 
 def test_qq_fallback_on_sina_failure(monkeypatch):

@@ -13,8 +13,11 @@ src/easy_tdx/
 ├── client.py          # TdxClient / AsyncTdxClient（标准协议）
 ├── unified.py         # UnifiedTdxClient（统一入口）
 ├── config.py          # 服务器地址、端口、超时配置
-├── indicator.py       # 技术指标计算（34 个，基于 MyTT）
-├── MyTT.py            # 麦语言技术指标算法库
+├── indicator.py       # 技术指标注册表（50 个，基于 easy_tdx.ta）
+├── ta/                # 技术指标引擎（TA-Lib 硬依赖）
+│   ├── core.py        # 0/1 级公式原语（MA/EMA/REF/HHV/CROSS …，通达信方言）
+│   ├── talib_ind.py   # TA-Lib 原生指标适配（MACD/RSI/BOLL/KDJ/ATR …）
+│   └── chinese.py     # TA-Lib 未覆盖的中式指标（BIAS/XSII/捉妖 …）
 ├── mac/
 │   ├── client.py      # MacClient / AsyncMacClient（MAC 协议）
 │   ├── enums.py       # Period, Adjust, Category, ExMarket, SortType, ...

@@ -3,14 +3,14 @@
 //
 // 与外盘看板（OverseasDashboard）的 K 线面板是同一概念的不同实现：
 // A 股代码无歧义（6 位直输 + detectAShareMarket），不需要服务端搜索框。
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { fetchBars, fetchSymbolName, formatError } from '../api'
-import { loadIndicatorParams, type IndicatorParams } from '../indicatorParams'
+import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
 import { detectAShareMarket, MARKET_DEFAULT_INDEX, marketLabel, type Market } from '../market'
 import type { Bar } from '../types'
-import IndicatorEditor from './IndicatorEditor.vue'
 import StockDialog from './StockDialog.vue'
+import IndicatorChips from './IndicatorChips.vue'
 import StockKline from './StockKline.vue'
 
 const props = defineProps<{ market: Market }>()
@@ -46,7 +46,25 @@ const K_CATS: Array<{ value: 'DAY' | 'WEEK' | 'MONTH'; label: string }> = [
 ]
 
 const indParams = ref<IndicatorParams>(loadIndicatorParams())
-const showIndEditor = ref(false)
+// 技术指标设置页写入后同步最新配置（全局共用）。
+const unsubscribeInd = subscribeIndicatorParams((p) => {
+  indParams.value = { ...p }
+})
+onUnmounted(unsubscribeInd)
+
+/** 主图叠加多选 + 副图切换：写回全局指标配置（各 K 线图/技术指标页共用）。 */
+function toggleOverlay(v: string) {
+  const cur = indParams.value.overlays ?? []
+  const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
+  indParams.value.overlays = next
+  indParams.value.overlay = next[0] ?? 'ma'
+  saveIndicatorParams(indParams.value)
+}
+
+function setSubPane(v: string) {
+  indParams.value.subPane = v
+  saveIndicatorParams(indParams.value)
+}
 const dialog = ref<Focal | null>(null)
 
 const title = computed(
@@ -115,7 +133,12 @@ loadBars()
           {{ c.label }}
         </button>
       </span>
-      <button class="chip ind-edit" title="编辑指标参数" @click="showIndEditor = true">⚙ 指标</button>
+      <IndicatorChips
+        :overlays="indParams.overlays ?? []"
+        :sub="indParams.subPane"
+        @toggle-overlay="toggleOverlay"
+        @select-sub="setSubPane"
+      />
       <button class="chip" title="打开分时/盘口弹窗" @click="dialog = { ...focal }">分时/盘口 ⌗</button>
     </div>
     <div class="k-search">
@@ -132,7 +155,6 @@ loadBars()
     <div v-if="barsLoading" class="loading">加载中…</div>
     <div v-else-if="barsError" class="err">{{ barsError }}</div>
     <StockKline v-else :bars="bars" :params="indParams" />
-    <IndicatorEditor v-if="showIndEditor" v-model="indParams" @close="showIndEditor = false" />
     <StockDialog
       v-if="dialog"
       :market="dialog.market"
@@ -162,6 +184,10 @@ loadBars()
   font-weight: 400;
 }
 .k-cats {
+  display: inline-flex;
+  gap: 4px;
+}
+.ind-group {
   display: inline-flex;
   gap: 4px;
 }

@@ -9,14 +9,14 @@ EMA12 上穿 EMA50 买入，EMA12 下穿 EMA50 卖出。
 """
 
 from easy_tdx.backtest import Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class EXPMAStrategy(Strategy):
     """EXPMA 指数均线交叉策略。"""
 
     def init(self) -> None:
-        self.ema12, self.ema50 = self.I(MyTT.EXPMA, self.data.close, 12, 50)
+        self.ema12, self.ema50 = self.I(ta.EXPMA, self.data.close, 12, 50)
         self.golden = crossover(self.ema12, self.ema50)
         self.death = crossover(self.ema50, self.ema12)
 

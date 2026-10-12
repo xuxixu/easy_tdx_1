@@ -59,6 +59,33 @@ test('主题弹窗切换后立即生效并持久化', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 })
 
+test('弹窗打开期间顶栏的主题与异常入口仍可点击', async ({ page }) => {
+  await resetStorage(page)
+  await page.goto('/')
+  await page.waitForTimeout(1500)
+
+  // 打开个股弹窗（z-index 1000 的全屏遮罩）
+  await page.locator('button[title="打开分时/盘口弹窗"]').click()
+  await expect(page.locator('.dlg-mask')).toBeVisible()
+
+  // 顶栏在 1100，必须仍可点——此前被遮罩盖住，弹窗一开就再也够不到
+  await page.locator(THEME_BTN).click()
+  const themeModal = page.locator('.modal-overlay')
+  await expect(themeModal).toBeVisible()
+  await themeModal.locator('.theme-card', { hasText: '晴昼' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  await themeModal.getByRole('button', { name: '完成' }).click()
+
+  // 异常入口同样可达，且盖在个股弹窗之上
+  await page.locator(ERROR_BTN).click()
+  await expect(page.locator('.modal-overlay')).toBeVisible()
+  await expect(page.locator('.modal-overlay h3')).toContainText('全局异常')
+  await page.locator('.modal-actions button', { hasText: '关闭' }).click()
+
+  // 个股弹窗本身没有被主题/异常面板挤掉
+  await expect(page.locator('.dlg-mask')).toBeVisible()
+})
+
 test('全局异常捕获三类来源并支持复制与清空', async ({ page, context }) => {
   await resetStorage(page)
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])

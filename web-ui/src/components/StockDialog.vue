@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // 个股预览对话框：头部实时报价 + 加/移除自选 + 左侧五档盘口
-// + 右侧 分时/日K tab（日K 支持技术指标切换）。
+// + 右侧 分时/分钟K/日K tab（K 线 tab 支持技术指标切换）。
 // 报价来自全局 SSE store；图表按需拉取，分时/日K 独立容错，
 // 指数代码在个股 /bars 拿不到时自动回退 /bars/index。
 
-import { computed, onMounted, ref, toRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
@@ -19,13 +19,13 @@ import {
   removeWatchItem,
 } from '../api'
 import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol, fmtVolShares } from '../format'
-import { loadIndicatorParams, saveIndicatorParams, type IndicatorParams } from '../indicatorParams'
-import { isExMarket } from '../market'
+import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
+import { US_SESSION_FILTERS, inUsSessionFilter, isExMarket, isUsDst, type USSessionFilter } from '../market'
 import { useQuoteStore } from '../stores/quotes'
-import type { Bar, MinutePoint, SecurityQuote } from '../types'
-import IndicatorEditor from './IndicatorEditor.vue'
+import type { Bar, Category, MinutePoint, SecurityQuote } from '../types'
+import IndicatorChips from './IndicatorChips.vue'
 import IntradayChart from './IntradayChart.vue'
-import StockKline, { type Overlay, type SubPane } from './StockKline.vue'
+import StockKline from './StockKline.vue'
 
 const props = defineProps<{
   market: string
@@ -46,8 +46,18 @@ const changePct = computed(() => {
 
 // ── tab / 指标 ──────────────────────────────────────────────────────────────
 
-const tab = ref<'minute' | 'daily'>('minute')
-const subPane = ref<SubPane>('macd')
+const tab = ref<'minute' | 'daily' | 'm15' | 'm30' | 'h1' | 'h4'>('minute')
+// 分钟 K 页签（key→ 后端 category；h4 = MIN_240，由 60M 重采样合成）
+const KLINE_TABS = [
+  { key: 'm15', label: '15分K', category: 'MIN_15', want: 320 },
+  { key: 'm30', label: '30分K', category: 'MIN_30', want: 320 },
+  { key: 'h1', label: '1小时K', category: 'MIN_60', want: 320 },
+  { key: 'h4', label: '4小时K', category: 'MIN_240', want: 200 },
+] as Array<{ key: 'm15' | 'm30' | 'h1' | 'h4'; label: string; category: Category; want: number }>
+/** 当前分钟 K 页签（分时/日K 下为 null）。 */
+const intraTab = computed(() => KLINE_TABS.find((t) => t.key === tab.value) ?? null)
+const isMinuteK = computed(() => intraTab.value !== null)
+const subPane = ref<string>('macd')
 const minuteDays = ref<1 | 3 | 5>(1)
 const DAY_OPTIONS: Array<{ value: 1 | 3 | 5; label: string }> = [
   { value: 1, label: '1日' },
@@ -55,35 +65,50 @@ const DAY_OPTIONS: Array<{ value: 1 | 3 | 5; label: string }> = [
   { value: 5, label: '5日' },
 ]
 
-const overlayOptions: Array<{ value: Overlay; label: string }> = [
-  { value: 'ma', label: 'MA' },
-  { value: 'boll', label: 'BOLL' },
-  { value: 'ema', label: 'EMA' },
-]
-
 /** 主图叠加多选：勾选态写回 indParams.overlays（全局共用配置）。 */
-const overlays = computed<Overlay[]>(() => indParams.value.overlays ?? [])
+const overlays = computed<string[]>(() => indParams.value.overlays ?? [])
 
-function toggleOverlay(v: Overlay) {
+function toggleOverlay(v: string) {
   const cur = overlays.value
   const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
   indParams.value.overlays = next
   indParams.value.overlay = next[0] ?? 'ma'
   saveIndicatorParams(indParams.value)
 }
-const subOptions: Array<{ value: SubPane; label: string }> = [
-  { value: 'macd', label: 'MACD' },
-  { value: 'kdj', label: 'KDJ' },
-  { value: 'rsi', label: 'RSI' },
-  { value: 'none', label: '副图无' },
-]
 
-// ── 指标参数（全局共用，编辑器写入 localStorage 后这里同步） ────────────────
+/** 副图切换：写回全局配置（与技术指标页/各 K 线图共用）。 */
+function setSubPane(v: string) {
+  subPane.value = v
+  indParams.value.subPane = v
+  saveIndicatorParams(indParams.value)
+}
+
+// ── 指标参数（全局共用，技术指标设置页写入后这里同步） ────────────────
 
 const indParams = ref<IndicatorParams>(loadIndicatorParams())
-const showIndEditor = ref(false)
+const unsubscribeInd = subscribeIndicatorParams((p) => {
+  indParams.value = { ...p }
+  subPane.value = p.subPane
+})
+onUnmounted(unsubscribeInd)
 
 const isEx = isExMarket(props.market)
+/** 美股才有时段概念（盘前/盘中/盘后/夜盘，北京时钟划分）。 */
+const isUS = computed(() => props.market === 'US')
+// 美股时段过滤（分时 + 分钟 K 通用；日K 不参与）：默认全部，点选后按北京
+// 时钟过滤（与海外看板同口径）。夜盘 TDX 无数据，空时给诚实提示。
+const sessionFilter = ref<USSessionFilter>('all')
+
+function inSession(datetime: string): boolean {
+  if (!isUS.value || sessionFilter.value === 'all') return true
+  if (datetime.length <= 13) return true // 无时分信息（日线）不过滤
+  return inUsSessionFilter(datetime.slice(11, 16), sessionFilter.value, isUsDst())
+}
+
+/** 时段过滤后的分时点（美股分时只有当日，dayMarks 单天不受影响）。 */
+const shownMinutePoints = computed(() => minutePoints.value.filter((p) => inSession(p.datetime)))
+/** 时段过滤后的分钟 K 线（StockKline 经 bars 变化自动重拉 option）。 */
+const shownIntraBars = computed(() => intraBars.value.filter((b) => inSession(b.datetime)))
 if (isEx) minuteDays.value = 1
 
 // ── 图表数据（独立容错） ────────────────────────────────────────────────────
@@ -92,8 +117,11 @@ const minutePoints = ref<MinutePoint[]>([])
 /** 多日分时的天分隔标记（每天起始索引 + 日期）。 */
 const minuteDayMarks = ref<Array<{ start: number; date: string }>>([])
 const dailyBars = ref<Bar[]>([])
+/** 当前分钟 K 页签的 K 线（StockKline 复用，与日K同走服务端 option）。 */
+const intraBars = ref<Bar[]>([])
 const minuteError = ref('')
 const dailyError = ref('')
+const intraError = ref('')
 const loading = ref(false)
 
 async function loadMinute() {
@@ -154,18 +182,50 @@ async function loadDaily() {
 // 请求序号守卫：loadCharts 内部先 await 日K、再 await 分时，而分时依赖日K
 // 尾部日期。快速连点两只标的时两次 loadCharts 并发，后发的日K可能先返回，
 // 导致旧标的的 loadMinute 拿着新标的的 dailyBars —— 分时与日K分属两只票。
+// 分钟 K 页签切换同样经此序号守卫，过期请求的结果直接丢弃。
 let chartSeq = 0
 
 async function loadCharts() {
   const my = ++chartSeq
   loading.value = true
+  sessionFilter.value = 'all' // 换标的重回全时段，避免旧过滤造成新标的空白
   // 先日K后分时：多日分时的交易日列表取自 dailyBars 尾部
   await loadDaily()
   if (my !== chartSeq) return // 已被更新的标的取代
   await loadMinute()
   if (my !== chartSeq) return
+  // 分钟 K 页签打开时一并刷新（日K tab 下跳过，不浪费请求）
+  if (isMinuteK.value) await loadIntra(my)
+  if (my !== chartSeq) return
   loading.value = false
 }
+
+/** 加载当前分钟 K 页签（指数回退 /bars/index；失败诚实报错，不阻塞）。 */
+async function loadIntra(my?: number) {
+  const t = intraTab.value
+  if (!t) return
+  const seq = my ?? ++chartSeq
+  if (my === undefined) loading.value = true
+  intraError.value = ''
+  intraBars.value = []
+  try {
+    let bars = await fetchBars(props.market, props.code, t.category, undefined, undefined, t.want)
+    if (bars.length === 0) bars = await fetchIndexBars(props.market, props.code, t.want, t.category)
+    if (bars.length === 0) throw new Error(`无${t.label}数据（该市场/指数可能不支持此周期）`)
+    if (seq !== chartSeq) return
+    intraBars.value = bars.slice(-t.want)
+  } catch (e) {
+    if (seq !== chartSeq) return
+    intraBars.value = []
+    intraError.value = formatError(e)
+  } finally {
+    if (seq === chartSeq) loading.value = false
+  }
+}
+
+watch(tab, () => {
+  if (isMinuteK.value) void loadIntra()
+})
 
 onMounted(loadCharts)
 watch([() => props.market, () => props.code], loadCharts)
@@ -388,6 +448,14 @@ function gotoOptimize() {
           <div class="chart-area">
             <div class="tabs">
               <button :class="{ active: tab === 'minute' }" @click="tab = 'minute'">分时</button>
+              <button
+                v-for="t in KLINE_TABS"
+                :key="t.key"
+                :class="{ active: tab === t.key }"
+                @click="tab = t.key"
+              >
+                {{ t.label }}
+              </button>
               <button :class="{ active: tab === 'daily' }" @click="tab = 'daily'">日K</button>
               <span v-if="tab === 'minute' && !isEx" class="ind-group">
                 <button
@@ -400,46 +468,56 @@ function gotoOptimize() {
                   {{ opt.label }}
                 </button>
               </span>
-              <template v-if="tab === 'daily'">
-                <span class="ind-group">
-                  <button
-                    v-for="opt in overlayOptions"
-                    :key="opt.value"
-                    class="chip"
-                    :class="{ on: overlays.includes(opt.value) }"
-                    :title="overlays.includes(opt.value) ? '点击取消叠加' : '点击叠加'"
-                    @click="toggleOverlay(opt.value)"
-                  >
-                    {{ opt.label }}
-                  </button>
-                  <span v-if="overlays.length > 1" class="dim ov-multi">叠加 {{ overlays.length }} 项</span>
-                </span>
-                <span class="ind-group">
-                  <button
-                    v-for="opt in subOptions"
-                    :key="opt.value"
-                    class="chip"
-                    :class="{ on: subPane === opt.value }"
-                    @click="subPane = opt.value; indParams.subPane = opt.value"
-                  >
-                    {{ opt.label }}
-                  </button>
-                </span>
-                <button class="chip ind-edit" title="编辑指标参数（周期/倍数）" @click="showIndEditor = true">
-                  ⚙ 指标
+              <span v-if="isUS && (tab === 'minute' || isMinuteK)" class="ind-group" title="按北京时钟划分美股时段">
+                <button
+                  v-for="s in US_SESSION_FILTERS"
+                  :key="s.value"
+                  class="chip"
+                  :class="{ on: sessionFilter === s.value }"
+                  @click="sessionFilter = s.value"
+                >
+                  {{ s.label }}
                 </button>
+              </span>
+              <template v-if="tab === 'daily' || isMinuteK">
+                <IndicatorChips
+                  :overlays="overlays"
+                  :sub="subPane"
+                  @toggle-overlay="toggleOverlay"
+                  @select-sub="setSubPane"
+                />
+                <span v-if="overlays.length > 1" class="dim ov-multi">叠加 {{ overlays.length }} 项</span>
               </template>
             </div>
             <div v-if="loading" class="chart-msg">加载中…</div>
             <template v-else>
               <template v-if="tab === 'minute'">
                 <div v-if="minuteError" class="chart-msg error">分时：{{ minuteError }}</div>
+                <div v-else-if="isUS && sessionFilter !== 'all' && shownMinutePoints.length === 0" class="chart-msg">
+                  该时段暂无数据（TDX 夜盘无数据），可切「全部」查看
+                </div>
                 <IntradayChart
                   v-else
-                  :points="minutePoints"
+                  :points="shownMinutePoints"
                   :pre-close="preClose"
                   :day-marks="minuteDayMarks"
                   :vol-unit-shares="isEx"
+                />
+              </template>
+              <template v-else-if="isMinuteK">
+                <div v-if="intraError" class="chart-msg error">{{ intraTab?.label }}：{{ intraError }}</div>
+                <div v-else-if="isUS && sessionFilter !== 'all' && shownIntraBars.length === 0" class="chart-msg">
+                  该时段暂无数据（TDX 夜盘无数据），可切「全部」查看
+                </div>
+                <!-- 分钟线首根涨跌相对自身开盘（不拿日级昨收）；vol 单位为股（后端契约），指数分钟线 vol 为 null 显示 0 -->
+                <StockKline
+                  v-else
+                  :bars="shownIntraBars"
+                  :overlays="overlays"
+                  :sub-pane="subPane"
+                  :params="indParams"
+                  :pre-close="null"
+                  :vol-unit-shares="true"
                 />
               </template>
               <template v-else>
@@ -459,11 +537,6 @@ function gotoOptimize() {
         </div>
       </div>
     </div>
-    <IndicatorEditor
-      v-if="showIndEditor"
-      v-model="indParams"
-      @close="showIndEditor = false"
-    />
   </teleport>
 </template>
 
@@ -475,7 +548,7 @@ function gotoOptimize() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1000;
 }
 .dlg {
   width: min(1280px, 96vw);

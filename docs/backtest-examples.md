@@ -10,13 +10,13 @@
 """双均线交叉策略：MA5 上穿 MA20 买入，下穿卖出。"""
 import pandas as pd
 from easy_tdx.backtest import BacktestEngine, Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class DualMACross(Strategy):
     def init(self):
-        self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-        self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+        self.ma5 = self.I(ta.MA, self.data.close, 5)
+        self.ma20 = self.I(ta.MA, self.data.close, 20)
         self.golden = crossover(self.ma5, self.ma20)
         self.death = crossover(self.ma20, self.ma5)
 
@@ -55,12 +55,12 @@ print(f"夏普比率: {result.performance['sharpe']:.2f}")
 ```python
 """MACD 策略：DIF 上穿 DEA 买入，下穿卖出。"""
 from easy_tdx.backtest import BacktestEngine, Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class MACDStrategy(Strategy):
     def init(self):
-        dif, dea, macd_hist = self.I(MyTT.MACD, self.data.close)
+        dif, dea, macd_hist = self.I(ta.MACD, self.data.close)
         self.dif = dif
         self.dea = dea
         self.golden = crossover(dif, dea)
@@ -82,12 +82,12 @@ result = engine.run(df)  # df 包含 OHLCV 数据
 ```python
 """布林带策略：跌破下轨买入，突破上轨卖出，模拟滑点。"""
 from easy_tdx.backtest import BacktestEngine, Strategy
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class BollingerBreakout(Strategy):
     def init(self):
-        upper, mid, lower = self.I(MyTT.BOLL, self.data.close, 20)
+        upper, mid, lower = self.I(ta.BOLL, self.data.close, 20)
         self.upper = upper
         self.lower = lower
 
@@ -115,13 +115,13 @@ result = engine.run(df)
 ```python
 # save as rsi_strategy.py
 from easy_tdx.backtest import Strategy
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class RSIStrategy(Strategy):
     """RSI 超卖超买策略。"""
     def init(self):
-        self.rsi = self.I(MyTT.RSI, self.data.close, 14)
+        self.rsi = self.I(ta.RSI, self.data.close, 14)
 
     def next(self):
         cur_rsi = self.rsi[self._bar_index]

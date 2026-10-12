@@ -105,6 +105,7 @@ export type Category =
   | 'MIN_30'
   | 'MIN_60'
   | 'MIN_120'
+  | 'MIN_240'
 
 export interface BacktestRequest {
   strategy: string
@@ -1113,5 +1114,44 @@ export interface CcpmRankResponse {
   product: string
   product_name: string
   data: CcpmRankRow[]
+  count: number
+}
+
+// ── 通达信公式（POST /api/v1/formula/validate|compute） ─────────────────────
+
+/** 公式语法校验响应（无需行情）。 */
+export interface FormulaValidateResponse {
+  ok: boolean
+  signals: string[]
+  values: string[]
+  error: string | null
+}
+
+// ── K 线图 option（POST /api/v1/chart/kline-option，pyecharts 服务端组装） ──
+
+/** 单条指标的序列化规格（预置列名由 columns() 确定，自定义列未知、后端兜底）。 */
+export interface KlineChartItem {
+  id: string
+  formula: string
+  pane: 'main' | 'sub'
+  display: Record<string, string>
+  colors: Record<string, string>
+  dashed: string[]
+  bar_cols: string[]
+  /** 叠加 K 线列（自定义“叠加K线显示”）：4 个输出列名[开,高,低,收]，缺省画线。 */
+  candle_cols?: string[]
+}
+
+/** K 线图 option 构建请求（K 线由前端发，后端只做计算 + 组装）。 */
+export interface KlineOptionRequest {
+  bars: Array<{ datetime: string; open: number; high: number; low: number; close: number; vol: number }>
+  items: KlineChartItem[]
+  /** Y 轴分割线色（前端当前主题 --border）。 */
+  axis_color: string
+}
+
+/** K 线图 option 响应（tooltip/title 前端合并，不经过网络）。 */
+export interface KlineOptionResponse {
+  option: Record<string, unknown>
   count: number
 }

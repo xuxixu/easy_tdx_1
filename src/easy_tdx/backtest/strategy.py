@@ -34,7 +34,7 @@ class _SeriesAccessor:
         >>> close = data.close
         >>> close[0]      # 当前 bar 的收盘价
         >>> close[-1]     # 前一根 bar 的收盘价
-        >>> ma = MyTT.MA(close.raw, 20)  # 传入 numpy 数组
+        >>> ma = ta.MA(close.raw, 20)  # 传入 numpy 数组
     """
 
     __slots__ = ("_series", "_bar_index")
@@ -72,7 +72,7 @@ class _SeriesAccessor:
         return len(self._series)
 
     def __array__(self) -> NDArray:
-        """允许传入 MyTT 函数（自动解包为 numpy 数组）。"""
+        """允许传入 ta 指标函数（自动解包为 numpy 数组）。"""
         return self._series
 
     @property
@@ -181,8 +181,8 @@ def crossover(
         bool 数组，True 表示发生金叉
 
     Examples:
-        >>> ma5 = MyTT.MA(data.close.raw, 5)
-        >>> ma20 = MyTT.MA(data.close.raw, 20)
+        >>> ma5 = ta.MA(data.close.raw, 5)
+        >>> ma20 = ta.MA(data.close.raw, 20)
         >>> cross = crossover(ma5, ma20)  # ma5 上穿 ma20
         >>> if cross[bar_index]:
         ...     strategy.buy(size=100)
@@ -223,8 +223,8 @@ class Strategy(ABC):
     示例:
         >>> class MyStrategy(Strategy):
         ...     def init(self):
-        ...         self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-        ...         self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+        ...         self.ma5 = self.I(ta.MA, self.data.close, 5)
+        ...         self.ma20 = self.I(ta.MA, self.data.close, 20)
         ...         self.cross = crossover(self.ma5, self.ma20)
         ...
         ...     def next(self):
@@ -304,7 +304,7 @@ class Strategy(ABC):
         ``self._indicators``，可在 ``next()`` 中访问。
 
         Args:
-            func: 指标函数（如 MyTT.MA）
+            func: 指标函数（如 ta.MA）
             *args: 参数（可能是 _SeriesAccessor，会自动解包）
             **kwargs: 关键字参数
 
@@ -312,8 +312,8 @@ class Strategy(ABC):
             指标值数组（numpy ndarray）
 
         Examples:
-            >>> ma5 = self.I(MyTT.MA, self.data.close, 5)
-            >>> macd = self.I(MyTT.MACD, self.data.close, self.data.low, self.data.high)
+            >>> ma5 = self.I(ta.MA, self.data.close, 5)
+            >>> macd = self.I(ta.MACD, self.data.close, self.data.low, self.data.high)
         """
         # 解包 _SeriesAccessor 参数
         unpacked_args = []

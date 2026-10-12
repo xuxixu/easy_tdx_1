@@ -11,7 +11,7 @@ MTM = 当前价 - N 日前价格，最纯粹的动量指标。
     easy-tdx backtest SZ 000001 --strategy-file strategies/mtm_momentum.py --count 2000 --table
 """
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest import Strategy, crossover
 
 
@@ -20,7 +20,7 @@ class MTMMomentumStrategy(Strategy):
 
     def init(self) -> None:
         # MTM 返回 2 个数组: MTM, MTMMA
-        self.mtm, self.mtm_ma = self.I(MyTT.MTM, self.data.close)
+        self.mtm, self.mtm_ma = self.I(ta.MTM, self.data.close)
         # 用 MTM 上穿 0 线作为买入信号，下穿 0 线作为卖出信号
         zeros = [0.0] * len(self.data.close)
         self.buy_signal = crossover(self.mtm, zeros)

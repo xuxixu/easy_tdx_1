@@ -68,7 +68,9 @@ class AsyncTdxConnection:
             except asyncio.TimeoutError as e:
                 await self._close_unlocked()
                 raise TdxConnectionError(f"通信超时: {self.timeout}s") from e
-            except (OSError, asyncio.IncompleteReadError) as e:
+            except (OSError, asyncio.IncompleteReadError, TdxConnectionError) as e:
+                # TdxConnectionError: 帧头/正文解析时流已失步或连接被服务器关闭
+                # （_recv_exact_sock / parse_header 抛出），同样需要作废连接防止复用。
                 await self._close_unlocked()
                 raise TdxConnectionError(f"通信错误: {e}") from e
 

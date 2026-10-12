@@ -179,7 +179,7 @@ class MarketGateway:
         token = normalize_market(market)
 
         if is_ex(token):
-            # 真指数（HSCEI/HSTECH/DJI/IXIC/SPX）：TDX 无，走 HTTP 源
+            # 真指数（HSI/HSCEI/HSTECH/DJI/IXIC/SPX/NDX）：TDX 无，走 HTTP 源
             if _is_http_index(token, code):
                 return await _run_blocking(_http_bars, token, code, category, start, count, adjust)
             client = self._require_ex_client(token)
@@ -424,6 +424,10 @@ def _http_bars(
 
     数据源优先级：AkShare 全历史（已安装时，日/周/月）→ 腾讯快照。
     返回帧带 ``source`` 列（ak/qq），上层据此标注数据来源与延时。
+
+    AkShare（新浪日级）盘中不含今日未收盘 K（港股 10-12 盘中仍只到 10-09），
+    而腾讯 fqkline 盘中即有今日半截 K。Ak 命中时用腾讯尾部补齐新日期，
+    避免 K 线停在上周五、报价却已是周一价的割裂。
     """
     from easy_tdx.sources import ak_index
 
@@ -431,8 +435,20 @@ def _http_bars(
     source = "qq"
     try:
         if cat_name in ("DAY", "WEEK", "MONTH") and ak_index.is_enabled():
-            df = ak_index.fetch_bars(token, code, cat_name, start, count)
+            ak_full = ak_index.fetch_bars(token, code, cat_name, 0, 10000)
             source = "ak"
+            try:
+                from easy_tdx.sources.qq_index import fetch_bars as _qq_fetch_bars
+
+                qq_recent = _qq_fetch_bars(token, code, cat_name, 0, 50)
+                merged = _merge_index_bars(ak_full, qq_recent)
+            except Exception as exc:  # noqa: BLE001 — 补齐失败就用纯 ak，不整体失败
+                logger.warning("腾讯补齐指数K线尾部失败 %s:%s: %s", token, code, exc)
+                merged = ak_full
+            total = len(merged)
+            lo = max(0, total - start - count)
+            hi = max(0, total - start)
+            df = merged.iloc[lo:hi].reset_index(drop=True)
         else:
             raise RuntimeError("akshare 不可用或非日线周期，走腾讯快照")
     except Exception as exc:  # noqa: BLE001 — ak 失败回落腾讯快照，不整体失败
@@ -442,6 +458,35 @@ def _http_bars(
         df = fetch_bars(token, code, cat_name, start, count)
     df = MarketGateway._normalize_columns(df, daily_plus=MarketGateway._is_daily_plus(category))
     return _with_source(df, source)
+
+
+def _merge_index_bars(ak_df: Any, qq_df: Any) -> Any:
+    """合并 AkShare 全历史与腾讯尾部（补今日盘中 K）。
+
+    - 空表直接返回另一边；
+    - 按 ``date`` 去重，腾讯行优先（尾部新日期/今日半截 K 以腾讯为准）；
+    - 按日期升序归还，列顺序与 ak 一致。
+    """
+    import pandas as pd
+
+    if ak_df is None or len(ak_df) == 0:
+        return qq_df
+    if qq_df is None or len(qq_df) == 0:
+        return ak_df
+    if "date" not in ak_df.columns or "date" not in qq_df.columns:
+        return ak_df
+    try:
+        ak_dates = set(ak_df["date"].astype(str))
+        extra = qq_df[~qq_df["date"].astype(str).isin(ak_dates)]
+        if extra.empty:
+            return ak_df
+        merged = pd.concat([ak_df, extra], ignore_index=True)
+        merged["_d"] = pd.to_datetime(merged["date"], errors="coerce")
+        merged = merged.sort_values("_d").drop(columns=["_d"]).reset_index(drop=True)
+        logger.info("指数K线尾部补齐 %d 根（ak %d + qq %d）", len(extra), len(ak_df), len(qq_df))
+        return merged
+    except Exception:  # noqa: BLE001 — 合并失败返回 ak 全量
+        return ak_df
 
 
 def _with_source(df: Any, source: str) -> Any:

@@ -18,7 +18,7 @@ IF(S_SMA>X OR X_LMA<REF(X_LMA,1),X_LMA,DRAWNULL),COLORGREEN;
 ZERO:0;
 ```
 
-### MyTT 等价实现
+### easy_tdx.ta 等价实现
 
 ```python
 def BIAS_SIGNAL(CLOSE, P=10, M=30):
@@ -33,7 +33,7 @@ def BIAS_SIGNAL(CLOSE, P=10, M=30):
 ## 调用方式
 
 ```python
-from easy_tdx.MyTT import BIAS_SIGNAL
+from easy_tdx.ta import BIAS_SIGNAL
 
 # close: numpy 数组，建议至少 60+ 个数据点（M=30 的两倍以确保信号线收敛）
 X, S_SMA, X_LMA = BIAS_SIGNAL(close)
@@ -67,7 +67,7 @@ easy-tdx indicator BIAS_SIGNAL -m SH -c 601088 --count 120 --table
 
 ### 与标准 BIAS 的关系
 
-标准 BIAS 指标（MyTT 已有）直接返回 6/12/24 日乖离率原始值。`BIAS_SIGNAL` 的不同之处在于：
+标准 BIAS 指标（引擎已有）直接返回 6/12/24 日乖离率原始值。`BIAS_SIGNAL` 的不同之处在于：
 
 1. **聚焦单一周期**（M=30），而非多周期并列
 2. **叠加信号线**，S_SMA 和 X_LMA 构成双重平滑，过滤假信号

@@ -84,6 +84,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   MIN_30: '30 分钟',
   MIN_60: '60 分钟',
   MIN_120: '120 分钟',
+  MIN_240: '240 分钟',
 }
 
 const EXECUTION_LABELS: Record<ExecutionMode, string> = {

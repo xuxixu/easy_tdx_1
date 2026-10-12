@@ -21,7 +21,7 @@
 - ``~/.easy_tdx`` 的 SQLite 不在打包范围（用户运行时写入家目录），无需处理。
 """
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 hiddenimports: list[str] = []
 hiddenimports += collect_submodules("uvicorn")
@@ -44,6 +44,22 @@ hiddenimports += collect_submodules("baostock")
 # PyInstaller/hooks/hook-pandas.* 等），无需手动 collect_submodules——
 # 手动全量收集会把 numpy.typing.tests / pandas._numba.kernels 等可选/测试
 # 模块也拖进来，既增加体积又制造噪音 WARNING。
+# 技术指标引擎 TA-Lib（easy_tdx.ta 的内核）是 C 扩展。
+# 各平台轮子形态不同：Windows 官方轮子把 C 库**静态链接**进
+# _ta_lib*.pyd（自包含，无独立 DLL），部分平台则拆出 libta_lib*.so，
+# 那种情况必须显式带上，否则运行期 ImportError: cannot open shared object。
+# 因此这里「有多少收多少」，只在包本身缺失时硬失败——静默产出一个指标功能
+# 全废的 EXE，比打包失败难排查得多。
+# talib.abstract / talib.stream / talib.deprecated 由 talib/__init__ 懒加载，
+# 静态分析扫不到，需显式声明。
+if importlib.util.find_spec("talib") is None:
+    raise SystemExit(
+        "打包错误: 未找到 ta-lib——技术指标引擎 easy_tdx.ta 需要它。"
+        '请先执行 pip install ta-lib（或 pip install -e ".[web,packaging,baostock]"）'
+        "再运行 pyinstaller easy_tdx.spec"
+    )
+binaries = collect_dynamic_libs("talib")
+hiddenimports += collect_submodules("talib")
 # 系统托盘（打包态专用）：pystray 在 Windows 用 win32 API，Pillow 的
 # 图像格式插件用 importlib 动态加载，两者都需要显式声明。
 hiddenimports += collect_submodules("pystray")
@@ -75,11 +91,10 @@ else:
     print("WARNING: web-ui/dist 不存在，EXE 将无前端界面！请先 npm run build")
 
 block_cipher = None
-
 a = Analysis(
     ["src/easy_tdx/__main__.py"],
     pathex=["src"],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

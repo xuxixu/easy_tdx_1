@@ -8,14 +8,14 @@ RSI < 30（超卖）买入，RSI > 70（超买）卖出。
 """
 
 from easy_tdx.backtest import Strategy
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class RSIStrategy(Strategy):
     """RSI 超买超卖反转策略。"""
 
     def init(self) -> None:
-        self.rsi = self.I(MyTT.RSI, self.data.close, 14)
+        self.rsi = self.I(ta.RSI, self.data.close, 14)
 
     def next(self) -> None:
         cur_rsi = self.rsi[self._bar_index]

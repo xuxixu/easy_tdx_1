@@ -20,7 +20,7 @@ if hasattr(sys.stdout, "reconfigure"):
 import pandas as pd  # noqa: E402
 
 from easy_tdx import KlineCategory, Market, TdxClient  # noqa: E402
-from easy_tdx.MyTT import MA  # noqa: E402
+from easy_tdx.ta import MA  # noqa: E402
 from easy_tdx.backtest import BacktestEngine, Strategy  # noqa: E402
 from easy_tdx.backtest.attribution import AttributionAnalyzer  # noqa: E402
 from easy_tdx.backtest.execution import TWAPExecution  # noqa: E402

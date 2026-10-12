@@ -11,7 +11,7 @@ DMI 是唯一直接衡量趋势强度的指标：ADX 区分"有趋势可跟"和"
     easy-tdx backtest SZ 000001 --strategy-file strategies/dmi_trend.py --count 2000 --table
 """
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest import Strategy
 
 
@@ -21,7 +21,7 @@ class DMITrendStrategy(Strategy):
     def init(self) -> None:
         # DMI 返回 4 个数组: PDI, MDI, ADX, ADXR
         self.pdi, self.mdi, self.adx, _ = self.I(
-            MyTT.DMI, self.data.close, self.data.high, self.data.low,
+            ta.DMI, self.data.close, self.data.high, self.data.low,
         )
 
     def next(self) -> None:

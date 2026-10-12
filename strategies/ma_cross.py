@@ -8,15 +8,15 @@ MA5 上穿 MA20（金叉）全仓买入，MA5 下穿 MA20（死叉）全部卖�
 """
 
 from easy_tdx.backtest import Strategy, crossover
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class MACrossStrategy(Strategy):
     """双均线交叉策略。"""
 
     def init(self) -> None:
-        self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-        self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+        self.ma5 = self.I(ta.MA, self.data.close, 5)
+        self.ma20 = self.I(ta.MA, self.data.close, 20)
         self.golden = crossover(self.ma5, self.ma20)
         self.death = crossover(self.ma20, self.ma5)
 

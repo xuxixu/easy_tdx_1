@@ -11,7 +11,7 @@ TRIX 对收盘价做三次 EMA 平滑再算变化率，比 MACD 多一层过滤�
     easy-tdx backtest SZ 000001 --strategy-file strategies/trix_cross.py --count 2000 --table
 """
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest import Strategy, crossover
 
 
@@ -20,7 +20,7 @@ class TRIXCrossStrategy(Strategy):
 
     def init(self) -> None:
         # TRIX 返回 2 个数组: TRIX, TRMA（信号线）
-        self.trix, self.trma = self.I(MyTT.TRIX, self.data.close)
+        self.trix, self.trma = self.I(ta.TRIX, self.data.close)
         self.golden = crossover(self.trix, self.trma)
         self.death = crossover(self.trma, self.trix)
 

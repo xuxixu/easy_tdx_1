@@ -11,7 +11,7 @@ MFI 是成交量的 RSI——把量价关系压缩成一个振荡器，比纯价
     easy-tdx backtest SZ 000001 --strategy-file strategies/mfi_volume.py --count 2000 --table
 """
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest import Strategy
 
 
@@ -20,7 +20,7 @@ class MFIVolumeStrategy(Strategy):
 
     def init(self) -> None:
         self.mfi = self.I(
-            MyTT.MFI, self.data.close, self.data.high, self.data.low, self.data.vol,
+            ta.MFI, self.data.close, self.data.high, self.data.low, self.data.vol,
         )
 
     def next(self) -> None:

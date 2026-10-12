@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest.strategy import Strategy
 
 # ── 辅助函数 ─────────────────────────────────────────────────────────────────────
@@ -133,8 +133,8 @@ class TestExtractFactorSignals:
 
         class MAStrategy(Strategy):
             def init(self) -> None:
-                self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-                self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+                self.ma5 = self.I(ta.MA, self.data.close, 5)
+                self.ma20 = self.I(ta.MA, self.data.close, 20)
 
             def next(self) -> None:
                 if self._bar_index < 1:

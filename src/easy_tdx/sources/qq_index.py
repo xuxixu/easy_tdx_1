@@ -14,6 +14,8 @@ goods_kline 直接取返回 0 行。只有恒生指数（HSI）是真的。
 实时报价           新浪 hq.sinajs     rt_hkHSI/rt_hkHSCEI/rt_hkHSTECH +
                                      gb_dji/gb_ixic/gb_inx（注意标普是 inx）
 实时报价（备）     腾讯 qt.gtimg      r_hkHSI/r_hkHSCEI + ff_DJI/ff_INX/ff_CCMP
+实时报价（三备）   东财现货(AkShare)  stock_hk_index_spot_em/index_global_spot_em，
+                                     新浪腾讯双失败时启用（`EASY_TDX_AKSHARE=0` 可关）
 日/周/月K          腾讯 fqkline       hkHSI/hkHSCEI/hkHSTECH/usDJI/usIXIC/usINX
 分时               腾讯 minute/query  hkHSI 全天逐分钟点
 ================  ================  ====================================
@@ -101,11 +103,11 @@ def _http_get(url: str) -> bytes:
 
 
 def fetch_quote(market: str, code: str) -> dict[str, Any]:
-    """取真指数实时报价（新浪主，腾讯备）。
+    """取真指数实时报价（新浪主 → 腾讯备 → 东财现货三备）。
 
     Returns:
         ``{market, code, name, price, pre_close, open, high, low, amount}``；
-        失败抛 ``RuntimeError``。
+        三源全失败抛 ``RuntimeError``。
     """
     from easy_tdx.markets import normalize_market
 
@@ -115,14 +117,27 @@ def fetch_quote(market: str, code: str) -> dict[str, Any]:
         return _sina_quote(key)
     except Exception as exc:  # noqa: BLE001 — 主源失败自动切备源
         logger.warning("新浪指数报价失败 %s%s，切腾讯: %s", token, code, exc)
-    return _qq_quote(key)
+    try:
+        return _qq_quote(key)
+    except Exception as exc:  # noqa: BLE001 — 备源失败切三备
+        logger.warning("腾讯指数报价失败 %s%s，切东财现货: %s", token, code, exc)
+    from easy_tdx.sources import em_index
+
+    return em_index.fetch_quote(token, key[1])
 
 
 def _sina_quote(key: tuple[str, str]) -> dict[str, Any]:
     sina_code = SINA_MAP[key]
     raw = _http_get(f"https://hq.sinajs.cn/list={sina_code}").decode("gbk", errors="replace")
-    # var hq_str_rt_hkHSI="HSI,恒生指数,昨收,今开,最高,最低,今收,涨跌额,涨跌幅,...";
-    # var hq_str_gb_ixic="纳斯达克,今收,涨跌幅,时间,涨跌额,昨收,最高,最低,...";
+    # 实测 2026-10-12（港股盘中）：
+    #   rt_hkHSI="HSI,恒生指数,今开,昨收,最高,最低,今收,涨跌额,涨跌幅,..."
+    #   e.g. "HSI,恒生指数,24434.930,24211.350,24455.950,24234.190,24238.889,27.540,0.110,..."
+    #   其中 今收-昨收==涨跌额（24238.889-24211.350=27.539），与腾讯 r_hkHSI
+    #  （今收/昨收/今开）交叉验证一致。之前把 parts[2]/parts[3] 当成昨收/今开
+    #   写反了，导致现价正确但涨跌幅全错（如 -0.78% vs 实际 +0.13%）。
+    # var hq_str_gb_ixic="纳斯达克,今收,涨跌幅,时间,涨跌额,今开,最高,最低,...,昨收,...";
+    #   e.g. gb_dji 现 51654.9492/涨跌 423.31/开 51258.9492/昨 51231.6406，
+    #   昨收=今收-涨跌额（51654.9492-423.31=51231.6392），parts[5] 是今开不是昨收。
     start = raw.find('"')
     end = raw.rfind('"')
     if start < 0 or end <= start:
@@ -132,8 +147,8 @@ def _sina_quote(key: tuple[str, str]) -> dict[str, Any]:
         raise RuntimeError(f"新浪无数据: {sina_code}")
     token, code = key
     if token == "HK":
-        # HSI,恒生指数,昨收,今开,最高,最低,今收,涨跌额,涨跌幅
-        name, pre, opn, high, low, close = (
+        # HSI,恒生指数,今开,昨收,最高,最低,今收,涨跌额,涨跌幅
+        name, opn, pre, high, low, close = (
             parts[1],
             parts[2],
             parts[3],
@@ -143,8 +158,8 @@ def _sina_quote(key: tuple[str, str]) -> dict[str, Any]:
         )
         amount = parts[12] if len(parts) > 12 else 0
     else:
-        # 纳斯达克,今收,涨跌幅,时间,涨跌额,昨收,最高,最低
-        name, close, _, _, _, pre, high, low = (
+        # 纳斯达克,今收,涨跌幅,时间,涨跌额,今开,最高,最低
+        name, close, _, _, chg, opn, high, low = (
             parts[0],
             parts[1],
             parts[2],
@@ -154,7 +169,12 @@ def _sina_quote(key: tuple[str, str]) -> dict[str, Any]:
             parts[6],
             parts[7],
         )
-        opn = parts[1]
+        # 昨收在尾部（如 parts[26]），各标的位置不完全统一；
+        # 用 今收-涨跌额 反推，保证与新浪自带的涨跌额自洽。
+        try:
+            pre = str(float(close) - float(chg))
+        except (ValueError, TypeError):
+            pre = parts[5]
         amount = 0
     return {
         "market": token,

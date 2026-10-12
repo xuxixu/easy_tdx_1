@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from easy_tdx import MyTT
+from easy_tdx import ta
 from easy_tdx.backtest.engine import BacktestEngine
 from easy_tdx.backtest.execution import TWAPExecution, VWAPExecution
 from easy_tdx.backtest.slippage import FixedSlippage, SquareRootSlippage
@@ -38,8 +38,8 @@ class MACrossStrategy(Strategy):
     """Simple MA crossover strategy."""
 
     def init(self):
-        self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-        self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+        self.ma5 = self.I(ta.MA, self.data.close, 5)
+        self.ma20 = self.I(ta.MA, self.data.close, 20)
         self.cross_up = False
         self.cross_down = False
 
@@ -283,8 +283,8 @@ class PositionAwareStrategy(Strategy):
     """Strategy that checks position before trading (the common pattern)."""
 
     def init(self):
-        self.ma5 = self.I(MyTT.MA, self.data.close, 5)
-        self.ma20 = self.I(MyTT.MA, self.data.close, 20)
+        self.ma5 = self.I(ta.MA, self.data.close, 5)
+        self.ma20 = self.I(ta.MA, self.data.close, 20)
         self.cross_up = False
         self.cross_down = False
 

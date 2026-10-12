@@ -41,7 +41,7 @@ ruff check src/ tests/               # E/F/I/UP 规则
 ruff format --check src/ tests/
 ```
 
-mypy/ruff 均排除 `src/easy_tdx/exchange_margin.py`；`MyTT.py` 有手写 `MyTT.pyi` stub 保持 strict 检查。
+mypy/ruff 均排除 `src/easy_tdx/exchange_margin.py`；`ta/` 包全量带类型标注，无需额外 stub（旧版 `MyTT.py` 依赖手写 `MyTT.pyi` 保持 strict，该存根已随引擎更换删除）。
 
 本地一键门禁（等价 CI 三 job 的本地版）：
 

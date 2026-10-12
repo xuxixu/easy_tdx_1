@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+import talib
 
 from easy_tdx.formula import FormulaError, compile_formula
 
@@ -92,7 +93,7 @@ def test_series_aliases():
 
 
 def test_ma_matches_mytt():
-    from easy_tdx.MyTT import MA
+    from easy_tdx.ta import MA
 
     df = _df(50)
     res = compile_formula("均线: MA(C, 5);").compute(df)
@@ -113,7 +114,7 @@ def test_cross_semantics():
     assert set(np.unique(golden[np.isfinite(golden)])).issubset({0.0, 1.0})
     assert golden.sum() >= 0  # 结构完整（趋势数据至少存在或为 0）
     # CROSS 手工复算对拍
-    from easy_tdx.MyTT import CROSS, MA
+    from easy_tdx.ta import CROSS, MA
 
     fast = MA(df["close"].to_numpy(), 3)
     slow = MA(df["close"].to_numpy(), 10)
@@ -284,9 +285,144 @@ def test_ref_positive_still_works():
 
 
 def test_mytt_internal_negative_ref_unaffected():
-    """MyTT 库内直调（ICHIMOKU 迟行带）不经公式白名单，负移位仍可用。"""
-    from easy_tdx.MyTT import REF
+    """引擎内直调（ICHIMOKU 迟行带）不经公式白名单，负移位仍可用。"""
+    from easy_tdx.ta import REF
 
     close = np.arange(5, dtype=float)
     out = REF(close, -1)
     assert out[0] == pytest.approx(1.0)
+
+
+# ── 预置指标公式化（技术指标管理：六组预置 = 锁定的通达信公式） ─────────────
+# 以下公式文本与前端 presetFormulas.ts 的生成口径保持一致（参数不同、
+# 结构相同）；改动任一侧请同步另一侧。
+
+
+def _big_df() -> pd.DataFrame:
+    return _df(300, seed=11)
+
+
+def test_preset_ma_matches_mytt():
+    from easy_tdx import ta
+
+    df = _big_df()
+    res = compile_formula("MA5: MA(C,5); MA20: MA(C,20);").compute(df)
+    assert res.values == ["MA5", "MA20"]
+    np.testing.assert_allclose(res.columns["MA5"], ta.MA(df["close"].values, 5), equal_nan=True)
+    np.testing.assert_allclose(res.columns["MA20"], ta.MA(df["close"].values, 20), equal_nan=True)
+
+
+def test_preset_ema_matches_mytt():
+    from easy_tdx import ta
+
+    df = _big_df()
+    res = compile_formula("EMA12: EMA(C,12); EMA26: EMA(C,26);").compute(df)
+    np.testing.assert_allclose(res.columns["EMA12"], ta.EMA(df["close"].values, 12))
+    np.testing.assert_allclose(res.columns["EMA26"], ta.EMA(df["close"].values, 26))
+
+
+def test_preset_boll_matches_mytt():
+    from easy_tdx import ta
+
+    df = _big_df()
+    res = compile_formula(
+        "BOLL_MID: MA(C,20);BOLL_UPPER: BOLL_MID+2*STD(C,20);BOLL_LOWER: BOLL_MID-2*STD(C,20);"
+    ).compute(df)
+    upper, mid, lower = ta.BOLL(df["close"].values, N=20, P=2)
+    # ta 侧经 RD(3位小数)舍入，公式侧全精度：atol=1e-3 对齐
+    np.testing.assert_allclose(res.columns["BOLL_MID"], mid, atol=1e-3, equal_nan=True)
+    np.testing.assert_allclose(res.columns["BOLL_UPPER"], upper, atol=1e-3, equal_nan=True)
+    np.testing.assert_allclose(res.columns["BOLL_LOWER"], lower, atol=1e-3, equal_nan=True)
+
+
+def _ewm(x: np.ndarray, alpha: float) -> np.ndarray:
+    """通达信 ``SMA(X,N,M)`` 的独立参照（alpha = M/N 的递归平滑）。
+
+    pandas ``ewm`` 对输入里的 NaN 是**跳过并沿用上一值**（首个有效值之前
+    仍为 NaN），公式引擎的 ``SMA`` 走的是同一条路径，参照必须保持一致。
+    """
+    return pd.Series(x).ewm(alpha=alpha, adjust=False).mean().to_numpy()
+
+
+def test_preset_macd_matches_formula_semantics():
+    """MACD 预置按**通达信公式语义**核对（EMA 链 + 柱 ×2）。
+
+    注意与 :func:`test_formula_vs_talib_indicator_divergence_is_intentional` 的
+    分工：这里锁的是公式引擎「按公式算出什么」，不是与 TA-Lib 指标一致。
+    """
+    df = _big_df()
+    res = compile_formula(
+        "DIF: EMA(C,12)-EMA(C,26); DEA: EMA(DIF,9); MACD_HIST: (DIF-DEA)*2;"
+    ).compute(df)
+    close = df["close"].to_numpy(dtype=float)
+    dif = talib.EMA(close, 12) - talib.EMA(close, 26)
+    dea = talib.EMA(dif, 9)
+    np.testing.assert_allclose(res.columns["DIF"], dif, equal_nan=True)
+    np.testing.assert_allclose(res.columns["DEA"], dea, equal_nan=True)
+    np.testing.assert_allclose(res.columns["MACD_HIST"], (dif - dea) * 2, equal_nan=True)
+
+
+def test_preset_kdj_matches_formula_semantics():
+    """KDJ 预置按通达信 ``SMA(RSV,3,1)`` 核对（alpha = 1/3 的递归平滑）。"""
+    df = _big_df()
+    res = compile_formula(
+        "RSV := (C-LLV(L,9))/(HHV(H,9)-LLV(L,9))*100;K: SMA(RSV,3,1); D: SMA(K,3,1); J: 3*K-2*D;"
+    ).compute(df)
+    assert res.values == ["K", "D", "J"]
+    close = df["close"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    high = df["high"].to_numpy(dtype=float)
+    llv9 = pd.Series(low).rolling(9).min().to_numpy()
+    hhv9 = pd.Series(high).rolling(9).max().to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rsv = (close - llv9) / (hhv9 - llv9) * 100.0
+    k = _ewm(rsv, 1 / 3)
+    d = _ewm(k, 1 / 3)
+    np.testing.assert_allclose(res.columns["K"], k, equal_nan=True)
+    np.testing.assert_allclose(res.columns["D"], d, equal_nan=True)
+    np.testing.assert_allclose(res.columns["J"], 3 * k - 2 * d, equal_nan=True)
+
+
+def test_preset_rsi_matches_formula_semantics():
+    """RSI 预置按通达信 ``SMA(MAX(UD,0),N,1)/SMA(ABS(UD),N,1)*100`` 核对。"""
+    df = _big_df()
+    res = compile_formula(
+        "UD := C-REF(C,1); RSI6: SMA(MAX(UD,0),6,1)/SMA(ABS(UD),6,1)*100;"
+    ).compute(df)
+    close = df["close"].to_numpy(dtype=float)
+    ud = np.concatenate(([np.nan], np.diff(close)))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        expected = _ewm(np.maximum(ud, 0.0), 1 / 6) / _ewm(np.abs(ud), 1 / 6) * 100.0
+    np.testing.assert_allclose(res.columns["RSI6"], expected, atol=1e-9, equal_nan=True)
+
+
+def test_formula_vs_talib_indicator_divergence_is_intentional():
+    """公式方言与 TA-Lib 融合指标**不**一致——这是设计结果，勿"修复"。
+
+    TA-Lib 的 ``MACD``/``KDJ``/``RSI`` 是 C 融合实现，内部 EMA 以更长的
+    复合回看期做 SMA 播种，无法由 ``talib.EMA`` 等原语精确复现。因此：
+
+    - ``easy-tdx indicator MACD``（Web ``/api/indicator``、指标选择器）
+      走 :mod:`easy_tdx.ta` 的 **TA-Lib 原生口径**；
+    - ``easy-tdx formula`` 走**通达信公式语义**。
+
+    两者在预热段长度与数值上都有可见差异（柱值另差 2 倍：公式 ×2、TA-Lib ×1）。
+    本测试把该差异钉死，防止后人误以为二者应当一致而去"对齐"。
+    """
+    from easy_tdx import ta
+
+    df = _big_df()
+    res = compile_formula("DIF: EMA(C,12)-EMA(C,26);").compute(df)
+    dif, _, _ = ta.MACD(df["close"].to_numpy(dtype=float), SHORT=12, LONG=26, M=9)
+    formula, indicator = res.columns["DIF"], dif
+    # 预热起点不同：公式 EMA(26) 第 25 根出值，TA-Lib MACD 第 33 根出值
+    assert np.argmax(np.isfinite(formula)) < np.argmax(np.isfinite(indicator))
+    both = np.isfinite(formula) & np.isfinite(indicator)
+    assert both.any()
+    assert not np.allclose(formula[both], indicator[both], rtol=1e-3)
+    # MA/EMA 等原语两边同源，仍然逐位一致（对照：并非全面背离）
+    assert np.allclose(
+        compile_formula("MA20: MA(C,20);").compute(df).columns["MA20"],
+        ta.MA(df["close"].to_numpy(dtype=float), 20),
+        equal_nan=True,
+    )

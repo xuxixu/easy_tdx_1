@@ -155,7 +155,7 @@ function onSave() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: 1000;
 }
 .ed {
   width: min(560px, 92vw);

@@ -9,7 +9,7 @@
 """
 
 from easy_tdx.backtest import Strategy
-from easy_tdx import MyTT
+from easy_tdx import ta
 
 
 class BIAStrategy(Strategy):
@@ -17,7 +17,7 @@ class BIAStrategy(Strategy):
 
     def init(self) -> None:
         # BIAS 返回 3 个数组: BIAS6, BIAS12, BIAS24，只取 6 日
-        self.bias6, _, _ = self.I(MyTT.BIAS, self.data.close, 6)
+        self.bias6, _, _ = self.I(ta.BIAS, self.data.close, 6)
 
     def next(self) -> None:
         val = float(self.bias6[self._bar_index])

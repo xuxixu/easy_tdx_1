@@ -21,7 +21,7 @@ import pytest
 from easy_tdx.backtest.engine import BacktestEngine
 from easy_tdx.backtest.strategies import get_registry
 from easy_tdx.backtest.strategy import Strategy
-from easy_tdx.MyTT import MA
+from easy_tdx.ta import MA
 
 # ── 合成行情（确定性） ───────────────────────────────────────────────────────
 
@@ -118,13 +118,6 @@ def _run_both(
 # ── 对拍：全部内置策略 × 默认参数 ───────────────────────────────────────────
 
 
-#: 已知「默认参数下不会交易」的策略：MyTT 的 WR 是 0~100 刻度（100=超卖），
-#: 而 wr_reversal 默认阈值为 -80/-20（通达信 -100~0 惯例），entry 恒 False。
-#: 这是策略的既有行为（两路径一致地不交易），语义修正不属于向量化改动范围；
-#: 对拍改用非默认参数覆盖（见 test_key_strategies_alternate_params）。
-_DEAD_DEFAULT_STRATEGIES = {"wr_reversal"}
-
-
 @pytest.mark.parametrize("name", get_registry().names())
 def test_all_builtin_strategies_default_params(name: str) -> None:
     """全部内置策略：向量化与逐 bar 输出逐位一致（对拍核心保证）。"""
@@ -136,8 +129,7 @@ def test_all_builtin_strategies_default_params(name: str) -> None:
         loop, vec = _run_both(name, _synthetic_ohlcv(seed=7, base=50.0))
     if len(loop.trades) == 0:
         loop, vec = _run_both(name, _oscillating_ohlcv())
-    if name not in _DEAD_DEFAULT_STRATEGIES:
-        assert len(loop.trades) > 0, f"{name} 在三组行情下均无交易，对拍无效"
+    assert len(loop.trades) > 0, f"{name} 在三组行情下均无交易，对拍无效"
     _assert_results_identical(loop, vec)
 
 
@@ -165,19 +157,16 @@ def test_key_strategies_alternate_params(name: str, params: dict[str, Any]) -> N
     _assert_results_identical(loop, vec)
 
 
-def test_wr_reversal_parity_with_skip_bounds() -> None:
-    """wr_reversal 的向量化机制对拍（需 skip_bounds 越过死的默认边界）。
+def test_wr_reversal_default_params_now_trade() -> None:
+    """wr_reversal 默认参数已可直接触发（引擎换成 TA-Lib WILLR 刻度所致）。
 
-    其阈值参数边界为负数区间（-100~-40 / -60~0），而 MyTT 的 WR 是 0~100
-    刻度——任何合法参数都无法触发交易（策略现状如此，两路径行为一致）。
-    为了让它的掩码/状态机路径也被对拍覆盖，用 skip_bounds 传 0~100 刻度内
-    的阈值绕过边界（寻优器同款机制）。
+    历史包袱：``WR`` 曾是 0~100 刻度（100=超卖），而本策略阈值按通达信
+    -100~0 惯例取 -80/-20，两者刻度相反 → entry 恒 False，任何合法参数都
+    无法成交，只能靠 ``skip_bounds`` 绕边界才能对拍。引擎改用 TA-Lib 原生
+    ``WILLR``（0=超买 / -100=超卖）后，策略阈值与指标刻度重新对齐。
     """
-    df = _oscillating_ohlcv()
-    loop, vec = _run_both(
-        "wr_reversal", df, {"n": 14, "oversold": 40, "overbought": 60}, skip_bounds=True
-    )
-    assert len(loop.trades) > 0
+    loop, vec = _run_both("wr_reversal", _oscillating_ohlcv())
+    assert len(loop.trades) > 0, "默认参数下即应成交，无需任何绕行"
     _assert_results_identical(loop, vec)
 
 

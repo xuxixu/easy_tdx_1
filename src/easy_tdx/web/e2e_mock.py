@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import time
 import zlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -78,6 +78,39 @@ def _market_str(market: Any) -> str:
 def _seed(market: Any, code: str) -> int:
     """(market, code) → 确定性随机种子（CRC32）。"""
     return zlib.crc32(f"{_market_str(market)}{code}".encode())
+
+
+def _minute_timestamps(date_int: int, n: int = 240) -> list[pd.Timestamp]:
+    """A 股分时的 n 个时间戳：0-119 = 09:30~11:29，120-239 = 13:00~14:59。
+
+    与真实客户端 :func:`easy_tdx._df._add_minute_datetime` 的口径一致——**必须
+    跳过午休**。此前 mock 用 ``t0 + i 分钟`` 连续累加，会把 11:30~13:00 这段
+    非交易时间也画进图里，分时图的横轴因此是错的。
+    """
+    base = pd.Timestamp(year=date_int // 10000, month=(date_int // 100) % 100, day=date_int % 100)
+    minutes = list(range(9 * 60 + 30, 9 * 60 + 30 + 120)) + list(range(13 * 60, 13 * 60 + 120))
+    return [base + pd.Timedelta(minutes=m) for m in minutes[:n]]
+
+
+def _synth_minute_df(market: Any, code: str, date_int: int) -> pd.DataFrame:
+    """某一交易日的合成分时（datetime / price / vol）。
+
+    种子带上 date_int：多日分时（StockDialog 的 1/3/5 日）每天必须长得不一样，
+    否则天与天的曲线完全重合，看不出多日拼接是否正确。
+    """
+    rng = np.random.default_rng(_seed(market, code) ^ date_int)
+    pre_close = float(_synth_closes(market, code, 30)[-2])
+    prices = pre_close * np.cumprod(1.0 + rng.normal(0.0, 0.0015, 240))
+    return pd.DataFrame(
+        {
+            # 用 pd.Timestamp 而非字符串：DataFrameResponse 走 value.isoformat()
+            # 序列化，产出 "YYYY-MM-DDTHH:MM:SS"（前端 IntradayChart 按
+            # slice(11,16) 取时分，与真实 /minute 完全同构）。
+            "datetime": _minute_timestamps(date_int),
+            "price": prices,
+            "vol": rng.integers(100, 9000, 240).astype(float),
+        }
+    )
 
 
 def _display_name(market: Any, code: str) -> str:
@@ -215,19 +248,18 @@ class MockTdxClient:
         return _bars_to_legacy_cols(df, _is_daily_category(category))
 
     async def get_minute_time_data(self, market: Any, code: str) -> pd.DataFrame:
-        """今日分时（240 点：价格围绕昨收随机游走 + 每分钟量）。"""
-        rng = np.random.default_rng(_seed(market_enum_key(market), code) ^ 0xCAFE)
-        pre_close = float(_synth_closes(market_enum_key(market), code, 30)[-2])
-        prices = pre_close * np.cumprod(1.0 + rng.normal(0.0, 0.0015, 240))
-        t0 = datetime.now().replace(hour=9, minute=30, second=0, microsecond=0)
-        times = [t0 + timedelta(minutes=i) for i in range(240)]
-        return pd.DataFrame(
-            {
-                "datetime": [t.strftime("%H:%M") for t in times],
-                "price": prices,
-                "vol": rng.integers(100, 9000, 240).astype(float),
-            }
-        )
+        """最近交易日分时（240 点：价格围绕昨收随机游走 + 每分钟量）。"""
+        today = int(datetime.now().strftime("%Y%m%d"))
+        return _synth_minute_df(market_enum_key(market), code, today)
+
+    async def get_history_minute_time_data(self, market: Any, code: str, date: int) -> pd.DataFrame:
+        """历史某日分时（/minute/history）。
+
+        此前 mock 没有这个方法，多日分时（StockDialog 的 1/3/5 日）直接抛
+        ``'MockTdxClient' object has no attribute 'get_history_minute_time_data'``，
+        分时图这条链路在 E2E 里完全没被覆盖到。
+        """
+        return _synth_minute_df(market_enum_key(market), code, date)
 
     async def get_security_quotes(self, stocks: list[tuple[Any, str]]) -> pd.DataFrame:
         """批量五档快照（POST /quotes + QuoteStreamer SSE 共用）。"""

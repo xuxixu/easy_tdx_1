@@ -681,7 +681,7 @@ const portfolioTrades = computed<PortfolioTrade[]>(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1000;
 }
 .modal {
   background: var(--bg-panel);

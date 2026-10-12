@@ -43,6 +43,7 @@
 
 - [indicator-zhuoyao.md](./indicator-zhuoyao.md) — 捉妖大师（ZHUOYAO）多周期 ROC 共振详解
 - [indicator-bias-signal.md](./indicator-bias-signal.md) — 30 日乖离率信号（BIAS_SIGNAL）详解
+- [dzh-indicators.md](./dzh-indicators.md) — 大智慧指标包：62 个桌面指标转自定义指标对照表（一键导入）
 
 ## 开发者
 
@@ -93,6 +94,7 @@ quantitative-guide
 quantitative-advanced
 indicator-zhuoyao
 indicator-bias-signal
+dzh-indicators
 architecture
 development
 packaging
