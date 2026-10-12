@@ -41,6 +41,9 @@ web-ui/playwright-report/
 # ZCode agent 会话目录（本地，不入库）
 .zcode/
 
+# WorkBuddy agent 工作目录（本地会话/记忆，不入库；与 .claude/ .omc/ 同一惯例）
+.workbuddy/
+
 # 本地 akshare 探测脚本（根目录临时试验用，非库代码）
 _ak*.py
 
