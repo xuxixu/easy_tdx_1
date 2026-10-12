@@ -47,15 +47,23 @@ class _SeriesAccessor:
         """获取相对索引的值。
 
         Args:
-            key: 0=当前值, -1=前一根, -2=前两根,依此类推
+            key: 0=当前值, -1=前一根, -2=前两根,依此类推。**不支持正索引**：
+                正索引会读到未来 bar，构成前视偏差。
 
         Returns:
-            对应位置的 float 值；越界（回测早期数据不足）返回 ``nan``，
-            而非抛 IndexError —— 策略里写 ``close[-1]`` 在首根 bar 不会崩溃，
-            与 warmup 机制配合避免指标预热期误信号。
+            对应位置的 float 值；越界（回测早期数据不足）或正索引（未来数据）
+            返回 ``nan``，而非抛 IndexError —— 策略里写 ``close[-1]`` 在首根
+            bar 不会崩溃，与 warmup 机制配合避免指标预热期误信号。
+
+        Note:
+            此前正索引会静默返回**下一根** bar 的值，等于把前视偏差做成了 API
+            的隐式行为（只在数组末尾才偶然抛 IndexError）。现统一按"不可用"
+            处理返回 nan，杜绝自定义策略无意间用到未来数据。
         """
+        if key > 0:
+            return float("nan")
         idx = self._bar_index + key
-        if idx < 0:
+        if idx < 0 or idx >= len(self._series):
             return float("nan")
         return float(self._series[idx])
 

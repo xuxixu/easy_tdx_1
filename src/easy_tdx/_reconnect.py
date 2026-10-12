@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import Awaitable, Callable
 
@@ -58,20 +59,43 @@ _HEARTBEAT_RETRYABLE: tuple[type[BaseException], ...] = (
 # 同一进程内两次全量测速的最小间隔（秒）。
 _FAILOVER_PING_THROTTLE_SEC: float = 30.0
 
-# 上次全量测速完成的时间戳（monotonic）；初始 0 表示"从未测过"。
-_last_failover_ts: float = 0.0
+# 上次全量测速完成的时间戳（monotonic）。初值必须是 -inf：time.monotonic() 是
+# **开机以来**的秒数，用 0.0 会导致机器刚启动的头 _FAILOVER_PING_THROTTLE_SEC
+# 秒内 (monotonic() - 0.0) < 30 恒为真，所有跨主机故障转移被静默跳过
+# （容器/CI 极易命中）。
+_last_failover_ts: float = float("-inf")
+
+# 保护「节流判断 + 标记」的原子性：原实现的 check-then-act 跨函数非原子，
+# 并发请求可同时通过节流检查，各自发起一轮对全部候选主机的测速——正是
+# 本模块想避免的"惊群"。
+_failover_lock = threading.Lock()
 
 
 def _throttled() -> bool:
     """距上次全量测速是否仍在节流窗口内（True=应跳过本次测速）。"""
-    global _last_failover_ts
     return (time.monotonic() - _last_failover_ts) < _FAILOVER_PING_THROTTLE_SEC
+
+
+def _begin_failover() -> bool:
+    """原子地抢占一次全量测速资格。
+
+    返回 True 表示调用方应发起测速（并在结束后调 :func:`_mark_failover_done`）；
+    False 表示仍在节流窗口内，应放弃本次切换。
+    """
+    global _last_failover_ts
+    with _failover_lock:
+        if _throttled():
+            return False
+        # 立即打时间戳：既标记了窗口起点，也让并发调用方立刻看到"已被占用"
+        _last_failover_ts = time.monotonic()
+        return True
 
 
 def _mark_failover_done() -> None:
     """记录"本次全量测速已完成"，开启新一轮节流窗口。"""
     global _last_failover_ts
-    _last_failover_ts = time.monotonic()
+    with _failover_lock:
+        _last_failover_ts = time.monotonic()
 
 
 # 测速函数的统一签名：(hosts, port, timeout) -> [(host, latency_seconds), ...]
@@ -105,7 +129,7 @@ def select_best_host_sync(
         选中的新主机（已 ``save_fn`` 持久化）；若无更优选择或处于节流窗口
         内，返回 ``None``（调用方保持原 host）。
     """
-    if _throttled():
+    if not _begin_failover():
         logging.getLogger(__name__).debug(
             "跨主机故障转移：处于 %ss 节流窗口内，跳过本次测速",
             _FAILOVER_PING_THROTTLE_SEC,
@@ -114,7 +138,7 @@ def select_best_host_sync(
     try:
         ranked = ping_fn(hosts, port, ping_timeout)
     finally:
-        # 无论测速是否拿到结果，都视为"完成一次测速"，开启节流窗口，
+        # 无论测速是否拿到结果，都视为"完成一次测速"，刷新节流窗口起点，
         # 避免失败时被高频重试反复触发。
         _mark_failover_done()
     # 健康分重排：冷却中的剔除，剩余按 latency/score（有效延迟）排序。
@@ -143,7 +167,7 @@ async def select_best_host_async(
     （``ping_fn`` 是阻塞实现，用 ``asyncio.to_thread`` 避免阻塞事件循环），
     节流与持久化语义不变。
     """
-    if _throttled():
+    if not _begin_failover():
         logging.getLogger(__name__).debug(
             "跨主机故障转移：处于 %ss 节流窗口内，跳过本次测速",
             _FAILOVER_PING_THROTTLE_SEC,

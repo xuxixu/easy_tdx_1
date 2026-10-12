@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import TracebackType
 from typing import Any
 
@@ -18,6 +19,8 @@ from .mac.enums import (
     SortOrder,
     SortType,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class UnifiedTdxClient:
@@ -47,12 +50,16 @@ class UnifiedTdxClient:
         self._ensure_mac()
 
     def close(self) -> None:
-        if self._mac is not None:
-            self._mac.close()
-            self._mac = None
-        if self._mac_ex is not None:
-            self._mac_ex.close()
-            self._mac_ex = None
+        # 两个客户端各自独立关闭：此前 _mac.close() 抛异常会直接跳过 _mac_ex 的
+        # 关闭，泄漏扩展行情连接（7727 端口）。
+        for attr in ("_mac", "_mac_ex"):
+            cli = getattr(self, attr)
+            if cli is not None:
+                try:
+                    cli.close()
+                except Exception:  # noqa: BLE001 — 关闭失败不应阻断另一个客户端的释放
+                    logger.warning("%s close failed", attr, exc_info=True)
+                setattr(self, attr, None)
 
     def disconnect(self) -> None:
         self.close()

@@ -5,7 +5,7 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts from '../echarts-setup'
+import echarts, { chartAxisColor, initChart, useChartRedraw } from '../echarts-setup'
 
 const props = defineProps<{
   /** 四维分值（0~100，50 为中性）。 */
@@ -24,7 +24,7 @@ const DIMS = [
 
 function render() {
   if (!container.value) return
-  chart ??= echarts.init(container.value, 'dark')
+  chart ??= initChart(container.value)
   const v = props.values
   chart.setOption(
     {
@@ -35,9 +35,9 @@ function render() {
         center: ['50%', '52%'],
         splitNumber: 4,
         axisName: { color: '#8b919e', fontSize: 11 },
-        splitLine: { lineStyle: { color: '#2a2e3a' } },
+        splitLine: { lineStyle: { color: chartAxisColor() } },
         splitArea: { show: false },
-        axisLine: { lineStyle: { color: '#2a2e3a' } },
+        axisLine: { lineStyle: { color: chartAxisColor() } },
       },
       series: [
         {
@@ -62,6 +62,14 @@ function render() {
 function resize() {
   chart?.resize()
 }
+
+// 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，
+// 只能 dispose 后按新主题重建（render 内已改成 initChart + 主题感知）。
+useChartRedraw(() => {
+  chart?.dispose()
+  chart = null
+  render()
+})
 
 onMounted(() => {
   render()

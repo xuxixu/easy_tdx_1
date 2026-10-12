@@ -84,6 +84,9 @@ def ping_all(
     import concurrent.futures
 
     results: list[tuple[str, float]] = []
+    if not hosts:
+        # ThreadPoolExecutor(max_workers=0) 会直接抛 ValueError；空列表当无候选处理
+        return results
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(hosts)) as pool:
         futures = {pool.submit(ping_host, h, port, timeout): h for h in hosts}
         for fut in concurrent.futures.as_completed(futures):
@@ -192,6 +195,10 @@ class TdxConnection:
                 header = parse_header(header_buf)
                 raw_body = self._recv_exact(header.zipsize)
             except OSError as e:
+                # 关键：通信失败后必须作废这条连接。否则下一次 execute() 会复用一条
+                # 流里仍残留着上一条响应字节的 socket，把残片当成新帧头解析
+                # ——产出价格/日期错误的"合法"数据，或卡满超时的死连接。
+                self._close_socket_unlocked()
                 raise TdxConnectionError(f"通信错误: {e}") from e
             body = decompress_body(header, raw_body)
             return cmd.parse_response(body)
@@ -302,3 +309,16 @@ class TdxConnection:
         """循环 recv 直到读满 n 字节。"""
         assert self._sock is not None
         return _recv_exact_sock(self._sock, n)
+
+    def _close_socket_unlocked(self) -> None:
+        """关闭并丢弃底层 socket（调用方须已持有 ``self._lock``）。
+
+        与 :meth:`close` 的区别：不碰心跳线程，只做 socket 回收，供
+        :meth:`execute` 在通信异常时安全调用。
+        """
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None

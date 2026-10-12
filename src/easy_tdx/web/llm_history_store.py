@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import _sqlite
+
 __all__ = ["LlmHistoryRecord", "LlmHistoryStore", "get_llm_history_store"]
 
 _write_lock = threading.Lock()
@@ -105,9 +107,8 @@ class LlmHistoryStore:
             conn.executescript(self._SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+        # 退出 with 时真正 close（裸 sqlite3.connect 只 commit 不 close → fd 泄漏）
+        return _sqlite.connect(self.db_path)
 
     def add(self, rec: LlmHistoryRecord) -> LlmHistoryRecord:
         """追加一条记录，返回带 id/created_at 的落库结果。"""

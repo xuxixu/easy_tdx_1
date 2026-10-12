@@ -152,7 +152,12 @@ class PerformanceAnalyzer:
             calmar = 0.0
 
         # 交易统计
+        # 被拒的委托（rejected=True，pnl 恒为 0）不是真实成交，必须排除：
+        # 否则它们会被 win_trades_mask(pnl>0) 判为亏损，凭空拉低胜率、抬高
+        # 总笔数与最大连亏——reject_policy="skip" 时尤其明显。
         sell_trades = self._trades[self._trades["direction"] == "SELL"]
+        if "rejected" in sell_trades.columns:
+            sell_trades = sell_trades[~sell_trades["rejected"].astype(bool)]
         win_trades_mask = sell_trades["pnl"] > 0
         lose_trades_mask = sell_trades["pnl"] <= 0
 

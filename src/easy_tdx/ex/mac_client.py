@@ -22,15 +22,25 @@ from .._reconnect import (
     select_best_host_async,
     select_best_host_sync,
 )
+from ..codec.bitmap import PresetField
 from ..commands.base import BaseCommand
 from ..config import get_best_mac_ex_host, get_mac_ex_hosts, save_best_mac_ex_host
 from ..exceptions import TdxConnectionError
+from ..mac.commands.board_list import BoardListCmd
+from ..mac.commands.board_members_quotes import BoardMembersQuotesCmd
 from ..mac.commands.chart_sampling import ChartSamplingCmd
 from ..mac.commands.symbol_bar import SymbolBarCmd
 from ..mac.commands.symbol_quotes import SymbolQuotesCmd
 from ..mac.commands.symbol_tick_chart import SymbolTickChartCmd
 from ..mac.commands.symbol_transaction import SymbolTransactionCmd
-from ..mac.enums import Adjust, Period, SortOrder, SortType
+from ..mac.enums import (
+    Adjust,
+    BoardSortColumn,
+    ExBoardType,
+    Period,
+    SortOrder,
+    SortType,
+)
 from ..mac.models import MacQuoteField
 from ._hk_transaction import (
     _fetch_all_hk_transactions_async,
@@ -548,6 +558,84 @@ class MacExClient:
         result = _fetch_all_hk_transactions_sync(self._execute, market, code, query_date)
         return _to_df(result)
 
+    # ------------------------------------------------------------------ #
+    # 港股 / 美股板块（0x1231 板块列表 + 0x122C 成分股，与 A 股同命令号）
+    # ------------------------------------------------------------------ #
+    # 通达信把港美股板块挂在扩展市场协议栈（7727）上：board_type 取
+    # ExBoardType（HK_ALL=0 / HK_GN=1 / HK_HY=2 / US_ALL=3 / US_GN=4 /
+    # US_HY=5），A 股的 BoardType 发到这里返回的是 A 股板块，不能混用。
+    # 板块代码形如 "HK0285" / "US0467"，market 列固定 70。
+
+    def get_board_list(
+        self,
+        board_type: ExBoardType | int = ExBoardType.HK_HY,
+        count: int = 500,
+        sort_column: BoardSortColumn = BoardSortColumn.CHANGE_PCT,
+    ) -> pd.DataFrame:
+        """获取港股 / 美股板块列表（自动翻页）。
+
+        Args:
+            board_type: ``ExBoardType``（HK_HY/HK_GN/US_HY/US_GN…）或等值 int。
+            count: 请求总数（港股行业 129 / 美股行业 132，建议一次取全）。
+            sort_column: 排序键（CHANGE_PCT/SPEED/CHANGE_3D/…/YTD 均实测可用）。
+        """
+        bt = int(board_type)
+        all_items: list[Any] = []
+        fetched = 0
+        offset = 0
+        page_size = 150
+        while fetched < count:
+            batch = self._execute(
+                BoardListCmd(bt, offset, min(page_size, count - fetched), sort_column)  # type: ignore[arg-type]
+            )
+            if not batch:
+                break
+            all_items.extend(batch)
+            fetched += len(batch)
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
+        return _to_df(all_items)
+
+    def get_board_members(
+        self,
+        board_symbol: str,
+        count: int = 100000,
+        sort_type: SortType = SortType.CHANGE_PCT,
+        sort_order: SortOrder = SortOrder.DESC,
+    ) -> pd.DataFrame:
+        """获取港股 / 美股板块成分股报价（自动分页）。
+
+        Args:
+            board_symbol: 板块代码（如 "HK0285" / "US0467")。
+        """
+        from ..mac.client import _convert_board_code, _quotes_to_df
+
+        board_code = _convert_board_code(board_symbol)
+        all_quotes: list[MacQuoteField] = []
+        fetched = 0
+        offset = 0
+        while fetched < count:
+            page_size = min(count - fetched, 80)
+            batch = self._execute(
+                BoardMembersQuotesCmd(
+                    board_code=board_code,
+                    sort_type=sort_type,
+                    start=offset,
+                    page_size=page_size,
+                    sort_order=sort_order,
+                    fields=PresetField.COMMON,
+                )
+            )
+            if not batch:
+                break
+            all_quotes.extend(batch)  # extend 而非 list+list：分页可达上千轮，后者是 O(n²) 拷贝
+            fetched += len(batch)
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
+        return _quotes_to_df(all_quotes)
+
 
 # ============================================================
 # 异步客户端
@@ -901,3 +989,65 @@ class AsyncMacExClient(AsyncHeartbeatMixin):
             )
         result = await _fetch_all_hk_transactions_async(self._execute, market, code, query_date)
         return _to_df(result)
+
+    async def get_board_list(
+        self,
+        board_type: ExBoardType | int = ExBoardType.HK_HY,
+        count: int = 500,
+        sort_column: BoardSortColumn = BoardSortColumn.CHANGE_PCT,
+    ) -> pd.DataFrame:
+        """获取港股 / 美股板块列表（异步，自动翻页）。语义见同步版 :meth:`get_board_list`。"""
+        bt = int(board_type)
+        all_items: list[Any] = []
+        fetched = 0
+        offset = 0
+        page_size = 150
+        while fetched < count:
+            batch = await self._execute(
+                BoardListCmd(bt, offset, min(page_size, count - fetched), sort_column)  # type: ignore[arg-type]
+            )
+            if not batch:
+                break
+            all_items.extend(batch)
+            fetched += len(batch)
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
+        return _to_df(all_items)
+
+    async def get_board_members(
+        self,
+        board_symbol: str,
+        count: int = 100000,
+        sort_type: SortType = SortType.CHANGE_PCT,
+        sort_order: SortOrder = SortOrder.DESC,
+    ) -> pd.DataFrame:
+        """获取港股 / 美股板块成分股报价（异步，自动分页）。
+        语义见同步版 :meth:`get_board_members`。
+        """
+        from ..mac.client import _convert_board_code, _quotes_to_df
+
+        board_code = _convert_board_code(board_symbol)
+        all_quotes: list[MacQuoteField] = []
+        fetched = 0
+        offset = 0
+        while fetched < count:
+            page_size = min(count - fetched, 80)
+            batch = await self._execute(
+                BoardMembersQuotesCmd(
+                    board_code=board_code,
+                    sort_type=sort_type,
+                    start=offset,
+                    page_size=page_size,
+                    sort_order=sort_order,
+                    fields=PresetField.COMMON,
+                )
+            )
+            if not batch:
+                break
+            all_quotes.extend(batch)  # extend 而非 list+list：分页可达上千轮，后者是 O(n²) 拷贝
+            fetched += len(batch)
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
+        return _quotes_to_df(all_quotes)

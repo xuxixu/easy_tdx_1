@@ -74,12 +74,34 @@ def test_vipdoc_settings_endpoints(settings_env, tmp_path):
 
 
 def test_effective_vipdoc_priority(settings_env, tmp_path, monkeypatch):
-    """显式参数 > 已存设置 > 自动检测（None）。"""
+    """显式参数 > 已存设置 > 自动检测（None）。显式参数须为已存在目录。"""
     from easy_tdx.web.app_settings_store import get_app_settings_store
     from easy_tdx.web.routers.market import _effective_vipdoc
 
+    other = tmp_path / "other"
+    other.mkdir()
     get_app_settings_store().set("vipdoc", str(tmp_path))
-    assert _effective_vipdoc(str(tmp_path / "other")) == str(tmp_path / "other")  # 显式优先
+    assert _effective_vipdoc(str(other)) == str(other)  # 显式优先
     assert _effective_vipdoc(None) == str(tmp_path)  # 已存设置
     get_app_settings_store().delete("vipdoc")
     assert _effective_vipdoc(None) is None  # 落回自动检测
+
+
+def test_effective_vipdoc_rejects_non_directory(settings_env, tmp_path):
+    """显式 vipdoc 参数会直达文件系统遍历，必须是已存在目录，否则拒绝。
+
+    此前该参数未经任何校验就被当成通达信数据目录去遍历，任意目录
+    （如 C:\\Windows）都可被指定；且它还是无上限缓存的键。
+    """
+    import pytest
+
+    from easy_tdx.web.routers.market import _effective_vipdoc
+
+    with pytest.raises(ValueError):
+        _effective_vipdoc(str(tmp_path / "does-not-exist"))
+
+    # 存在但是文件（非目录）同样拒绝
+    f = tmp_path / "a.txt"
+    f.write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError):
+        _effective_vipdoc(str(f))

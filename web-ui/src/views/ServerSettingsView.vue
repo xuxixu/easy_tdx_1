@@ -2,7 +2,7 @@
 // 服务器设置页面：列出通达信行情服务器、测速、点选切换。
 // 解决"有些 IP 能连通有些不能"的问题——不同地区/运营商对各服务器连通性不同。
 import { onMounted, ref } from 'vue'
-import { fetchServerHosts, testServerHosts, switchServerHost, formatError } from '../api'
+import { addServerHost, fetchServerHosts, removeServerHost, testServerHosts, switchServerHost, formatError } from '../api'
 import type { ServerHostInfo } from '../types'
 
 const hosts = ref<ServerHostInfo[]>([])
@@ -12,6 +12,9 @@ const testing = ref(false)
 const switchingHost = ref<string | null>(null)
 const error = ref('')
 const message = ref('')
+const newHost = ref('')
+const adding = ref(false)
+const removingHost = ref<string | null>(null)
 
 onMounted(loadHosts)
 
@@ -79,6 +82,42 @@ async function switchHost(host: string) {
   }
 }
 
+async function addHost() {
+  const h = newHost.value.trim()
+  if (!h || adding.value) return
+  adding.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const resp = await addServerHost(h)
+    hosts.value = resp.hosts
+    currentHost.value = resp.current_host
+    newHost.value = ''
+    message.value = `已新增服务器 ${h}`
+  } catch (e) {
+    error.value = formatError(e)
+  } finally {
+    adding.value = false
+  }
+}
+
+async function removeHost(host: string) {
+  if (removingHost.value) return
+  removingHost.value = host
+  error.value = ''
+  message.value = ''
+  try {
+    const resp = await removeServerHost(host)
+    hosts.value = resp.hosts
+    currentHost.value = resp.current_host
+    message.value = `已删除服务器 ${host}`
+  } catch (e) {
+    error.value = formatError(e)
+  } finally {
+    removingHost.value = null
+  }
+}
+
 function latencyColor(ms: number | null): string {
   if (ms === null) return 'var(--text-dim)'
   if (ms < 100) return 'var(--green, #4caf50)'
@@ -103,6 +142,17 @@ function latencyText(ms: number | null): string {
       <button class="btn-test" :disabled="testing || loading" @click="testAll">
         {{ testing ? '测速中...' : '🔄 测试全部服务器' }}
       </button>
+      <div class="add-box">
+        <input
+          v-model="newHost"
+          class="add-input mono"
+          placeholder="新增服务器 IP/域名"
+          @keyup.enter="addHost"
+        />
+        <button class="btn-add" :disabled="adding || !newHost.trim()" @click="addHost">
+          {{ adding ? '新增中...' : '＋ 新增' }}
+        </button>
+      </div>
       <p class="hint">
         点击"测试全部"测速各服务器延迟，然后点"使用"切换到最快或可用的服务器。
         切换后立即生效，无需重启。
@@ -153,6 +203,15 @@ function latencyText(ms: number | null): string {
                 {{ switchingHost === h.host ? '切换中...' : '使用' }}
               </button>
               <span v-else class="current-mark">✓</span>
+              <button
+                v-if="!h.is_current"
+                class="btn-del"
+                :disabled="removingHost !== null"
+                title="从候选列表删除"
+                @click="removeHost(h.host)"
+              >
+                {{ removingHost === h.host ? '…' : '删除' }}
+              </button>
             </td>
           </tr>
         </tbody>
@@ -307,6 +366,57 @@ function latencyText(ms: number | null): string {
   color: #fff;
 }
 .btn-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-del {
+  margin-left: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+}
+.btn-del:hover:not(:disabled) {
+  border-color: var(--red, #f44336);
+  color: var(--red, #f44336);
+}
+.add-box {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.add-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  outline: none;
+}
+.add-input:focus {
+  border-color: var(--accent);
+}
+.btn-add {
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.btn-add:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-add:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

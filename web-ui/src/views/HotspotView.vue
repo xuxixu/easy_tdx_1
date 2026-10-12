@@ -12,7 +12,20 @@ import HotspotStatStrip from '../components/HotspotStatStrip.vue'
 import type { HotspotResp, HotspotRow } from '../types'
 
 // boardType 可由路由 props 注入（/styles → FG 风格轮动），页内仍可自由切换
+// 港美股模式：HY/GN 自动映射为 HK_HY/HK_GN 或 US_HY/US_GN（FG 风格仅 A 股有）
 const props = defineProps<{ boardType?: 'HY' | 'GN' | 'FG' }>()
+
+import { useMarketStore } from '../stores/market'
+const marketStore = useMarketStore()
+
+type BoardKind = 'HY' | 'GN' | 'FG' | 'HK_HY' | 'HK_GN' | 'US_HY' | 'US_GN'
+
+function mapBoardType(t: 'HY' | 'GN' | 'FG'): BoardKind {
+  const m = marketStore.market
+  if (m === 'HK') return t === 'GN' ? 'HK_GN' : 'HK_HY'
+  if (m === 'US') return t === 'GN' ? 'US_GN' : 'US_HY'
+  return t
+}
 
 const PER_DAY = 5 // 每日前 5 名入选（与后端默认一致）
 
@@ -30,6 +43,16 @@ watch(
     // 需回退默认 HY，否则 FG 数据滞留在热点滚动路由下
     const target = t ?? 'HY'
     if (target !== boardType.value) setType(target)
+  },
+)
+
+// 顶栏市场切换 → 热点类型重映射并重载
+watch(
+  () => marketStore.market,
+  () => {
+    loadSeq++
+    resp.value = null
+    load()
   },
 )
 
@@ -64,7 +87,13 @@ function stopBuildPoll() {
 async function load(retry = false) {
   const my = ++loadSeq
   try {
-    const r = await fetchBoardHotspot(boardType.value, days.value, mode.value, PER_DAY, retry)
+    const r = await fetchBoardHotspot(
+      mapBoardType(boardType.value),
+      days.value,
+      mode.value,
+      PER_DAY,
+      retry,
+    )
     // 响应已过期（期间用户切换了类型/天数/模式）：不得覆盖 resp、不得
     // 杀死或重启新参数的构建轮询，整体丢弃。
     if (my !== loadSeq) return
@@ -212,11 +241,11 @@ function openBoard(r: HotspotRow) {
       <span v-if="resp?.session === 'live'" class="live-badge">今日列 · 实时</span>
     </div>
 
-    <!-- 工具行 -->
+    <!-- 工具行（港美股无风格分类，FG 按钮隐藏） -->
     <div class="toolbar">
       <span class="seg">
         <button
-          v-for="t in (['HY', 'GN', 'FG'] as const)"
+          v-for="t in (marketStore.isAShareMode ? (['HY', 'GN', 'FG'] as const) : (['HY', 'GN'] as const))"
           :key="t"
           :class="{ on: boardType === t }"
           @click="setType(t)"
@@ -314,7 +343,7 @@ function openBoard(r: HotspotRow) {
 
     <!-- 相关性视图：活跃板块两两日涨跌幅相关系数 -->
     <template v-else-if="viewMode === 'corr'">
-      <HotspotCorrelation :board-type="boardType" :days="days" :per-day="PER_DAY" />
+      <HotspotCorrelation :board-type="mapBoardType(boardType)" :days="days" :per-day="PER_DAY" />
     </template>
 
     <BoardDialog

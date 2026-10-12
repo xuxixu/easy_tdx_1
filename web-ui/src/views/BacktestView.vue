@@ -29,9 +29,10 @@ const route = useRoute()
 // SymbolPicker 实例引用，用于触发取行情
 const symbolPicker = ref<InstanceType<typeof SymbolPicker> | null>(null)
 
-// 镜像 SymbolPicker 的代码/周期/日期，与 SymbolPicker 通过 v-model 双向同步。
+// 镜像 SymbolPicker 的代码/周期/日期/市场，与 SymbolPicker 通过 v-model 双向同步。
 // 初始值与 SymbolPicker 默认一致；onMounted 时若 URL query 带了寻优页传来的值则覆盖。
 const code = ref('000001')
+const symbolMarket = ref('A')
 const category = ref<Category>('DAY')
 function isoDaysFromNow(days: number): string {
   const d = new Date()
@@ -80,10 +81,14 @@ onMounted(async () => {
   // 从 URL query 回填标的代码 / 周期 / 日期范围（寻优页「查看」跳转带来）。
   // 各字段独立 if 守卫：老书签（只有 strategy/params）仍保持默认值，向后兼容。
   const qSymbol = route.query.symbol as string | undefined
+  const qSymbolMarket = route.query.symbolMarket as string | undefined
   const qStartDate = route.query.startDate as string | undefined
   const qEndDate = route.query.endDate as string | undefined
   const qCategory = route.query.category as Category | undefined
   if (qSymbol) code.value = qSymbol
+  if (qSymbolMarket === 'HK' || qSymbolMarket === 'US' || qSymbolMarket === 'A') {
+    symbolMarket.value = qSymbolMarket
+  }
   if (qStartDate) startDate.value = qStartDate
   if (qEndDate) endDate.value = qEndDate
   if (qCategory) category.value = qCategory
@@ -96,28 +101,37 @@ const wfWindows = ref(7)
 const evaluateEnabled = ref(false)
 
 // 取行情 + 回测 串联（点击「开始回测」触发）
+// submitting 覆盖"取行情"这段窗口：此时 store.running 还是 false，按钮不会
+// 自动禁用，连点两次会并发两条回测任务并互相覆盖结果。
+const submitting = ref(false)
 async function onRun() {
+  if (submitting.value) return
+  submitting.value = true
   store.error = ''
   store.clearExtraAnalysis()
-  // 1. 先取行情（SymbolPicker.loadBars 会校验并填充 store.ohlcv）
-  const ok = await symbolPicker.value?.loadBars()
-  if (!ok) return // 校验/取数失败，错误已在 store.error
-  // 2. 再回测
-  const req = {
-    strategy: strategy.value,
-    params: params.value,
-    cash: cash.value,
-    commission: commission.value,
-    slippage: slippage.value,
-    execution: execution.value,
+  try {
+    // 1. 先取行情（SymbolPicker.loadBars 会校验并填充 store.ohlcv）
+    const ok = await symbolPicker.value?.loadBars()
+    if (!ok) return // 校验/取数失败，错误已在 store.error
+    // 2. 再回测
+    const req = {
+      strategy: strategy.value,
+      params: params.value,
+      cash: cash.value,
+      commission: commission.value,
+      slippage: slippage.value,
+      execution: execution.value,
+    }
+    await store.run(req)
+    // 3. 附加分析：勾选的 WF / 一条龙评估并行跑（互不阻塞，各自有独立错误提示）
+    if (!store.result) return
+    const jobs: Promise<void>[] = []
+    if (wfEnabled.value) jobs.push(store.runWalkforward(req, wfWindows.value))
+    if (evaluateEnabled.value) jobs.push(store.runEvaluate(req))
+    await Promise.allSettled(jobs)
+  } finally {
+    submitting.value = false
   }
-  await store.run(req)
-  // 3. 附加分析：勾选的 WF / 一条龙评估并行跑（互不阻塞，各自有独立错误提示）
-  if (!store.result) return
-  const jobs: Promise<void>[] = []
-  if (wfEnabled.value) jobs.push(store.runWalkforward(req, wfWindows.value))
-  if (evaluateEnabled.value) jobs.push(store.runEvaluate(req))
-  await Promise.allSettled(jobs)
 }
 
 // ── 保存策略（把当前结果 + 配置 + 上下文存进策略库）──────────────────────────
@@ -139,11 +153,12 @@ const grade = computed(() =>
   store.result ? gradePerformance(store.result.performance) : null,
 )
 
-// 当前股票完整代码（市场:6位），从 SymbolPicker 同步来的 code 是纯数字，
-// 需要带上市场前缀。复用 market.ts 的 detectMarket（与 SymbolPicker /
-// StocksPicker 同一套规则），避免分叉导致 ETF/基金（5 开头）等被错判市场。
-function fullSymbol(code6: string): string {
-  return `${detectMarket(code6)}:${code6}`
+// 当前股票完整代码（市场:代码）。市场由 SymbolPicker 的 market 决定：
+// 'A' = A 股（按 6 位规则识别沪/深/北），'HK'/'US' = 港美股直传。
+function fullSymbol(codeStr: string): string {
+  const c = codeStr.trim().toUpperCase()
+  if (symbolMarket.value === 'HK' || symbolMarket.value === 'US') return `${symbolMarket.value}:${c}`
+  return `${detectMarket(c)}:${c}`
 }
 
 // 当前标的的股票名（打开保存弹窗时异步查询，挂到名称/摘要后；查不到则为空）
@@ -159,7 +174,10 @@ async function openSaveForm() {
   showSaveForm.value = true
   // 查询股票中文名，拼成「策略 · 代码 · 股票名」（如 双均线交叉 · 002163 · 海南发展）。
   // 查询失败/市场不支持（如 BJ）时保持原名称；若用户在等待期间已手动改名则不打扰。
-  const name = await fetchSymbolName(detectMarket(code.value), code.value)
+  const name = await fetchSymbolName(
+    symbolMarket.value === 'A' ? detectMarket(code.value) : symbolMarket.value,
+    code.value,
+  )
   if (!name) return
   symbolName.value = name
   if (saveName.value === baseName) saveName.value = `${baseName} · ${name}`
@@ -271,6 +289,7 @@ const aiTip = computed(() =>
           v-model:category="category"
           v-model:start-date="startDate"
           v-model:end-date="endDate"
+          v-model:market="symbolMarket"
         />
       </section>
 
@@ -338,7 +357,7 @@ const aiTip = computed(() =>
 
       <button
         class="primary run-btn"
-        :disabled="store.running || store.wfRunning || store.evaluateRunning"
+        :disabled="submitting || store.running || store.wfRunning || store.evaluateRunning"
         @click="onRun"
       >
         {{ store.running || store.wfRunning || store.evaluateRunning ? '取行情+回测中…' : '开始回测' }}
@@ -607,7 +626,7 @@ const aiTip = computed(() =>
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;

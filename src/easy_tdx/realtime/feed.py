@@ -21,11 +21,13 @@ import logging
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
 
 from .engine import EventBus, EventType, MarketEvent
+from .session import SHANGHAI_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +59,11 @@ def _is_in_session(now: float, sessions: tuple[tuple[int, int], ...]) -> bool:
     """
     if not sessions:
         return True
-    lt = time.localtime(now)
-    minute_of_day = lt.tm_hour * 60 + lt.tm_min
+    # 必须按沪市时区判定：用主机本地时区的话，UTC 主机（Docker 默认 / CI）上
+    # 09:30-15:00 会被判成 01:30-07:00 从而整天不拉数据。与 realtime/session.py
+    # 保持同一口径（SHANGHAI_TZ）。
+    lt = datetime.fromtimestamp(now, SHANGHAI_TZ)
+    minute_of_day = lt.hour * 60 + lt.minute
     for start, end in sessions:
         if start <= minute_of_day < end:
             return True
@@ -246,16 +251,22 @@ class RealtimeDataFeed:
                 （如 :class:`~easy_tdx.mac.client.MacClient`）。
             max_iterations: 最多轮询多少轮（测试用）。
         """
+        # 用 get_running_loop() 检测「是否已在循环内」：它在无循环时抛 RuntimeError，
+        # 而 asyncio.get_event_loop() 在 3.12+ 无循环时同样抛，两个分支无法区分。
+        # 原写法在自己的 try 里 raise RuntimeError 又被 except RuntimeError 接住，
+        # 那段面向用户的告警永远到不了调用方，只默默建了一个孤立的新 loop。
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                raise RuntimeError(
-                    "检测到正在运行的事件循环；请在循环内改用 "
-                    "await feed.run_async(...) 而非 feed.run_sync(...)"
-                )
+            asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            pass  # 当前没有运行中的循环，可以安全地新建并使用
+        else:
+            raise RuntimeError(
+                "检测到正在运行的事件循环；请在循环内改用 "
+                "await feed.run_async(...) 而非 feed.run_sync(...)"
+            )
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
         try:
             loop.run_until_complete(self._run_sync_loop(client, max_iterations))

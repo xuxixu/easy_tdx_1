@@ -58,7 +58,8 @@ const geom = computed(() => {
         vector-effect="non-scaling-stroke"
       />
     </template>
-    <text v-else :x="W / 2" :y="H - 10" text-anchor="middle" fill="#5c6370" font-size="9">加载中…</text>
+    <!-- 无数据（含尚未加载完成）：留空而不是显示"加载中…"，
+         调用方卡片已有价格/占位符承担状态提示，不必在图里重复占字 -->
   </svg>
 </template>
 

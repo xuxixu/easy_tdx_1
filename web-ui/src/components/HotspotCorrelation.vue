@@ -3,12 +3,12 @@
 // 红 = 同涨同跌（抱团），绿 = 跷跷板（资金轮动换手）。复用热点历史缓存，秒级出图。
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts, { DOWN_COLOR, UP_COLOR } from '../echarts-setup'
+import echarts, { chartHeatNeutral, DOWN_COLOR, initChart, UP_COLOR, useChartRedraw } from '../echarts-setup'
 import { fetchHotspotCorrelation, formatError } from '../api'
 import type { HotspotCorrelationResp } from '../types'
 
 const props = defineProps<{
-  boardType: 'HY' | 'GN' | 'FG'
+  boardType: 'HY' | 'GN' | 'FG' | 'HK_HY' | 'HK_GN' | 'US_HY' | 'US_GN'
   days: number
   perDay: number
 }>()
@@ -73,7 +73,7 @@ function render() {
       if (v !== null) data.push([i, j, v])
     }),
   )
-  chart ??= echarts.init(container.value, 'dark')
+  chart ??= initChart(container.value)
   chart.setOption(
     {
       backgroundColor: 'transparent',
@@ -99,7 +99,7 @@ function render() {
         bottom: 0,
         text: ['同涨同跌', '跷跷板'],
         textStyle: { fontSize: 10 },
-        inRange: { color: [DOWN_COLOR, '#1f2430', UP_COLOR] },
+        inRange: { color: [DOWN_COLOR, chartHeatNeutral(), UP_COLOR] },
       },
       series: [
         {
@@ -116,6 +116,14 @@ function render() {
 function onResize() {
   chart?.resize()
 }
+
+// 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，
+// 只能 dispose 后按新主题重建（render 内已改成 initChart + 主题感知）。
+useChartRedraw(() => {
+  chart?.dispose()
+  chart = null
+  render()
+})
 
 onMounted(() => {
   load()

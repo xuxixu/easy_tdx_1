@@ -4,7 +4,7 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts from '../echarts-setup'
+import echarts, { DOWN_COLOR, UP_COLOR, chartAxisColor, initChart, useChartRedraw } from '../echarts-setup'
 import { wfGlossary } from '../data/glossary'
 import type { WalkForwardResult } from '../types'
 import GlossaryList from './GlossaryList.vue'
@@ -21,7 +21,7 @@ const nWin = ref(props.wf.windows.filter((w) => w.total_return > 0).length)
 
 function render() {
   if (!container.value || props.wf.windows.length === 0) return
-  chart ??= echarts.init(container.value, 'dark')
+  chart ??= initChart(container.value)
   chart.setOption(buildOption(), true)
 }
 
@@ -44,7 +44,7 @@ function buildOption(): echarts.EChartsCoreOption {
     yAxis: {
       type: 'value',
       axisLabel: { formatter: (v: number) => `${v}%` },
-      splitLine: { lineStyle: { color: '#2a2e3a' } },
+      splitLine: { lineStyle: { color: chartAxisColor() } },
     },
     series: [
       {
@@ -52,7 +52,7 @@ function buildOption(): echarts.EChartsCoreOption {
         type: 'bar',
         data: values.map((v) => ({
           value: v,
-          itemStyle: { color: v >= 0 ? '#ef4146' : '#2ebd85' }, // 红涨绿跌
+          itemStyle: { color: v >= 0 ? UP_COLOR : DOWN_COLOR }, // 红涨绿跌
         })),
         barMaxWidth: 36,
         label: {
@@ -69,6 +69,14 @@ function buildOption(): echarts.EChartsCoreOption {
 function resize() {
   chart?.resize()
 }
+
+// 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，
+// 只能 dispose 后按新主题重建（render 内已改成 initChart + 主题感知）。
+useChartRedraw(() => {
+  chart?.dispose()
+  chart = null
+  render()
+})
 
 onMounted(() => {
   render()
@@ -160,7 +168,7 @@ watch(
   color: var(--up);
 }
 .stat-value.neg {
-  color: #2ebd85;
+  color: var(--good);
 }
 .wf-hint {
   font-size: 11px;

@@ -68,6 +68,39 @@ def board_type_from_str(s: str) -> Any:
     raise ValueError(f"无效板块类型 '{s}'，可选值: {valid}") from None
 
 
+#: 港美股板块类型名 → ExBoardType 名（board-mac 路由的 ex 分流用）。
+EX_BOARD_TYPES: dict[str, str] = {
+    "HK_ALL": "HK_ALL",
+    "HK_GN": "HK_GN",
+    "HK_HY": "HK_HY",
+    "US_ALL": "US_ALL",
+    "US_GN": "US_GN",
+    "US_HY": "US_HY",
+}
+
+
+def is_ex_board_type(s: str) -> bool:
+    """判断板块类型是否为港美股（走 7727 扩展栈）。"""
+    return s.strip().upper() in EX_BOARD_TYPES
+
+
+def ex_board_type_from_str(s: str) -> Any:
+    """将字符串转为 ExBoardType 枚举（HK_ALL/HK_GN/HK_HY/US_ALL/US_GN/US_HY）。"""
+    from easy_tdx.mac.enums import ExBoardType
+
+    key = s.strip().upper()
+    try:
+        return ExBoardType[key]
+    except KeyError:
+        pass
+    try:
+        return ExBoardType(int(key))
+    except (ValueError, TypeError):
+        pass
+    valid = ", ".join(m.name for m in ExBoardType)
+    raise ValueError(f"无效扩展板块类型 '{s}'，可选值: {valid}") from None
+
+
 def board_sort_from_str(s: str) -> Any:
     """将字符串转为 BoardSortColumn 枚举（CHANGE_PCT/SPEED/CHANGE_3D/...）。"""
     from easy_tdx.mac.enums import BoardSortColumn

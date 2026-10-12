@@ -92,3 +92,17 @@ async def delete_saved_strategy(strategy_id: str) -> dict[str, str]:
     if not store.delete(strategy_id):
         raise ValueError(f"策略 '{strategy_id}' 不存在")
     return {"deleted": strategy_id}
+
+
+@router.put("/strategies/{strategy_id}", response_model=SavedStrategy)
+async def update_saved_strategy(strategy_id: str, patch: dict[str, object]) -> SavedStrategy:
+    """按 id 部分更新一条已保存策略（名称 / 策略类型 / 参数 / 备注 / 标签 / 上下文）。
+
+    只更新请求体里出现的白名单字段，其余保持原值。不存在则 400。
+    前端「修改策略」弹窗走这个端点。
+    """
+    store = get_store()
+    rec = store.update(strategy_id, patch if isinstance(patch, dict) else {})
+    if rec is None:
+        raise ValueError(f"策略 '{strategy_id}' 不存在")
+    return _to_response(rec)

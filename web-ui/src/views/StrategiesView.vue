@@ -19,10 +19,12 @@ import {
   fetchSavedStrategies,
   formatError,
   saveStrategy,
+  updateSavedStrategy,
 } from '../api'
 import { buildPortfolioAiPrompt } from '../aiPrompt'
 import { GRADE_META, gradePortfolio } from '../grading'
 import { detectMarket } from '../market'
+import StrategyEditor, { type StrategyForm } from '../components/StrategyEditor.vue'
 import type { Category, MultiStrategyItem, Performance, SavedStrategy } from '../types'
 import { useBacktestStore } from '../stores/backtest'
 
@@ -89,10 +91,21 @@ function clearSelection() {
  *  早期 BacktestView.fullSymbol 硬编码市场判断（漏判 5 开头的沪市基金/ETF），
  *  导致部分历史保存的策略 symbol 被错标（如 SZ:515030，应为 SH:515030），
  *  后端按错配市场取到 0 根 K 线被静默跳过。
- *  这里在发请求前用 detectMarket 重算前缀，纠正历史数据 + 兜底未来。 */
+ *  只有「A 股 6 位数字」才用 detectMarket 重算；HK:/US: 前缀原样保留
+ *  （港股 5 位/美股字母按 A 股规则会被误判成深市）。 */
 function normalizeSymbol(raw: string): string {
   if (!raw) return raw
-  const code = raw.includes(':') ? raw.split(':').pop()! : raw
+  const parts = raw.includes(':') ? raw.split(':') : []
+  if (parts.length === 2) {
+    const [head, code] = parts
+    const h = head.toUpperCase()
+    if (h === 'HK' || h === 'US') return `${h}:${code.toUpperCase()}`
+    if (/^\d{6}$/.test(code)) return `${detectMarket(code)}:${code}`
+    return raw
+  }
+  const code = raw.trim().toUpperCase()
+  if (/^\d{4,5}$/.test(code)) return `HK:${code}`
+  if (/^[A-Z][A-Z0-9.\-]{0,11}$/.test(code) && !/^\d+$/.test(code)) return `US:${code}`
   return `${detectMarket(code)}:${code}`
 }
 
@@ -254,17 +267,21 @@ function onLoad(s: SavedStrategy) {
       },
     })
   } else {
-    // 保存的 symbol 带"市场:6位代码"前缀（如 SH:601088，便于策略库展示），
-    // 但回测页 SymbolPicker 的 code 只接受纯 6 位数字（市场由 detectMarket 自动识别），
-    // 故载入时剥掉前缀，只传 6 位代码。
+    // symbol 形如 SH:601088 / HK:00700 / US:AAPL：code 与市场一起传，
+    // 回测页 SymbolPicker 据此还原市场选项。
     const rawSymbol = (ctx.symbol as string) || ''
-    const codeOnly = rawSymbol.includes(':') ? rawSymbol.split(':').pop()! : rawSymbol
+    const [mkt, codeOnly] = rawSymbol.includes(':')
+      ? rawSymbol.split(':')
+      : ['A', rawSymbol]
     router.push({
       path: '/backtest',
       query: {
         strategy: s.strategy,
         params,
         symbol: codeOnly || undefined,
+        symbolMarket: ['HK', 'US'].includes((mkt || '').toUpperCase())
+          ? mkt.toUpperCase()
+          : 'A',
         startDate: (ctx.start_date as string) || undefined,
         endDate: (ctx.end_date as string) || undefined,
         category: (ctx.category as string) || undefined,
@@ -283,6 +300,60 @@ async function onDelete(s: SavedStrategy) {
     error.value = formatError(e)
   } finally {
     deletingId.value = null
+  }
+}
+
+// ── 新增 / 修改策略 ─────────────────────────────────────────────────────────
+// 新增：不跑回测，直接写库（kind=single，context 只有 symbol）。
+// 修改：名称/策略类型/标的/参数/备注/标签走 PUT /strategies/{id}。
+const editorOpen = ref(false)
+const editingStrategy = ref<SavedStrategy | null>(null)
+
+function openCreate() {
+  editingStrategy.value = null
+  editorOpen.value = true
+}
+
+function openEdit(s: SavedStrategy) {
+  editingStrategy.value = s
+  editorOpen.value = true
+}
+
+async function onEditorSave(form: StrategyForm) {
+  try {
+    if (editingStrategy.value) {
+      const updated = await updateSavedStrategy(editingStrategy.value.id, {
+        name: form.name,
+        strategy: form.strategy,
+        strategy_label:
+          store.strategies.find((x) => x.name === form.strategy)?.label ?? form.strategy,
+        params: JSON.parse(form.paramsText || '{}'),
+        context: { ...(editingStrategy.value.context ?? {}), symbol: form.symbol },
+        notes: form.notes,
+        tags: form.tagsText ? form.tagsText.split(/\s+/) : [],
+      })
+      const i = strategies.value.findIndex((x) => x.id === updated.id)
+      if (i >= 0) strategies.value[i] = updated
+    } else {
+      const created = await saveStrategy({
+        name: form.name,
+        kind: 'single',
+        strategy: form.strategy,
+        strategy_label:
+          store.strategies.find((x) => x.name === form.strategy)?.label ?? form.strategy,
+        params: JSON.parse(form.paramsText || '{}'),
+        context: { symbol: form.symbol, category: 'DAY' },
+        trade_config: {},
+        snapshot: {},
+        tags: form.tagsText ? form.tagsText.split(/\s+/) : [],
+        notes: form.notes,
+      })
+      strategies.value.unshift(created)
+    }
+    editorOpen.value = false
+    editingStrategy.value = null
+  } catch (e) {
+    error.value = formatError(e)
   }
 }
 
@@ -521,6 +592,7 @@ const aiContext = computed(() => ({
         <button class="ghost" :disabled="loading" @click="load">
           {{ loading ? '刷新中…' : '↻ 刷新' }}
         </button>
+        <button class="primary sm" @click="openCreate">＋ 新增策略</button>
       </div>
     </header>
 
@@ -564,8 +636,7 @@ const aiContext = computed(() => ({
       <p>加载中…</p>
     </div>
 
-    <div v-if="visibleStrategies.length" class="card-grid">
-      <article
+    <div v-if="visibleStrategies.length" class="card-grid">      <article
         v-for="s in visibleStrategies"
         :key="s.id"
         class="card"
@@ -634,6 +705,7 @@ const aiContext = computed(() => ({
               {{ store.multiStrategyRunning ? '重跑中…' : '↻ 重跑到今天' }}
             </button>
             <button v-else class="primary sm" @click="onLoad(s)">载入</button>
+            <button class="ghost sm" @click="openEdit(s)">修改</button>
             <button
               class="danger sm"
               :disabled="deletingId === s.id"
@@ -886,6 +958,14 @@ const aiContext = computed(() => ({
       :context="aiContext"
       tip="建议先点「WF 样本外验证」「一条龙评估」，跑完再打开此弹窗，数据会一并打包。"
       @close="showAiModal = false"
+    />
+
+    <!-- 新增 / 修改策略 -->
+    <StrategyEditor
+      v-if="editorOpen"
+      :editing="editingStrategy"
+      @save="onEditorSave"
+      @close="editorOpen = false; editingStrategy = null"
     />
   </div>
 </template>
@@ -1409,7 +1489,7 @@ const aiContext = computed(() => ({
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1422,7 +1502,7 @@ const aiContext = computed(() => ({
   padding: 20px 22px;
   width: 420px;
   max-width: calc(100vw - 32px);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 48px var(--shadow);
 }
 .modal h3 {
   font-size: 15px;

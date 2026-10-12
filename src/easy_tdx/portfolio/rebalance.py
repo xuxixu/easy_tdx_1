@@ -167,13 +167,25 @@ class RebalanceEngine:
         cash: float,
         holdings: dict[str, float],
     ) -> tuple[list[dict[str, object]], float, dict[str, float]]:
+        # 本方法采用「全仓重置」语义：无论新旧，目标持仓都按 target_weights 重新买入，
+        # 所以现金 = 总市值 − 新持仓市值 − 本次全部交易成本。
+        # 关键点：交易成本必须真的从现金里扣掉。此前 cash 被整行覆盖为
+        # ``total_value - 新持仓市值``，卖出净额与全部佣金/滑点被一并抹除 ——
+        # 净值曲线等价于"零成本交易"，而 trades_df 照常记录 cost，报表与净值
+        # 自相矛盾、回测收益被系统性高估。注意不能改成「卖出加、买入减」的增量
+        # 维护：同一标的既在旧持仓里又在新目标里时会被重复计价，导致现金转负。
+        total_cost = 0.0
+        # 无价（当日缺 K 线且无最近已知价）的持仓无法卖出，挂起等下个交易日，
+        # 不能直接删除——此前 price==0 也照删，等于凭空亏掉整个仓位市值。
+        stranded: dict[str, float] = {}
+
         for code in list(holdings.keys()):
             if code not in target_weights and holdings[code] > 0:
                 price = prices.get(code, 0)
                 if price > 0:
                     sell_value = holdings[code] * price
                     cost = sell_value * (self._commission + self._slippage)
-                    cash += sell_value - cost
+                    total_cost += cost
                     trades_list.append(
                         {
                             "datetime": date_int,
@@ -184,19 +196,28 @@ class RebalanceEngine:
                             "cost": cost,
                         }
                     )
-                del holdings[code]
+                else:
+                    stranded[code] = holdings[code]
+
+        # 买入预算须为"支付交易成本后仍不超支"的额度：
+        # 可用资金 = 总市值 − 已发生的卖出成本；买入时还要再扣买入费，
+        # 故按 (1 + 费率) 折算预算。否则在满仓（Σweight≈1）时会因费用超支，
+        # 让现金转负（等于被经纪人垫付了手续费）。
+        rate = self._commission + self._slippage
+        invest_budget = (total_value - total_cost) / (1.0 + rate) if rate > 0 else total_value
 
         new_holdings: dict[str, float] = {}
         for code, weight in target_weights.items():
             price = prices.get(code, 0)
             if price <= 0:
                 continue
-            target_value = total_value * weight
+            target_value = invest_budget * weight
             shares = int(target_value / price / 100) * 100
             if shares > 0:
                 new_holdings[code] = shares
                 trade_value = shares * price
                 cost = trade_value * (self._commission + self._slippage)
+                total_cost += cost
                 trades_list.append(
                     {
                         "datetime": date_int,
@@ -208,9 +229,13 @@ class RebalanceEngine:
                     }
                 )
 
-        cash = total_value - sum(new_holdings.get(c, 0) * prices.get(c, 0) for c in new_holdings)
+        invested = sum(shares * prices.get(c, 0) for c, shares in new_holdings.items())
+        cash = total_value - invested - total_cost
+
         holdings.clear()
         holdings.update(new_holdings)
+        # 挂起持仓并回（其市值在 total_value 中按 forward-fill 价计过，此处保持）
+        holdings.update(stranded)
         return trades_list, cash, holdings
 
     def _compute_performance(

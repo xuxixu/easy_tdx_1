@@ -14,6 +14,17 @@
   --warn: #f0a020;
   --radius: 6px;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* 以下为深色下的兜底值。真正的 token 真源在 src/theme.ts（切主题时由
+     applyTheme 写成 <html> 的 inline style 逐条覆盖）；这里保留一份是为了
+     JS 尚未执行的首帧不闪白。新增 token 记得两边同步。 */
+  --good: #2ebd85; /* 盈利色：与 --down 的「跌」绿区分 */
+  --overlay: rgba(0, 0, 0, 0.55); /* 弹窗遮罩 */
+  --shadow: rgba(0, 0, 0, 0.45); /* 浮起面板投影 */
+  --heat-neutral: #1f2430; /* 热力图三段色中性档 */
+  --hairline: rgba(255, 255, 255, 0.05); /* 低对比分隔线/进度槽 */
+  --warn-soft: rgba(240, 160, 32, 0.08);
+  --warn-line: rgba(240, 160, 32, 0.35);
 }
 
 * {

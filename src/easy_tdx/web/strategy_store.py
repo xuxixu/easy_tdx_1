@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import _sqlite
+
 __all__ = [
     "SavedStrategy",
     "StrategyStore",
@@ -148,9 +150,9 @@ class StrategyStore:
 
     def _connect(self) -> sqlite3.Connection:
         # check_same_thread=False：FastAPI 后台任务跑在 ThreadPool 内会跨线程访问。
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+        # 用 _sqlite.connect 而非裸 sqlite3.connect：后者退出 with 时只 commit、
+        # 不 close，短连接模式下每次调用都会泄漏一个 fd。
+        return _sqlite.connect(self.db_path)
 
     def _ensure_schema(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,6 +216,50 @@ class StrategyStore:
         with _write_lock, self._connect() as conn:
             cur = conn.execute("DELETE FROM strategies WHERE id = ?", (strategy_id,))
             return cur.rowcount > 0
+
+    def update(self, strategy_id: str, patch: dict[str, object]) -> SavedStrategy | None:
+        """按 id 部分更新（名称 / 参数 / 备注 / 标签 / 上下文）。
+
+        只更新 ``patch`` 里出现的白名单字段，其余保持原值；
+        ``updated_at`` 自动刷新。不存在返回 None。
+
+        Args:
+            strategy_id: 策略 id。
+            patch: 字段 → 新值（键须在白名单内，否则忽略）。
+        """
+        allowed = {
+            "name",
+            "strategy",
+            "strategy_label",
+            "params",
+            "context",
+            "trade_config",
+            "tags",
+            "notes",
+        }
+        sets: list[str] = []
+        values: list[object] = []
+        for key in allowed:
+            if key not in patch:
+                continue
+            value = patch[key]
+            if key in ("params", "context", "trade_config", "tags"):
+                value = json.dumps(value, ensure_ascii=False)
+            sets.append(f"{key} = ?")
+            values.append(value)
+        if not sets:
+            return self.get(strategy_id)
+        sets.append("updated_at = ?")
+        values.append(_now_iso())
+        values.append(strategy_id)
+        with _write_lock, self._connect() as conn:
+            cur = conn.execute(
+                f"UPDATE strategies SET {', '.join(sets)} WHERE id = ?",
+                values,  # noqa: S608
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get(strategy_id)
 
 
 # ── 单例 ───────────────────────────────────────────────────────────────────

@@ -23,9 +23,10 @@ const route = useRoute()
 // SymbolPicker 实例引用，用于触发取行情
 const symbolPicker = ref<InstanceType<typeof SymbolPicker> | null>(null)
 
-// 镜像 SymbolPicker 的代码/周期/日期，用于「查看」跳转时拼进 URL query。
+// 镜像 SymbolPicker 的代码/周期/日期/市场，用于「查看」跳转时拼进 URL query。
 // 与 SymbolPicker 通过 v-model 双向同步，初始值与 SymbolPicker 默认一致。
 const code = ref('000001')
+const symbolMarket = ref('A')
 const category = ref<Category>('DAY')
 function isoDaysFromNow(days: number): string {
   const d = new Date()
@@ -112,57 +113,75 @@ const gridPoints = computed(() => {
 })
 
 // 取行情（点击「开始寻优」时触发）→ 寻优
+// submitting 覆盖"取行情"这段窗口（此时 store.optimizeRunning 仍为 false，
+// 按钮不禁用，连点会并发两次寻优）。两个入口共用同一把锁，防止互相撞车。
+const submitting = ref(false)
+
 async function onRun() {
-  store.error = ''
-  // 1. 先取行情
-  const ok = await symbolPicker.value?.loadBars()
-  if (!ok) return
-  // 取行情成功 → 冻结本次寻优真正使用的标的上下文，供「查看」拼 URL（存 store，跨路由保留）
-  store.setOptimizeContext({
-    code: code.value,
-    category: category.value,
-    startDate: startDate.value,
-    endDate: endDate.value,
-  })
-  // 2. 校验寻优参数
-  if (Object.keys(paramGrid.value).length === 0) {
-    store.error = '请勾选至少 1 个参数并填入取值'
-    return
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    store.error = ''
+    // 1. 先取行情
+    const ok = await symbolPicker.value?.loadBars()
+    if (!ok) return
+    // 取行情成功 → 冻结本次寻优真正使用的标的上下文，供「查看」拼 URL（存 store，跨路由保留）
+    store.setOptimizeContext({
+      code: code.value,
+      category: category.value,
+      startDate: startDate.value,
+      endDate: endDate.value,
+      market: symbolMarket.value,
+    })
+    // 2. 校验寻优参数
+    if (Object.keys(paramGrid.value).length === 0) {
+      store.error = '请勾选至少 1 个参数并填入取值'
+      return
+    }
+    if (gridPoints.value > 200) {
+      store.error = `网格点数 ${gridPoints.value} 超过上限 200`
+      return
+    }
+    // 3. 寻优
+    await store.runOptimize({
+      strategy: strategy.value,
+      param_grid: paramGrid.value,
+      cash: cash.value,
+      execution: execution.value,
+      ohlcv: store.ohlcv,
+    })
+  } finally {
+    submitting.value = false
   }
-  if (gridPoints.value > 200) {
-    store.error = `网格点数 ${gridPoints.value} 超过上限 200`
-    return
-  }
-  // 3. 寻优
-  await store.runOptimize({
-    strategy: strategy.value,
-    param_grid: paramGrid.value,
-    cash: cash.value,
-    execution: execution.value,
-    ohlcv: store.ohlcv,
-  })
 }
 
 // 一键寻优所有策略：取行情 → 全策略预设网格寻优 → 全局排名
 async function onRunAll() {
-  store.error = ''
-  // 1. 先取行情
-  const ok = await symbolPicker.value?.loadBars()
-  if (!ok) return
-  // 取行情成功 → 冻结本次寻优真正使用的标的上下文，供「查看」拼 URL（存 store，跨路由保留）
-  store.setOptimizeContext({
-    code: code.value,
-    category: category.value,
-    startDate: startDate.value,
-    endDate: endDate.value,
-  })
-  // 2. 一键寻优
-  await store.runOptimizeAll({
-    cash: cash.value,
-    execution: execution.value,
-    workers: workers.value,
-    ohlcv: store.ohlcv,
-  })
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    store.error = ''
+    // 1. 先取行情
+    const ok = await symbolPicker.value?.loadBars()
+    if (!ok) return
+    // 取行情成功 → 冻结本次寻优真正使用的标的上下文，供「查看」拼 URL（存 store，跨路由保留）
+    store.setOptimizeContext({
+      code: code.value,
+      category: category.value,
+      startDate: startDate.value,
+      endDate: endDate.value,
+      market: symbolMarket.value,
+    })
+    // 2. 一键寻优
+    await store.runOptimizeAll({
+      cash: cash.value,
+      execution: execution.value,
+      workers: workers.value,
+      ohlcv: store.ohlcv,
+    })
+  } finally {
+    submitting.value = false
+  }
 }
 
 /** 「查看」跳转时，把本次寻优实际使用的标的 + 周期 + 日期范围一并塞进 query，
@@ -176,6 +195,7 @@ function buildBacktestQuery(strategyName: string, params: Record<string, number 
     strategy: strategyName,
     params: JSON.stringify(params),
     symbol: ctx?.code ?? '',
+    symbolMarket: ctx?.market ?? 'A',
     startDate: ctx?.startDate ?? '',
     endDate: ctx?.endDate ?? '',
     category: ctx?.category ?? category.value,
@@ -230,6 +250,7 @@ const rankingGrades = computed<GradeResult[]>(() =>
           v-model:category="category"
           v-model:start-date="startDate"
           v-model:end-date="endDate"
+          v-model:market="symbolMarket"
         />
       </section>
 
@@ -283,14 +304,14 @@ const rankingGrades = computed<GradeResult[]>(() =>
 
       <button
         class="primary run-btn"
-        :disabled="store.optimizeRunning || store.optimizeAllRunning"
+        :disabled="submitting || store.optimizeRunning || store.optimizeAllRunning"
         @click="onRun"
       >
         {{ store.optimizeRunning ? '取行情+寻优中…' : '开始寻优' }}
       </button>
       <button
         class="run-all-btn run-btn"
-        :disabled="store.optimizeRunning || store.optimizeAllRunning"
+        :disabled="submitting || store.optimizeRunning || store.optimizeAllRunning"
         @click="onRunAll"
       >
         {{ store.optimizeAllRunning ? '一键寻优所有策略中…' : '一键寻优所有策略' }}

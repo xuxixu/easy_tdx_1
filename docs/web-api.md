@@ -117,6 +117,70 @@ curl "http://localhost:8000/api/v1/ex/bars?market=HK_MAIN_BOARD&code=00700&categ
 # 美股实时报价
 curl "http://localhost:8000/api/v1/ex/quote?market=US_STOCK&code=AAPL"
 
+# ── 板块（A股 HY/GN + 港美股 HK_HY/HK_GN/US_HY/US_GN，走对应协议栈）──
+# 港股行业板块列表
+curl "http://localhost:8000/api/v1/board-mac/list?board_type=HK_HY&count=200"
+
+# 美股概念板块列表
+curl "http://localhost:8000/api/v1/board-mac/list?board_type=US_GN&count=50"
+
+# 港股板块总览（当日涨跌幅 + 领涨股 + 多周期，15s 缓存）
+curl "http://localhost:8000/api/v1/board-mac/overview?board_type=HK_HY&metrics=SPEED,CHANGE_3D,CHANGE_5D,CHANGE_20D,YTD"
+
+# 港股板块成分股
+curl "http://localhost:8000/api/v1/board-mac/members?board_symbol=HK0285&count=100"
+
+# 美股热点矩阵（building 轮询）
+curl "http://localhost:8000/api/v1/board-mac/hotspot?board_type=US_HY&days=20&mode=top&per_day=5"
+
+# ── 港股 / 美股（一等公民市场：与 A 股同走 /bars /minute /quotes /watchlist /backtest）──
+# 市场元信息（顶栏切换器用：各市场可用性/标的数/货币）
+curl "http://localhost:8000/api/v1/overseas/meta"
+
+# 搜索标的（服务端索引，毫秒级；symbol 形如 HK:00700 / US:AAPL）
+curl "http://localhost:8000/api/v1/overseas/symbols?market=HK&keyword=腾讯&limit=10"
+curl "http://localhost:8000/api/v1/overseas/symbols?market=US&keyword=AAPL&limit=10"
+
+# 批量报价（五档 + 成交额等）
+curl "http://localhost:8000/api/v1/overseas/quotes?market=HK&codes=00700,09988"
+
+# 全市场榜单（涨幅/跌幅/成交额/成交量 Top30 + 涨跌家数；首次 building，前端轮询至 ready）
+curl "http://localhost:8000/api/v1/overseas/rank?market=HK"
+
+# 港股/美股 K 线·分时·逐笔（与 A 股同端点，market=HK/US）
+curl "http://localhost:8000/api/v1/bars?market=HK&code=00700&category=DAY&count=30"
+curl "http://localhost:8000/api/v1/minute?market=US&code=AAPL"
+
+# 港股/美股回测（symbol 形如 HK:00700 / US:AAPL；美股分钟线自动只留盘中）
+curl -X POST "http://localhost:8000/api/v1/backtest/run/async" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "HK:00700", "strategy": "ma_cross", "params": {}, "category": "DAY", "count": 250}'
+
+# ── 真指数（TDX 18 台服务器全无，走免费接口；与 A 股同端点）──
+# 港股：恒生/国企/恒科（HK:HSI/HSCEI/HSTECH）
+# 美股：道指/纳指综合/标普500/纳指100（US:DJI/IXIC/SPX/NDX）
+# K线优先级：akshare 全历史(日/周/月) → 腾讯快照(仅最新1根)
+# 报价优先级：新浪(延时约15分钟) → 腾讯
+# 响应每行带 source 字段标注实际来源：tdx / ak / sina / qq
+curl "http://localhost:8000/api/v1/bars?market=HK&code=HSCEI&category=DAY&count=30"
+curl "http://localhost:8000/api/v1/bars?market=US&code=NDX&category=DAY&count=800"
+curl "http://localhost:8000/api/v1/minute?market=US&code=DJI"
+curl "http://localhost:8000/api/v1/overseas/quotes?market=US&codes=DJI,IXIC,SPX,NDX"
+
+# 美股时段（前端 夜盘/盘前/盘中/盘后 按钮；北京时间，夏令）
+#   盘前 16:00-21:30 · 盘中 21:30-04:00 · 盘后 04:00-08:00 · 夜盘无分钟数据
+
+# ── 策略库修改 / 信号定向扫描 ──
+# 部分更新一条策略（名称/策略类型/参数/备注/标签/上下文）
+curl -X PUT "http://localhost:8000/api/v1/strategies/<id>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "新名称", "params": {"fast": 5, "slow": 20}}'
+
+# 定向扫描：某只股票 × 某几个保存策略（只给买入/卖出信号）
+curl -X POST "http://localhost:8000/api/v1/backtest/signal-scan/run/async" \
+  -H "Content-Type: application/json" \
+  -d '{"window_bars": 5, "symbols": ["US:AAPL"], "strategy_ids": ["<id>"]}'
+
 # ── 技术指标 ──
 # 列出所有可用指标
 curl "http://localhost:8000/api/v1/indicator/list"
@@ -146,6 +210,19 @@ curl -X POST "http://localhost:8000/api/v1/backtest/run/async" \
   -d '{"strategy": "ma_cross", "symbol": "SZ:000001", "category": "DAY", "count": 2000}'
 # 轮询任务结果（对比页/导出亦走 /backtest/tasks）
 curl "http://localhost:8000/api/v1/backtest/tasks/<task_id>"
+# 删除已终态任务（运行中 409 拒绝；结果对比页清理用）
+curl -X DELETE "http://localhost:8000/api/v1/backtest/tasks/<task_id>"
+
+# ── 策略类型（内置浏览 + 自定义类型增删改；自定义=基于内置的命名预设包）──
+curl "http://localhost:8000/api/v1/backtest/strategies"  # 全部类型（含 custom 标记）
+curl "http://localhost:8000/api/v1/strategy-types"       # 自定义类型存储记录（含基准名）
+curl -X POST "http://localhost:8000/api/v1/strategy-types" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "双均线·短线版", "base": "ma_cross", "description": "", "default_params": {"fast": 5, "slow": 20}, "preset_grid": {}}'
+curl -X PUT "http://localhost:8000/api/v1/strategy-types/custom_<id>" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "新名称", "base": "ema_cross", "description": "", "default_params": {}, "preset_grid": {}}'
+curl -X DELETE "http://localhost:8000/api/v1/strategy-types/custom_<id>"  # 内置类型拒绝 400
 
 # ── 策略库（保存的策略持久化 SQLite）──
 curl "http://localhost:8000/api/v1/strategies"
@@ -179,6 +256,29 @@ curl "http://localhost:8000/api/v1/llm/config"                                # 
 curl -X POST "http://localhost:8000/api/v1/llm/chat/async" \
   -H "Content-Type: application/json" \
   -d '{"prompt": "解读这份回测报告：..."}'                                    # 后台任务，GET /llm/chat/tasks/{id} 轮询
+
+# ── 服务器设置（候选行情服务器增删改 + 测速切换）──
+curl "http://localhost:8000/api/v1/server/hosts"                             # 列出候选 + 当前 host
+curl -X POST "http://localhost:8000/api/v1/server/hosts" \
+  -H "Content-Type: application/json" -d '{"host": "180.153.18.170"}'        # 新增（去重追加）
+curl -X DELETE "http://localhost:8000/api/v1/server/hosts/180.153.18.170"    # 删除（至少保留 1 台）
+curl -X POST "http://localhost:8000/api/v1/server/test" \
+  -H "Content-Type: application/json" -d '{}'                                # 全部测速（多服务器容灾选最优）
+
+# ── 成交量排名（A/港/美 Top30）──
+# A 股：MAC 排行 VOLUME 排序（多服务器自动容灾，前端市场看板「成交量」tab）
+curl "http://localhost:8000/api/v1/mac/quote-list?category=A&count=30&sort_type=VOLUME&sort_order=DESC"
+# 港/美：全市场榜单 by_vol（与 gainers/losers/by_amount 同快照，Top30；首次 building 轮询至 ready）
+curl "http://localhost:8000/api/v1/overseas/rank?market=HK"
+
+# ── 推送服务（买卖信号 key-only 推送：Server酱/WXPush/百度云推送/MobPush/Webhook）──curl "http://localhost:8000/api/v1/push/config"                              # 当前配置（key 脱敏）+ 通道表
+curl -X PUT "http://localhost:8000/api/v1/push/config" \
+  -H "Content-Type: application/json" \
+  -d '{"channels": [{"provider": "serverchan", "key": "SCTxxxx", "endpoint": "", "enabled": true}]}'
+curl -X POST "http://localhost:8000/api/v1/push/test"                        # 发测试消息验通道
+curl -X POST "http://localhost:8000/api/v1/push/send-signal" \
+  -H "Content-Type: application/json" \
+  -d '{"rows": [{"symbol": "SH:600519", "latest_signal": "BUY"}], "window_bars": 5}'
 
 # ── 交易时段（自动刷新门控用）──
 curl "http://localhost:8000/api/v1/market/session"

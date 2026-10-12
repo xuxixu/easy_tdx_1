@@ -13,7 +13,15 @@ from typing import Annotated
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, StringConstraints
 
-from easy_tdx.config import get_best_host, get_known_hosts, get_port, save_best_host
+from easy_tdx.config import (
+    add_custom_host,
+    get_best_host,
+    get_known_hosts,
+    get_port,
+    remove_custom_host,
+    save_best_host,
+    set_known_hosts,
+)
 from easy_tdx.transport.sync import ping_all
 
 router = APIRouter(tags=["server"])
@@ -70,6 +78,18 @@ class SwitchResponse(BaseModel):
     ok: bool
     host: str
     message: str
+
+
+class HostAddRequest(BaseModel):
+    """POST /server/hosts 的请求：新增一台候选服务器。"""
+
+    host: str = Field(..., min_length=1, max_length=253, description="IP 或域名")
+
+
+class HostSetRequest(BaseModel):
+    """PUT /server/hosts 的请求：整体替换候选列表（去重保序）。"""
+
+    hosts: list[HostStr] = Field(..., min_length=1, max_length=50)
 
 
 class MetaResponse(BaseModel):
@@ -178,6 +198,62 @@ async def switch_host(req: ServerSwitchRequest, request: Request) -> SwitchRespo
     # 连接成功后才持久化
     save_best_host(req.host)
     return SwitchResponse(ok=True, host=req.host, message=f"已切换到 {req.host}")
+
+
+@router.post("/server/hosts", response_model=HostListResponse)
+async def add_host(req: HostAddRequest, request: Request) -> HostListResponse:
+    """新增一台候选服务器（去重追加，持久化到 config.json）。
+
+    不做连通性校验——内网/专线地址在服务器侧 ping 不通也可能是客户端可达，
+    由用户点"测试全部"自行验证。
+    """
+    try:
+        hosts = add_custom_host(req.host.strip())
+    except ValueError as exc:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    current = _get_current_host(request)
+    return HostListResponse(
+        hosts=[HostInfo(host=h, is_current=(h == current)) for h in hosts],
+        current_host=current,
+        total=len(hosts),
+    )
+
+
+@router.delete("/server/hosts/{host:path}", response_model=HostListResponse)
+async def remove_host(host: str, request: Request) -> HostListResponse:
+    """删除一台候选服务器（至少保留 1 台；删的是当前 best_host 则自动回落）。"""
+    try:
+        hosts = remove_custom_host(host.strip())
+    except ValueError as exc:
+        from fastapi import HTTPException
+
+        status = 400 if "至少保留" in str(exc) or "非法" in str(exc) else 404
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    current = _get_current_host(request)
+    return HostListResponse(
+        hosts=[HostInfo(host=h, is_current=(h == current)) for h in hosts],
+        current_host=current,
+        total=len(hosts),
+    )
+
+
+@router.put("/server/hosts", response_model=HostListResponse)
+async def replace_hosts(req: HostSetRequest, request: Request) -> HostListResponse:
+    """整体替换候选列表（WebUI 批量编辑用，去重保序持久化）。"""
+    try:
+        hosts = set_known_hosts(req.hosts)
+    except ValueError as exc:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    current = _get_current_host(request)
+    return HostListResponse(
+        hosts=[HostInfo(host=h, is_current=(h == current)) for h in hosts],
+        current_host=current,
+        total=len(hosts),
+    )
 
 
 # --------------------------------------------------------------------------- #

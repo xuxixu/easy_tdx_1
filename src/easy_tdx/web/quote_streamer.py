@@ -32,12 +32,20 @@ logger = logging.getLogger(__name__)
 __all__ = ["QuoteStreamer", "INDEX_SYMBOLS", "INDEX_NAMES"]
 
 # 看板常驻指数（标准协议行情，指数与个股同一接口）。
-INDEX_SYMBOLS: list[tuple[Market, str]] = [
+# 港美股真指数走 HTTP 源（_stream_fetch 按市场分流到网关，网关再分到 HTTP）。
+INDEX_SYMBOLS: list[tuple[Any, str]] = [
     (Market.SH, "000001"),  # 上证指数
     (Market.SZ, "399001"),  # 深证成指
     (Market.SZ, "399006"),  # 创业板指
     (Market.SH, "000688"),  # 科创50
     (Market.SH, "000300"),  # 沪深300
+    ("HK", "HSI"),  # 恒生指数
+    ("HK", "HSCEI"),  # 国企指数（HTTP）
+    ("HK", "HSTECH"),  # 恒生科技指数（HTTP）
+    ("US", "DJI"),  # 道琼斯指数（HTTP）
+    ("US", "IXIC"),  # 纳斯达克综合指数（HTTP）
+    ("US", "SPX"),  # 标普500指数（HTTP）
+    ("US", "NDX"),  # 纳斯达克100指数（HTTP）
 ]
 INDEX_NAMES: dict[str, str] = {
     "SH000001": "上证指数",
@@ -45,9 +53,32 @@ INDEX_NAMES: dict[str, str] = {
     "SZ399006": "创业板指",
     "SH000688": "科创50",
     "SH000300": "沪深300",
+    "HKHSI": "恒生指数",
+    "HKHSCEI": "国企指数",
+    "HKHSTECH": "恒生科技指数",
+    "USDJI": "道琼斯指数",
+    "USIXIC": "纳斯达克综合指数",
+    "USSPX": "标普500指数",
+    "USNDX": "纳斯达克100指数",
 }
 
-_MARKET_NAMES = {Market.SZ: "SZ", Market.SH: "SH", Market.BJ: "BJ"}
+#: market 值 → 前端 symbol 前缀。A 股是 ``Market`` 枚举（IntEnum，与 int
+#: 哈希相等）；外盘是扩展市场 int（31/48/…/74），标准映射表里没有，
+#: 必须显式列出，否则前端 symbol 会变成 "3100700" 这种无法解析的串。
+_MARKET_NAMES: dict[Any, str] = {
+    Market.SZ: "SZ",
+    Market.SH: "SH",
+    Market.BJ: "BJ",
+    0: "SZ",
+    1: "SH",
+    2: "BJ",
+    31: "HK",
+    48: "HK",
+    49: "HK",
+    27: "HK",
+    98: "HK",
+    74: "US",
+}
 
 # 推送给前端的字段白名单（SecurityQuote 全字段中挑展示需要的，避免 unknown_* 噪音）。
 _QUOTE_FIELDS = (
@@ -93,7 +124,7 @@ class QuoteStreamer:
     Args:
         quote_fetcher: async ``(stocks) -> pd.DataFrame``，通常为
             ``AsyncTdxClient.get_security_quotes`` 的偏函数。异常由本类兜底。
-        watch_symbols: async ``() -> list[tuple[Market, str]]``，自选订阅集合
+        watch_symbols: async ``() -> list[tuple[str | Market, str]]``，自选订阅集合
             （通常读 :class:`WatchlistStore`）。每次轮询前调用。
         trading_interval: 盘中轮询间隔（秒）。
         idle_interval: 盘外轮询间隔（秒）。
@@ -101,8 +132,8 @@ class QuoteStreamer:
 
     def __init__(
         self,
-        quote_fetcher: Callable[[list[tuple[Market, str]]], Awaitable[pd.DataFrame]],
-        watch_symbols: Callable[[], Awaitable[list[tuple[Market, str]]]],
+        quote_fetcher: Callable[[list[tuple[Any, str]]], Awaitable[pd.DataFrame]],
+        watch_symbols: Callable[[], Awaitable[list[tuple[Any, str]]]],
         *,
         trading_interval: float = 8.0,
         idle_interval: float = 60.0,
@@ -184,7 +215,7 @@ class QuoteStreamer:
                 logger.warning("QuoteStreamer 轮询异常", exc_info=True)
                 await asyncio.sleep(self._idle_interval)
 
-    async def _fetch_quotes(self, symbols: list[tuple[Market, str]]) -> list[dict[str, Any]]:
+    async def _fetch_quotes(self, symbols: list[tuple[Any, str]]) -> list[dict[str, Any]]:
         """批量拉行情（80/批），转精简 dict 列表；失败返回空。"""
         out: list[dict[str, Any]] = []
         for i in range(0, len(symbols), 80):
@@ -212,6 +243,11 @@ class QuoteStreamer:
                 if f in rec and f not in ("market", "code"):
                     v = rec[f]
                     d[f] = None if v != v else v  # NaN → None（JSON 合法）
+            # 扩展市场（港美股）报价列叫 close，标准协议叫 price——
+            # 统一补 price，否则前端现价整列 "-"
+            if d.get("price") is None and rec.get("close") is not None:
+                v = rec["close"]
+                d["price"] = None if v != v else v
             d["market"] = market_str
             d["code"] = code
             d["symbol"] = f"{market_str}{code}"

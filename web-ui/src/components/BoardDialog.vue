@@ -13,24 +13,37 @@ import {
   fetchMinute,
   fetchWatchlist,
   formatError,
+  marketToken,
   removeWatchItem,
 } from '../api'
 import { dirClass, fmt2, fmtPctSigned } from '../format'
+import { loadIndicatorParams, saveIndicatorParams, type IndicatorParams } from '../indicatorParams'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, MinutePoint, RankRow } from '../types'
+import IndicatorEditor from './IndicatorEditor.vue'
 import IntradayChart from './IntradayChart.vue'
 import StockKline, { type Overlay, type SubPane } from './StockKline.vue'
 import StockDialog from './StockDialog.vue'
 
 const props = defineProps<{
-  code: string // 881106 / 885418 ...
+  code: string // 881106 / 885418 ... 或 HK0285 / US0467
   name: string
 }>()
 
 const emit = defineEmits<{ close: []; 'watchlist-changed': [] }>()
 
+/** 板块归属市场：HK/US 开头走扩展栈，其余为 A 股（SH）。 */
+const boardMarket = computed(() => {
+  const c = props.code.trim().toUpperCase()
+  if (c.startsWith('HK')) return 'HK'
+  if (c.startsWith('US')) return 'US'
+  return 'SH'
+})
+/** 传给行情接口的代码（HK/US 前缀已含在 market 里，code 保持原样）。 */
+const boardCode = computed(() => props.code.trim().toUpperCase())
+
 const quoteStore = useQuoteStore()
-const quote = computed(() => quoteStore.getQuote(`SH${props.code}`))
+const quote = computed(() => quoteStore.getQuote(`${boardMarket.value}${boardCode.value}`))
 
 const changePct = computed(() => {
   const q = quote.value
@@ -39,14 +52,28 @@ const changePct = computed(() => {
 })
 
 const tab = ref<'minute' | 'daily'>('minute')
-const overlay = ref<Overlay>('ma')
+// 主图叠加由 indParams.overlays 统一驱动（见 toggleOverlay）；此前这里还有一个
+// 从未被赋值的 overlay ref 并被当作 :overlay 传入 StockKline，导致 effOverlays
+// 恒为 ['ma']、MA/BOLL/EMA 三个 chip 点了没反应。
 const subPane = ref<SubPane>('macd')
+
+// ── 指标参数（全局共用） ────────────────────────────────────────────────────
+const indParams = ref<IndicatorParams>(loadIndicatorParams())
+const showIndEditor = ref(false)
+
+/** 主图叠加多选（写回全局指标配置，与个股弹窗同一套）。 */
+function toggleOverlay(v: Overlay) {
+  const cur = indParams.value.overlays ?? []
+  const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
+  indParams.value.overlays = next
+  indParams.value.overlay = next[0] ?? 'ma'
+  saveIndicatorParams(indParams.value)
+}
 
 const overlayOptions: Array<{ value: Overlay; label: string }> = [
   { value: 'ma', label: 'MA' },
   { value: 'boll', label: 'BOLL' },
   { value: 'ema', label: 'EMA' },
-  { value: 'none', label: '主图无' },
 ]
 const subOptions: Array<{ value: SubPane; label: string }> = [
   { value: 'macd', label: 'MACD' },
@@ -64,7 +91,7 @@ const loading = ref(false)
 async function loadMinute() {
   minuteError.value = ''
   try {
-    minutePoints.value = await fetchMinute('SH', props.code)
+    minutePoints.value = await fetchMinute(boardMarket.value, boardCode.value)
   } catch (e) {
     minutePoints.value = []
     minuteError.value = formatError(e)
@@ -77,8 +104,9 @@ async function loadDaily() {
     // 日K只展示最近 250 根：取近 2 年（/bars 单页 800 根即可覆盖，避免全历史分页）；
     // 长期停牌取不到再退回全历史。
     const since = new Date(Date.now() - 2 * 365 * 86400_000).toISOString().slice(0, 10)
-    let bars = await fetchBars('SH', props.code, 'DAY', since, undefined)
-    if (bars.length === 0) bars = await fetchBars('SH', props.code, 'DAY', undefined, undefined)
+    let bars = await fetchBars(boardMarket.value, boardCode.value, 'DAY', since, undefined)
+    if (bars.length === 0)
+      bars = await fetchBars(boardMarket.value, boardCode.value, 'DAY', undefined, undefined)
     if (bars.length === 0) throw new Error('该板块无日K数据')
     dailyBars.value = bars.slice(-250)
   } catch (e) {
@@ -87,10 +115,17 @@ async function loadDaily() {
   }
 }
 
+// 请求序号守卫：快速切换板块时，旧板块的响应可能晚于新板块返回并覆盖结果。
+let chartSeq = 0
+
 async function loadCharts() {
+  const my = ++chartSeq
   loading.value = true
-  await Promise.all([loadMinute(), loadDaily()])
-  loading.value = false
+  try {
+    await Promise.all([loadMinute(), loadDaily()])
+  } finally {
+    if (my === chartSeq) loading.value = false
+  }
 }
 
 onMounted(loadCharts)
@@ -104,7 +139,9 @@ const watchBusy = ref(false)
 async function refreshWatchState() {
   try {
     const resp = await fetchWatchlist()
-    inWatchlist.value = resp.items.some((i) => i.symbol === `SH${props.code}`)
+    inWatchlist.value = resp.items.some(
+      (i) => i.symbol === `${boardMarket.value}${boardCode.value}`,
+    )
   } catch {
     inWatchlist.value = false
   }
@@ -116,10 +153,10 @@ async function toggleWatch() {
   watchBusy.value = true
   try {
     if (inWatchlist.value) {
-      await removeWatchItem('SH', props.code)
+      await removeWatchItem(boardMarket.value, boardCode.value)
       inWatchlist.value = false
     } else {
-      await addWatchItem('SH', props.code, props.name)
+      await addWatchItem(boardMarket.value, boardCode.value, props.name)
       inWatchlist.value = true
     }
     emit('watchlist-changed')
@@ -175,9 +212,15 @@ watch(() => props.code, loadMembers)
 /** 成分股行点击 → 叠开个股弹窗。 */
 const stockDlg = ref<{ market: string; code: string; name: string } | null>(null)
 
+/** 成分股行点击 → 叠开个股弹窗（market 归一：31/74 等 int 转 HK/US）。 */
 function openMember(r: RankRow) {
+  const mkt = marketToken(String(r.market ?? ''))
   stockDlg.value = {
-    market: String(r.market ?? ''),
+    // 归一失败（如成员缺 market 列）时回落到板块所属市场，
+    // 绝不默认 SZ（外盘成员误标 SZ 就是"A股代码应为6位数字"报错的来源）
+    market: mkt === 'HK' || mkt === 'US' || mkt === 'SH' || mkt === 'SZ' || mkt === 'BJ'
+      ? mkt
+      : boardMarket.value,
     code: String(r.code ?? ''),
     name: String(r.name ?? ''),
   }
@@ -191,7 +234,7 @@ function openMember(r: RankRow) {
         <div class="dlg-head">
           <div class="head-left">
             <span class="board-name">{{ name }}</span>
-            <span class="board-code mono">SH{{ code }} · 板块指数</span>
+            <span class="board-code mono">{{ boardMarket }}{{ boardCode }} · 板块指数</span>
           </div>
           <div class="head-quote">
             <span v-if="quote" class="price mono" :class="dirClass(changePct)">{{ fmt2(quote.price) }}</span>
@@ -222,8 +265,8 @@ function openMember(r: RankRow) {
                     v-for="opt in overlayOptions"
                     :key="opt.value"
                     class="chip"
-                    :class="{ on: overlay === opt.value }"
-                    @click="overlay = opt.value"
+                    :class="{ on: (indParams.overlays ?? []).includes(opt.value) }"
+                    @click="toggleOverlay(opt.value)"
                   >
                     {{ opt.label }}
                   </button>
@@ -234,11 +277,14 @@ function openMember(r: RankRow) {
                     :key="opt.value"
                     class="chip"
                     :class="{ on: subPane === opt.value }"
-                    @click="subPane = opt.value"
+                    @click="subPane = opt.value; indParams.subPane = opt.value"
                   >
                     {{ opt.label }}
                   </button>
                 </span>
+                <button class="chip ind-edit" title="编辑指标参数" @click="showIndEditor = true">
+                  ⚙ 指标
+                </button>
               </template>
             </div>
             <div v-if="loading" class="chart-msg">加载中…</div>
@@ -249,7 +295,13 @@ function openMember(r: RankRow) {
               </template>
               <template v-else>
                 <div v-if="dailyError" class="chart-msg error">日K：{{ dailyError }}</div>
-                <StockKline v-else :bars="dailyBars" :overlay="overlay" :sub-pane="subPane" />
+                <StockKline
+                  v-else
+                  :bars="dailyBars"
+                  :overlays="indParams.overlays ?? []"
+                  :sub-pane="subPane"
+                  :params="indParams"
+                />
               </template>
             </template>
           </div>
@@ -292,6 +344,7 @@ function openMember(r: RankRow) {
       @close="stockDlg = null"
       @watchlist-changed="emit('watchlist-changed')"
     />
+    <IndicatorEditor v-if="showIndEditor" v-model="indParams" @close="showIndEditor = false" />
   </teleport>
 </template>
 
@@ -299,7 +352,7 @@ function openMember(r: RankRow) {
 .dlg-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;

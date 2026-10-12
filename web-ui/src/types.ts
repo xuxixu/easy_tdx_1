@@ -25,11 +25,53 @@ export interface StrategySchema {
   description: string
   params: ParamSchema[]
   preset_grid?: Record<string, Array<number | string>>
+  /** 自定义类型（策略类型页创建）为 true，内置为 false（老后端缺省） */
+  custom?: boolean
 }
 
 export interface StrategiesResponse {
   strategies: StrategySchema[]
   count: number
+}
+
+// ── 自定义策略类型（GET /api/v1/backtest/strategies 透出 + /strategy-types CRUD） ──
+
+/** 一条自定义策略类型（服务端存储形状）。 */
+export interface CustomStrategyType {
+  id: string
+  /** 注册表键（custom_ 前缀） */
+  name: string
+  label: string
+  /** 基准内置策略名 */
+  base: string
+  description: string
+  default_params: Record<string, number | string | boolean>
+  preset_grid: Record<string, Array<number | string>>
+  created_at: string
+  updated_at: string
+}
+
+export interface CustomStrategyTypeCreate {
+  label: string
+  base: string
+  description: string
+  default_params: Record<string, number | string | boolean>
+  preset_grid: Record<string, Array<number | string>>
+}
+
+export type CustomStrategyTypeUpdate = CustomStrategyTypeCreate
+
+export interface CustomStrategyTypeSaveResult {
+  ok: boolean
+  type: CustomStrategyType
+  schema: StrategySchema
+}
+
+export interface CustomStrategyTypeDeleteResult {
+  ok: boolean
+  name: string
+  /** 引用该类型的已保存策略条数 */
+  in_use: number
 }
 
 // ── OHLCV 行情（GET /api/v1/bars） ────────────────────────────────────────────
@@ -42,6 +84,8 @@ export interface Bar {
   close: number
   vol: number
   amount: number
+  /** 数据源：tdx（实时）/ ak（日级）/ sina（延时15分钟）/ qq（快照）。 */
+  source?: string
 }
 
 export interface DataFrameResponse {
@@ -366,9 +410,12 @@ export interface SavedStrategyListResponse {
 
 // ── 信号雷达（POST /api/v1/backtest/signal-scan/run/async） ──────────────────
 
-/** 信号扫描请求：window_bars = 检查最近 N 根 K 线内的信号。 */
+/** 信号扫描请求：window_bars = 检查最近 N 根 K 线内的信号。
+ * symbols/strategy_ids 传了即做定向扫描（某只股票 × 某几个保存策略）。 */
 export interface SignalScanRequest {
   window_bars?: number
+  symbols?: string[]
+  strategy_ids?: string[]
 }
 
 /** 窗口内单根 K 线的信号。 */
@@ -994,6 +1041,36 @@ export interface LlmHistoryItem {
 export interface LlmHistoryResponse {
   items: LlmHistoryItem[]
   count: number
+}
+
+// ── 推送服务（POST /api/v1/push/*，买卖信号 key-only 推送） ───────────────────
+
+export interface PushChannel {
+  provider: string
+  /** 脱敏回显（如 "ab***cd"）；提交时空串/原样回传 = 不修改已存 key */
+  key: string
+  endpoint: string
+  enabled: boolean
+}
+
+export interface PushProviderInfo {
+  id: string
+  label: string
+}
+
+export interface PushConfigResponse {
+  config: { channels: PushChannel[] }
+  providers: PushProviderInfo[]
+  configured: boolean
+  config_path: string
+}
+
+export interface PushSendResult {
+  ok: boolean
+  sent?: number
+  total?: number
+  results?: Array<{ ok: boolean; provider: string; error?: string }>
+  error?: string
 }
 
 // ── 中金所成交持仓排名（GET /api/v1/ccpm/*） ─────────────────────────────────

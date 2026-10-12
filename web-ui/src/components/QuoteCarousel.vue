@@ -100,7 +100,7 @@ onUnmounted(() => {
   border-radius: 12px;
   padding: 40px 36px 28px;
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.35),
+    0 12px 40px var(--shadow),
     0 0 0 1px rgba(245, 158, 11, 0.08);
   overflow: hidden;
 }
@@ -112,7 +112,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   height: 2px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--hairline);
 }
 .quote-progress .bar {
   display: block;

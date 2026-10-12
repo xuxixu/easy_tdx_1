@@ -41,7 +41,22 @@ _SH_PREFIX = re.compile(r"^[695]")
 
 
 def _detect_market(code: str) -> str:
-    """按 6 位代码推断市场（SH/SZ/BJ），规则与前端 detectMarket 一致。"""
+    """按代码推断市场（SH/SZ/BJ/HK/US），规则与前端 detectMarket 一致。
+
+    港股 4-5 位数字 → HK；美股字母 → US；A 股 6 位按段规则。
+    已带 "MARKET:" 前缀的直接信任前缀（港股指数 CES100 等字母代码
+    不能按 A 股规则重判）。
+    """
+    code = (code or "").strip().upper()
+    if ":" in code:
+        head = code.split(":", 1)[0]
+        if head in ("SH", "SZ", "BJ", "HK", "US"):
+            return head
+        code = code.split(":", 1)[1]
+    if re.fullmatch(r"\d{4,5}", code):
+        return "HK"
+    if re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,11}", code) and not code.isdigit():
+        return "US"
     if not re.fullmatch(r"\d{6}", code):
         return "SZ"
     if _BJ_PREFIX.match(code):
@@ -52,15 +67,31 @@ def _detect_market(code: str) -> str:
 
 
 def normalize_symbol(raw: str) -> str:
-    """纠正历史保存策略的市场前缀（如 SZ:515080 → SH:515080）。
+    """纠正历史保存策略的市场前缀 + 补全港美股前缀。
 
-    早期前端曾按市场前缀漏判沪市基金，导致部分历史保存的 symbol 错标，
-    后端按错配市场取到 0 根 K 线被静默跳过。这里按代码段重判市场兜底。
+    - A 股 6 位：按代码段重判（纠正早期前端漏判沪市基金的错标）。
+    - 已带合法前缀的（HK:/US:/SH: 等）原样信任，只做大写去空白。
+    - 无前缀的港美股代码：4-5 位数字补 HK:，字母补 US:。
     """
-    code = raw.split(":", 1)[-1].strip() if raw else ""
-    if not code:
+    text = (raw or "").strip().upper()
+    if not text:
         return raw
-    return f"{_detect_market(code)}:{code}"
+    if ":" in text:
+        head, _, code = text.partition(":")
+        # 港美股前缀原样信任；A 股前缀按代码段重判（纠正早期错标，如 SZ:515080）
+        if head in ("HK", "US") and code:
+            return f"{head}:{code}"
+        if head in ("SH", "SZ", "BJ") and re.fullmatch(r"\d{6}", code or ""):
+            return f"{_detect_market(code)}:{code}"
+        text = code
+    code = text
+    if re.fullmatch(r"\d{6}", code):
+        return f"{_detect_market(code)}:{code}"
+    if re.fullmatch(r"\d{4,5}", code):
+        return f"HK:{code}"
+    if re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,11}", code) and not code.isdigit():
+        return f"US:{code}"
+    return raw
 
 
 # ── 展开子任务 ────────────────────────────────────────────────────────────────
@@ -85,16 +116,30 @@ class ScanTarget:
     error: str | None = None
 
 
-def expand_targets(records: list[SavedStrategy]) -> list[ScanTarget]:
-    """把全部已保存策略展开成"策略×标的"子任务列表。
+def expand_targets(
+    records: list[SavedStrategy],
+    *,
+    symbols: list[str] | None = None,
+    strategy_ids: list[str] | None = None,
+) -> list[ScanTarget]:
+    """把已保存策略展开成"策略×标的"子任务列表。
 
     - single: 1 条（context.symbol）
     - portfolio: context.stocks 每只一条（同 strategy + params）
     - multi: context.items 每条一 target（各自带 strategy/params/symbol）
     - 缺关键字段的条目展开为 error 行（保证结果表能看到"这条策略有问题"）
+
+    Args:
+        records: 全部已保存策略。
+        symbols: 只保留这些标的（归一化后比较，大小写不敏感）。
+        strategy_ids: 只保留这些策略 id。
     """
+    wanted_symbols = {normalize_symbol(s) for s in symbols} if symbols else None
+    wanted_ids = set(strategy_ids) if strategy_ids else None
     targets: list[ScanTarget] = []
     for rec in records:
+        if wanted_ids is not None and rec.id not in wanted_ids:
+            continue
         ctx = rec.context or {}
         if rec.kind == "multi":
             items = ctx.get("items")
@@ -117,6 +162,9 @@ def expand_targets(records: list[SavedStrategy]) -> list[ScanTarget]:
                 if not item.get("strategy") or not symbol:
                     targets.append(_error_target(rec, "组合条目缺少 strategy/symbol"))
                     continue
+                norm = normalize_symbol(str(symbol))
+                if wanted_symbols is not None and norm not in wanted_symbols:
+                    continue
                 targets.append(
                     ScanTarget(
                         strategy_id=rec.id,
@@ -125,21 +173,24 @@ def expand_targets(records: list[SavedStrategy]) -> list[ScanTarget]:
                         strategy=str(item["strategy"]),
                         strategy_label=str(item.get("strategy_label") or ""),
                         params=item.get("params") or {},
-                        symbol=normalize_symbol(str(symbol)),
+                        symbol=norm,
                         category=str(item.get("category") or "DAY"),
                     )
                 )
         else:
             # single 与 portfolio 同构：portfolio 把同策略铺到多只标的
             stocks = ctx.get("stocks") if rec.kind == "portfolio" else None
-            symbols = [str(s) for s in stocks] if isinstance(stocks, list) and stocks else None
-            if symbols is None:
+            sym_list = [str(s) for s in stocks] if isinstance(stocks, list) and stocks else None
+            if sym_list is None:
                 symbol = ctx.get("symbol")
                 if not symbol:
                     targets.append(_error_target(rec, "缺少标的上下文（symbol）"))
                     continue
-                symbols = [str(symbol)]
-            for sym in symbols:
+                sym_list = [str(symbol)]
+            for sym in sym_list:
+                norm = normalize_symbol(sym)
+                if wanted_symbols is not None and norm not in wanted_symbols:
+                    continue
                 targets.append(
                     ScanTarget(
                         strategy_id=rec.id,
@@ -148,7 +199,7 @@ def expand_targets(records: list[SavedStrategy]) -> list[ScanTarget]:
                         strategy=rec.strategy,
                         strategy_label=rec.strategy_label,
                         params=rec.params or {},
-                        symbol=normalize_symbol(sym),
+                        symbol=norm,
                         category=str(ctx.get("category") or "DAY"),
                     )
                 )
@@ -172,12 +223,15 @@ def _error_target(rec: SavedStrategy, message: str) -> ScanTarget:
 async def fetch_scan_bars(
     client: Any,
     targets: list[ScanTarget],
+    gateway: Any = None,
 ) -> dict[tuple[str, str], pd.DataFrame | None]:
     """按 (symbol, category) 去重取最近 ``SCAN_BARS`` 根 K 线（async，event loop 内调用）。
 
-    同一标的被多个策略引用时只取一次。单个标的取数失败/数据无效记 None
+    同一标的被多个策略引用时只取一次。A 股走标准协议，港股 / 美股走
+    扩展栈（``gateway``）。单个标的取数失败/数据无效记 None
     （不中断整批），run_scan 会给相关行统一标 error。
     """
+    from easy_tdx.markets import is_ex, normalize_market
     from easy_tdx.web.convert import category_from_str, market_from_str
 
     bars: dict[tuple[str, str], pd.DataFrame | None] = {}
@@ -186,14 +240,20 @@ async def fetch_scan_bars(
         if key in bars or t.error:
             continue
         try:
-            market_str, code = t.symbol.split(":", 1)
-            df = await client.get_security_bars(
-                market_from_str(market_str),
-                code,
-                category_from_str(t.category),
-                0,
-                SCAN_BARS,
-            )
+            market_str, _, code = t.symbol.partition(":")
+            token = normalize_market(market_str.strip().upper())
+            if is_ex(token):
+                if gateway is None or not gateway.ex_available:
+                    raise ValueError("扩展市场协议栈未连接")
+                df = await gateway.bars(token, code, category_from_str(t.category), 0, SCAN_BARS)
+            else:
+                df = await client.get_security_bars(
+                    market_from_str(market_str),
+                    code,
+                    category_from_str(t.category),
+                    0,
+                    SCAN_BARS,
+                )
         except Exception as exc:  # noqa: BLE001 — 单标的失败不中断整批
             logger.warning("信号扫描取数失败 %s: %s", t.symbol, exc)
             bars[key] = None

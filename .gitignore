@@ -40,3 +40,27 @@ web-ui/playwright-report/
 
 # ZCode agent 会话目录（本地，不入库）
 .zcode/
+
+# 本地 akshare 探测脚本（根目录临时试验用，非库代码）
+_ak*.py
+
+# uv 锁定文件（本项目文档以 pip 为准，uv.lock 属本机工具链产物）
+uv.lock
+
+# IDE / 操作系统杂项
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 通用日志与 Office 临时文件
+*.log
+~$*
+
+# 本地环境变量文件（可能含 API Key / 服务器地址，切勿入库）
+.env
+.env.*
+!.env.example
+
+# 本地配置目录（~/.easy_tdx 的项目内副本，含密钥与自选数据）
+.easy_tdx/

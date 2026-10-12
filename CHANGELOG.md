@@ -2,6 +2,55 @@
 
 本文件记录 easy-tdx 的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [未发布] — 2026-10-12
+
+**全量代码审查（前后端）后的修复**——对 `src/easy_tdx`（280 个模块）与 `web-ui/src`（44 组件 / 22 视图 / 3 store）做前后端并行深审，本轮落地全部确认缺陷：协议层连接作废、组合回测交易成本被抹除、实时轮询时区错位、sqlite 短连接 fd 泄漏、推送地址 SSRF、前端长轮询无中止与图表叠加失效等。基线静态检查（ruff / mypy --strict / vue-tsc）与测试套件（~1800 项）在改动前后均全绿。
+
+### 数据正确性（影响回测数字可信性）
+
+- **组合再平衡交易成本不再被抹除**（[rebalance.py](src/easy_tdx/portfolio/rebalance.py)）：`_rebalance` 末尾用 `cash = total_value - 新持仓市值` 整行覆盖现金，把卖出净额与全部佣金/滑点一并抹除——净值等价于"零成本交易"，而 `trades_df` 照常记录 `cost`，报表与净值自相矛盾、收益被系统性高估。现改为「总市值 − 新持仓市值 − 本次全部交易成本」，并按 `(1+费率)` 折算买入预算，避免满仓时费用超支导致现金转负。
+- **无价持仓不再被静默清零**（同上）：某标的当日缺 K 线且无最近已知价时，`del holdings[code]` 在 `if price > 0` 之外执行，等于一次性亏掉整个仓位市值；现挂起至下一交易日。
+- **协议流错位不再产出"合法"脏数据**（[transport/sync.py](src/easy_tdx/transport/sync.py)、[ex/transport/sync.py](src/easy_tdx/ex/transport/sync.py)）：`execute()` 遇 `OSError` 只抛异常、不作废 socket，残留字节会被下一条请求当成帧头解析 → 产出价格/日期错误的数据或死等超时；现失败即关闭连接交由上层重连。
+- **帧头魔数校验**（[codec/frame.py](src/easy_tdx/codec/frame.py)）：`parse_header` 此前完全不校验 `magic`（恒为 7654321），任意 16 字节垃圾都能得到"合法" `zipsize`；现校验不符即抛 `TdxConnectionError`（此前 `TdxDecodeError` 不是其子类，不会被上层重连逻辑捕获）。
+- **被拒委托不再计入胜率**（[performance.py](src/easy_tdx/backtest/performance.py)）：`rejected=True` 的 SELL（`pnl` 恒为 0）此前被 `pnl<=0` 判为亏损，凭空拉低胜率、抬高总笔数与最大连亏（`reject_policy="skip"` 时尤甚）。
+- **策略 API 不再隐式前视**（[strategy.py](src/easy_tdx/backtest/strategy.py)）：`close[1]` 等正索引此前静默返回**下一根** bar 的值；现按"不可用"返回 NaN 并补充上界检查。
+
+### 实盘/运维正确性
+
+- **实时轮询时区统一沪市**（[realtime/feed.py](src/easy_tdx/realtime/feed.py)）：交易时段判定用 `time.localtime`（主机本地时区），UTC 主机上沪深 09:30–15:00 被判为盘外 → 整天不拉数据、本地半夜狂拉；改用 `SHANGHAI_TZ`，与 `realtime/session.py` 同口径。
+- **跨主机故障转移节流初值修复**（[_reconnect.py](src/easy_tdx/_reconnect.py)）：`_last_failover_ts` 初值 `0.0` 而 `time.monotonic()` 是开机以来秒数，机器启动头 30 秒内所有故障转移被静默跳过（容器/CI 必中）；改 `-inf`，并把「检查+标记」改为原子操作消除惊群。
+- **config.json 读-改-写加锁**（[config.py](src/easy_tdx/config.py)）：各 `save_best_*` 并发调用时后写者用旧快照整体覆写、丢失他人写入；现统一走锁内的原子 `_update()`。
+- **`run_sync` 的守卫不再被自己吞掉**（[realtime/feed.py](src/easy_tdx/realtime/feed.py)）：`raise RuntimeError` 被紧随的 `except RuntimeError` 接住，用户在事件循环内误用不会被提示，只默默建了孤立 loop。
+- **统一客户端关闭不再漏关**（[unified.py](src/easy_tdx/unified.py)）：`_mac.close()` 抛异常会跳过 `_mac_ex` 的关闭，泄漏扩展行情连接；现各自 try/except。
+- **空候选列表不再崩**（[transport/sync.py](src/easy_tdx/transport/sync.py)）：`ThreadPoolExecutor(max_workers=len(hosts))` 在 `hosts=[]` 时 `ValueError`。
+- **分页拼接去掉 O(n²)**（[ex/mac_client.py](src/easy_tdx/ex/mac_client.py)）：板块成分股 1250 轮 `list + list` 改为 `extend`。
+
+### 安全
+
+- **推送 webhook 地址校验**（[web/push.py](src/easy_tdx/web/push.py)）：endpoint 直通 `urlopen` 且无 scheme 校验，`file://` 可被读本地文件；现仅允许 http/https，并禁用重定向（防 302 到 `file://` 绕过）。
+- **vipdoc 查询参数校验 + 缓存限幅**（[web/routers/market.py](src/easy_tdx/web/routers/market.py)）：三个 GET 端点的 `vipdoc` 参数未校验直达文件系统遍历（任意目录可被当数据目录），且作为无上限缓存键；现与 PUT 同套校验并给缓存加上限。
+- **服务器地址校验加固**（[config.py](src/easy_tdx/config.py)）：候选 host 限定为纯主机形态（拒绝 scheme/路径/凭据/内嵌端口），避免任意 URL 串进入连接层。
+- **CORS 合规**（[web/app.py](src/easy_tdx/web/app.py)）：`allow_origins=["*"]` + `allow_credentials=True` 是规范禁止组合（Starlette 会退化为回显 Origin）；本应用不用凭据，已显式关闭 credentials。
+
+### 资源泄漏
+
+- **SQLite 短连接真正关闭**（新增 [web/_sqlite.py](src/easy_tdx/web/_sqlite.py)，应用于 strategy_store / watchlist_store / custom_strategy_store / llm_history_store）：`sqlite3.Connection` 的 `with` 只 commit/rollback、**不 close**，每次调用泄漏一个 fd；现返回退出即关闭的连接子类。
+- **符号索引连接泄漏**（[web/symbol_index.py](src/easy_tdx/web/symbol_index.py)）：`from_best_host()+connect()` 位于 `try/finally` 之外，扩展行情不可达时每次请求泄漏一条 socket；另修：回源失败时不再把**空索引**以 12 小时 TTL 写入内存缓存（否则一次抖动致全市场搜索 12 小时内恒空），并透传已持有的共享 client、磁盘解析移出事件循环。
+
+### 前端
+
+- **主图叠加（MA/BOLL/EMA）勾选失效**（[StockKline.vue](web-ui/src/components/StockKline.vue)、[BoardDialog.vue](web-ui/src/components/BoardDialog.vue)）：`watch` 未包含 `props.overlays`（父组件是原地改参数对象，`params` 引用不变），且板块弹窗传的是一个从未赋值的 `overlay` ref → chip 高亮变了图不动；现纳入监听并去掉死 ref。
+- **长轮询可中止**（[SignalRadarView.vue](web-ui/src/views/SignalRadarView.vue)、[SentimentView.vue](web-ui/src/views/SentimentView.vue)、[api.ts](web-ui/src/api.ts)）：信号扫描（最长 300s）与 AI 解读（最长 20min）此前无 `AbortController`，离开页面后仍持续打 HTTP 并写已卸载组件；现支持中止并在 `onBeforeUnmount` 清理。
+- **定时器/连接回收**（[App.vue](web-ui/src/App.vue)、[MarketTopbar.vue](web-ui/src/components/MarketTopbar.vue)、[SymbolPicker.vue](web-ui/src/components/SymbolPicker.vue)）：全局 SSE 无 `close()` 调用路径、60s 会话定时器与搜索防抖定时器无清理；均已补齐卸载钩子。
+- **请求竞态守卫**（[StockDialog.vue](web-ui/src/components/StockDialog.vue)、[BoardDialog.vue](web-ui/src/components/BoardDialog.vue)）：快速切换标的时旧响应覆盖新结果（分时与日K可能分属两只票）；补 `chartSeq` 序号守卫。
+- **重复提交防护**（[BacktestView.vue](web-ui/src/views/BacktestView.vue)、[OptimizeView.vue](web-ui/src/views/OptimizeView.vue)）：取行情阶段（数秒）按钮未禁用，连点会并发两条回测/寻优任务；补 `submitting` 锁。
+- **迷你分时不再整日不刷新**（[WatchlistView.vue](web-ui/src/views/WatchlistView.vue)）：`continue` 让 60s 定时器从第二次起纯空转，且两个 Map 只增不减；现按当前自选裁剪并真正重拉。
+- **任务轮询结果为空即报错**（[stores/backtest.ts](web-ui/src/stores/backtest.ts)）：`done` 但 `result` 为空时会空转到超时。
+
+### 测试
+
+- 新增回归：组合交易成本必须降低净值、现金不为负（[test_portfolio_rebalance.py](tests/unit/test_portfolio_rebalance.py)）；sqlite 短连接退出即关闭/异常回滚（[test_web_sqlite_connections.py](tests/unit/test_web_sqlite_connections.py)）；帧头魔数校验（[test_codec_frame.py](tests/unit/test_codec_frame.py)）；显式 vipdoc 参数须为已存在目录（[test_vipdoc_settings.py](tests/unit/test_vipdoc_settings.py)）。
+
 ## [1.32.6] — 2026-09-06
 
 **两周改动深度审查后的全面修复**——对 v1.21→v1.32.5 的 249 个文件、4.2 万行改动做六路专项审查，本轮落地全部修复：回测数字可信性（组合收益虚增 / 轮动停牌成交 / WF 指标稀释三件套）、LLM 安全加固（封死 file:// 读取与 API Key 外送链）、涨跌停价舍入漏判、数据源与缓存正确性、前端请求竞态等，共 58 处行为修复、约 60 条"先红后绿"回归测试。

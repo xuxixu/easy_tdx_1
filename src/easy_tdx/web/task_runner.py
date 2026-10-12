@@ -179,6 +179,40 @@ class BacktestTaskRunner:
         state = self.peek(task_id)
         return state.status if state else None
 
+    def delete(self, task_id: str) -> TaskState:
+        """删除已终态（done/failed）任务：内存摘除 + 磁盘删除，返回被删状态。
+
+        运行中/排队中（pending/running）拒绝删除并抛 RuntimeError——
+        工作线程结束时仍会写回磁盘，删内存会留下僵尸记录。
+        不存在抛 KeyError。
+        """
+        with self._lock:
+            state = self._tasks.get(task_id)
+            if state is not None:
+                if state.status in ("pending", "running"):
+                    raise RuntimeError(f"任务 {task_id} 仍在执行中，完成后可删除")
+                self._tasks.pop(task_id, None)
+                try:
+                    get_task_store().delete(task_id)
+                except Exception:  # noqa: BLE001 — 持久化故障不阻断内存删除
+                    logger.exception("任务持久化：删除 %s 磁盘记录失败", task_id)
+                return state
+        # 锁外恢复：只在磁盘上（进程重启后内存 LRU 已淘汰）。
+        # _restore_from_store 会把状态插回内存，拿到后再走内存路径删除。
+        restored = self._restore_from_store(task_id)
+        if restored is None:
+            raise KeyError(f"未知任务 '{task_id}'")
+        with self._lock:
+            live = self._tasks.get(task_id, restored)
+            if live.status in ("pending", "running"):
+                raise RuntimeError(f"任务 {task_id} 仍在执行中，完成后可删除")
+            self._tasks.pop(task_id, None)
+            try:
+                get_task_store().delete(task_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("任务持久化：删除 %s 磁盘记录失败", task_id)
+            return live
+
     def shutdown(self, wait: bool = True) -> None:
         """关闭执行器（应用退出时调用）。
 

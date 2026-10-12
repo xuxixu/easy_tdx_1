@@ -40,11 +40,23 @@ def _json_safe(v: Any) -> Any:
 
 
 class MarketEnum(IntEnum):
-    """Market identifier."""
+    """Market identifier.
+
+    A 股在 REST 层是 0/1/2 单字节；港股与美股走扩展市场协议栈，
+    取值远大于 2（港股 31/48/49/27/98，美股 74），因此本枚举只覆盖 A 股——
+    港美股的校验请用 :func:`easy_tdx.markets.normalize_market` + 正则，
+    不要拿它当全市场枚举用。
+    """
 
     SZ = 0
     SH = 1
     BJ = 2
+
+
+#: REST 层接受的市场令牌正则（A股 3 个 + 港股 + 美股）。
+#: 刻意写成大写：FastAPI 会用这个 pattern 直接卡请求，大小写混写
+#: （如 ``"hk"``）会被 422 挡掉——前端已统一转大写，这里保持严格。
+MARKET_PATTERN = r"^(SZ|SH|BJ|HK|US)$"
 
 
 class KlineCategoryEnum(IntEnum):
@@ -78,8 +90,10 @@ class AdjustEnum(IntEnum):
 class StockIdentifier(BaseModel):
     """A single stock identified by market + code."""
 
-    market: str = Field(..., pattern=r"^(SZ|SH|BJ)$", description="市场代码")
-    code: str = Field(..., min_length=6, max_length=6, description="6位股票代码")
+    market: str = Field(..., pattern=MARKET_PATTERN, description="市场代码")
+    # 代码长度随市场而变：A 股 6 位数字、港股 5 位数字、美股字母 ticker，
+    # 统一放宽到 1-12 位，具体格式由 validate_code(market=...) 按市场再校验。
+    code: str = Field(..., min_length=1, max_length=12, description="证券代码")
 
 
 class QuoteRequest(BaseModel):
@@ -93,8 +107,8 @@ class QuoteRequest(BaseModel):
 class ChanlunRequest(BaseModel):
     """缠论分析请求。"""
 
-    market: str = Field(..., pattern=r"^(SZ|SH|BJ)$")
-    code: str = Field(..., min_length=6, max_length=6)
+    market: str = Field(..., pattern=MARKET_PATTERN)
+    code: str = Field(..., min_length=1, max_length=12)
     category: str = Field(default="DAY", description="K线周期")
     count: int = Field(default=800, ge=1, le=800)
     start: int = Field(default=0, ge=0)

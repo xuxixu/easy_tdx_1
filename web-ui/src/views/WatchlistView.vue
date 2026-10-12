@@ -18,12 +18,14 @@ import {
 import StockDialog from '../components/StockDialog.vue'
 import BoardDialog from '../components/BoardDialog.vue'
 import Sparkline from '../components/Sparkline.vue'
-import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol } from '../format'
-import { detectMarket } from '../market'
+import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol, fmtVolShares } from '../format'
+import { detectAShareMarket } from '../market'
+import { useMarketStore } from '../stores/market'
 import { useQuoteStore } from '../stores/quotes'
 import type { WatchItem, WatchReturnItem } from '../types'
 
 const quoteStore = useQuoteStore()
+const marketStore = useMarketStore()
 
 // 近 N 交易日涨跌幅（交易日偏移口径，见后端 /watchlist/returns）：列名与窗口一一对应，
 // 窗口本身由后端 returns.DEFAULT_WINDOWS 固定，这里只负责标签与取值顺序。
@@ -33,8 +35,10 @@ const WINDOWS: ReadonlyArray<{ days: number; label: string }> = [
   { days: 10, label: '近2周' },
 ]
 
-/** 板块指数（881/885/880 开头）走板块弹窗，其余走个股弹窗。 */
-function isBoardCode(code: string): boolean {
+/** 板块指数（881/885/880 开头）走板块弹窗，其余走个股弹窗。
+ * 仅 A 股有板块概念，港美股一律走个股弹窗。 */
+function isBoardCode(market: string, code: string): boolean {
+  if (market === 'HK' || market === 'US') return false
   return /^88\d/.test(code)
 }
 
@@ -155,25 +159,47 @@ const sparks = ref(new Map<string, number[]>())
 const sparkBase = ref(new Map<string, number>())
 
 async function loadSparks() {
-  const targets = items.value.slice(0, 80)
-  for (const it of targets) {
-    if (sparks.value.has(it.symbol)) continue
-    try {
-      const pts = await fetchMinute(it.market, it.code)
-      if (pts.length > 0) {
-        sparks.value.set(it.symbol, pts.map((p) => p.price))
-        const qq = q(it)
-        sparkBase.value.set(it.symbol, qq?.pre_close ?? pts[0].price)
+  if (sparkBusy) return // 上一轮还没跑完就跳过，避免慢请求下定时器堆积
+  sparkBusy = true
+  try {
+    const targets = items.value.slice(0, 80)
+    // 先按当前列表裁剪：删掉的自选不能继续留在两个 Map 里（此前只增不减）
+    const alive = new Set(targets.map((it) => it.symbol))
+    for (const k of [...sparks.value.keys()]) {
+      if (!alive.has(k)) {
+        sparks.value.delete(k)
+        sparkBase.value.delete(k)
       }
-    } catch {
-      // 单只失败不影响整表
     }
+    for (const it of targets) {
+      try {
+        const pts = await fetchMinute(it.market, it.code)
+        if (pts.length > 0) {
+          // 直接替换整个 Map 引用，确保 Vue 能感知变化（Map.set 本身是响应式的，
+          // 但替换引用对下游 computed 更稳妥）
+          const next = new Map(sparks.value)
+          next.set(it.symbol, pts.map((p) => p.price))
+          sparks.value = next
+          const qq = q(it)
+          const nextBase = new Map(sparkBase.value)
+          nextBase.set(it.symbol, qq?.pre_close ?? pts[0].price)
+          sparkBase.value = nextBase
+        }
+      } catch {
+        // 单只失败不影响整表
+      }
+    }
+  } finally {
+    sparkBusy = false
   }
 }
 
+let sparkBusy = false
 let sparkTimer = 0
 onMounted(() => {
   loadList()
+  // 盘内每 60s 重拉一次迷你分时（此前循环里的 `continue` 让第二次起全是空转，
+  // 分时图一整天不更新）
   sparkTimer = window.setInterval(loadSparks, 60_000)
 })
 onBeforeUnmount(() => window.clearInterval(sparkTimer))
@@ -181,12 +207,30 @@ onBeforeUnmount(() => window.clearInterval(sparkTimer))
 // ── 加/删自选 ───────────────────────────────────────────────────────────────
 
 async function add() {
-  const code = addCode.value.trim()
-  if (!/^\d{6}$/.test(code)) {
-    listError.value = '请输入 6 位数字代码'
-    return
+  const rawCode = addCode.value.trim().toUpperCase()
+  const mkt = marketStore.market
+  // 代码形状跟随顶栏市场：A 股 6 位数字 / 港股 4-5 位数字 / 美股字母
+  let market: string
+  if (mkt === 'HK') {
+    if (!/^\d{4,5}$/.test(rawCode)) {
+      listError.value = '港股代码为 4-5 位数字（如 00700）'
+      return
+    }
+    market = 'HK'
+  } else if (mkt === 'US') {
+    if (!/^[A-Z][A-Z0-9.\-]{0,11}$/.test(rawCode)) {
+      listError.value = '美股代码为字母（如 AAPL）'
+      return
+    }
+    market = 'US'
+  } else {
+    if (!/^\d{6}$/.test(rawCode)) {
+      listError.value = '请输入 6 位数字代码'
+      return
+    }
+    market = detectAShareMarket(rawCode)
   }
-  const market = detectMarket(code)
+  const code = rawCode
   adding.value = true
   listError.value = ''
   try {
@@ -234,14 +278,20 @@ const dialog = ref<WatchItem | null>(null)
 const boardDlg = ref<WatchItem | null>(null)
 
 function openItem(item: WatchItem) {
-  if (isBoardCode(item.code)) boardDlg.value = item
+  if (isBoardCode(item.market, item.code)) boardDlg.value = item
   else dialog.value = item
 }
 
 const emptyHint = computed(() =>
   items.value.length === 0 && !listError.value
-    ? '自选为空：输入 6 位代码加入（如 600519）。加入后行情实时推送。'
+    ? `自选为空：当前${marketStore.market === 'HK' ? '港股' : marketStore.market === 'US' ? '美股' : 'A股'}模式，输入${
+        marketStore.market === 'US' ? '字母代码加入（如 AAPL）' : marketStore.market === 'HK' ? '4-5 位代码加入（如 00700）' : '6 位代码加入（如 600519）'
+      }。加入后行情实时推送。`
     : '',
+)
+
+const addPlaceholder = computed(() =>
+  marketStore.market === 'US' ? '字母代码' : marketStore.market === 'HK' ? '4-5 位代码' : '6 位代码',
 )
 </script>
 
@@ -250,7 +300,7 @@ const emptyHint = computed(() =>
     <div class="toolbar">
       <h2>自选行情</h2>
       <div class="add-row">
-        <input v-model="addCode" class="code-input" placeholder="6 位代码" maxlength="6" @keyup.enter="add" />
+        <input v-model="addCode" class="code-input" :placeholder="addPlaceholder" :maxlength="marketStore.market === 'US' ? 12 : 6" @keyup.enter="add" />
         <input v-model="addName" class="name-input" placeholder="备注名（可空）" maxlength="16" @keyup.enter="add" />
         <button class="primary" :disabled="adding" @click="add">{{ adding ? '加入中…' : '加入自选' }}</button>
       </div>
@@ -300,7 +350,7 @@ const emptyHint = computed(() =>
             <td :class="dirClass(pct(item))">
               {{ q(item)?.price && q(item)?.pre_close ? fmt2(q(item)!.price! - q(item)!.pre_close!) : '-' }}
             </td>
-            <td>{{ fmtVol(q(item)?.vol) }}</td>
+            <td>{{ item.market === 'HK' || item.market === 'US' ? fmtVolShares(q(item)?.vol) : fmtVol(q(item)?.vol) }}</td>
             <td>{{ fmtAmount(q(item)?.amount) }}</td>
             <td>{{ fmt2(q(item)?.high) }}</td>
             <td>{{ fmt2(q(item)?.low) }}</td>

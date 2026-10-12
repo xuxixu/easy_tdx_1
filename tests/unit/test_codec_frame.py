@@ -3,11 +3,17 @@
 import struct
 import zlib
 
-from easy_tdx.codec.frame import HEADER_SIZE, decompress_body, parse_header
+import pytest
+
+from easy_tdx.codec.frame import HEADER_SIZE, FrameHeader, decompress_body, parse_header
+from easy_tdx.exceptions import TdxConnectionError
+
+# 协议魔数，恒为 7654321（真实响应帧头里必须有它）
+MAGIC = 7654321
 
 
-def _make_header(zipsize: int, unzipsize: int) -> bytes:
-    return struct.pack("<IIIHH", 0, 0, 0, zipsize, unzipsize)
+def _make_header(zipsize: int, unzipsize: int, magic: int = MAGIC) -> bytes:
+    return struct.pack("<IIIHH", magic, 0, 0, zipsize, unzipsize)
 
 
 class TestParseHeader:
@@ -23,6 +29,21 @@ class TestParseHeader:
 
     def test_header_size(self):
         assert HEADER_SIZE == 16
+
+    def test_magic_preserved(self):
+        h = parse_header(_make_header(10, 10))
+        assert h.magic == MAGIC
+
+    def test_bad_magic_raises_connection_error(self):
+        """magic 不符说明响应流已错位，必须抛 TdxConnectionError 触发重连，
+        而不是产出垃圾数据（TdxDecodeError 不会被上层重连逻辑捕获）。"""
+        with pytest.raises(TdxConnectionError):
+            parse_header(_make_header(10, 10, magic=0))
+
+    def test_frame_header_is_frozen_dataclass(self):
+        h = FrameHeader(MAGIC, 0, 0, 1, 1)
+        with pytest.raises(Exception):
+            h.magic = 1  # type: ignore[misc]
 
 
 class TestDecompressBody:

@@ -338,7 +338,7 @@ def test_signal_scan_endpoint_e2e(api_client, monkeypatch) -> None:
         def list_all(self) -> list[SavedStrategy]:
             return [_single()]
 
-    async def fake_fetch(client, targets):  # noqa: ANN001
+    async def fake_fetch(client, targets, gateway=None):  # noqa: ANN001
         return {("SH:601088", "DAY"): df}
 
     monkeypatch.setattr(store_mod, "get_store", lambda: FakeStore())

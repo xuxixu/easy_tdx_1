@@ -1,22 +1,39 @@
 <script setup lang="ts">
 // 大盘日历（/calendar）：指数全年每日涨跌红绿日历热力图（GitHub 贡献图风格）。
-// 数据 = /bars/index 指数日K（上证/深成/创业板），前端算逐日涨跌幅、按年渲染 12 个月块。
+// 数据 = 指数日K（A股走 /bars/index；港美股走 /bars），前端算逐日涨跌幅、按年渲染 12 个月块。
+// 指数随顶栏市场切换：沪/深=上证、北交=北证50、港股=恒生+国企+恒科、美股=道指+纳指+标普。
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { fetchIndexBars, formatError } from '../api'
+import { fetchBars, fetchIndexBars, formatError } from '../api'
 import { fmt2, fmtAmount, fmtPctSigned, pctCellStyle } from '../format'
+import { enabledIndices } from '../indexIndicators'
+import { useMarketStore } from '../stores/market'
 import type { Bar } from '../types'
 
-const INDICES = [
-  { market: 'SH', code: '000001', name: '上证指数' },
-  { market: 'SZ', code: '399001', name: '深证成指' },
-  { market: 'SZ', code: '399006', name: '创业板指' },
-] as const
+const marketStore = useMarketStore()
 
-type DailyPoint = { date: string; pct: number | null; close: number; amount: number }
+// 指数清单取自「指数设置」页配置（与看板指数条同一份）。
+const indices = computed(() =>
+  enabledIndices(marketStore.market).map((x) => ({
+    market: x.market,
+    code: x.code,
+    name: x.name,
+  })),
+)
 
 const activeIdx = ref(0)
-const barsByIndex = new Map<number, Bar[]>()
+const barsByIndex = new Map<string, Bar[]>()
+
+watch(
+  () => marketStore.market,
+  () => {
+    activeIdx.value = 0
+    barsByIndex.clear()
+    loadIndex(0)
+  },
+)
+
+type DailyPoint = { date: string; pct: number | null; close: number; amount: number }
 
 const loading = ref(false)
 const error = ref('')
@@ -24,7 +41,10 @@ const bars = ref<Bar[]>([])
 const lastUpdate = ref('')
 
 async function loadIndex(idx: number) {
-  const cached = barsByIndex.get(idx)
+  const meta = indices.value[idx]
+  if (!meta) return
+  const key = `${meta.market}${meta.code}`
+  const cached = barsByIndex.get(key)
   if (cached) {
     bars.value = cached
     error.value = '' // 其他指数的失败/空数据提示不带到已缓存的指数上
@@ -34,14 +54,16 @@ async function loadIndex(idx: number) {
   loading.value = true
   error.value = ''
   try {
-    const meta = INDICES[idx]
-    const data = await fetchIndexBars(meta.market, meta.code, 550) // ≈2.2 年
+    // A 股指数走 /bars/index；港美股指数/ETF 走通用 /bars（网关分流）
+    const data = marketStore.isAShareMode
+      ? await fetchIndexBars(meta.market, meta.code, 550) // ≈2.2 年
+      : await fetchBars(meta.market, meta.code, 'DAY', undefined, undefined)
     if (data.length === 0) {
       // 空数据不入缓存：否则"重试"命中缓存直接 return，永远无法重新请求
       error.value = `${meta.name} 日K返回空`
       return
     }
-    barsByIndex.set(idx, data)
+    barsByIndex.set(key, data)
     bars.value = data
     lastUpdate.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (e) {
@@ -207,7 +229,7 @@ onMounted(() => loadIndex(activeIdx.value))
     <div class="toolbar">
       <span class="seg">
         <button
-          v-for="(m, i) in INDICES"
+          v-for="(m, i) in indices"
           :key="m.code"
           :class="{ on: activeIdx === i }"
           @click="onIndexChange(i)"
@@ -490,7 +512,7 @@ onMounted(() => loadIndex(activeIdx.value))
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px var(--shadow);
   white-space: nowrap;
 }
 .ft-line.up {

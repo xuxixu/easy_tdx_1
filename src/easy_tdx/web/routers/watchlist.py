@@ -22,14 +22,15 @@ from typing import Any, NamedTuple
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as PathParam
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 from easy_tdx.exceptions import TdxConnectionError
 from easy_tdx.mac.enums import Adjust, Period
 from easy_tdx.models.enums import KlineCategory, Market
 from easy_tdx.realtime.session import SHANGHAI_TZ, is_trading_time
 from easy_tdx.web.convert import market_from_str, market_value_from_str
-from easy_tdx.web.deps import get_client, get_mac_client_optional
+from easy_tdx.web.deps import get_client, get_gateway, get_mac_client_optional
+from easy_tdx.web.market_gateway import validate_code
 from easy_tdx.web.returns import (
     DEFAULT_WINDOWS,
     StockReturns,
@@ -42,8 +43,14 @@ _logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["watchlist"])
 
-# 6 位数字代码（自选会被 QuoteStreamer 拿去轮询，非数字代码产生无效请求）
-_CODE_PATTERN = r"^\d{6}$"
+#: 证券代码的四种合法形状（A 股 6 位数字 / 港股 4-5 位数字或 HKxxxx 板块 /
+#: 美股字母 ticker 或 USxxxx 板块）。这里只管"像不像某一种"；市场与代码
+#: 是否**匹配**由 :meth:`WatchItemAdd._check_market_code` 交叉校验——单靠
+#: pattern 表达不了 "5 位数字对深市非法、对港股合法" 这类规则。
+_CODE_PATTERN = r"^(?:\d{6}|\d{4,5}|[A-Z][A-Z0-9.\-]{0,11}|(?:HK|US)\d{4})$"
+
+#: 自选支持的市场令牌（A 股 3 个 + 港股 + 美股）。
+_MARKETS = frozenset({"SZ", "SH", "BJ", "HK", "US"})
 
 # ── 近 N 交易日涨跌幅（issue #7）────────────────────────────────────────────
 
@@ -76,10 +83,21 @@ _bars_cache: dict[str, tuple[str, list[tuple[date, float]]]] = {}
 class WatchItemAdd(BaseModel):
     """加入自选请求。name 由前端从行情数据带过来。"""
 
-    market: str = Field(..., pattern=r"^(SZ|SH|BJ)$")
+    market: str = Field(..., pattern=r"^(SZ|SH|BJ|HK|US)$")
     code: str = Field(..., pattern=_CODE_PATTERN)
     name: str = Field("", max_length=64)
     group: str = Field("默认", max_length=32)
+
+    @model_validator(mode="after")
+    def _check_market_code(self) -> WatchItemAdd:
+        """市场与代码形状必须匹配。
+
+        全局正则放行了 6 位 / 4-5 位 / 字母三种形状，但它们与市场一一对应：
+        ``SZ:00001``（5 位）不是深市代码而是港股代码，``HK:AAPL`` 也不存在。
+        跨市场错配会在取数时静默返回空结果，比直接 422 难查得多。
+        """
+        validate_code(self.code, self.market)
+        return self
 
 
 class WatchlistResponse(BaseModel):
@@ -178,13 +196,29 @@ def _series_from_df(df: Any) -> list[tuple[date, float]]:
 
 
 async def _fetch_bars(
-    market: str, code: str, mac_client: Any, client: Any, *, is_index: bool = False
+    market: str,
+    code: str,
+    mac_client: Any,
+    client: Any,
+    *,
+    is_index: bool = False,
+    gateway: Any = None,
 ) -> list[tuple[date, float]]:
     """按 ``/bars`` 语义取日线：MAC 优先（QFQ）→ 标准 TdxClient 降级（不复权）。
+
+    港股 / 美股走扩展市场协议栈（``gateway``），A 股的 MAC/标准回退链
+    对它们不适用——两条栈互不相通，发过去只会 503。
 
     Raises:
         最后一级失败时的原始异常（调用方按"单只失败不影响整表"处理）。
     """
+    from easy_tdx.markets import is_ex
+
+    if is_ex(market):
+        if gateway is None or not gateway.ex_available:
+            raise TdxConnectionError(f"{market}{code} 需要扩展市场协议栈（端口 7727），当前未连接")
+        df = await gateway.bars(market, code, KlineCategory.DAY, 0, _BAR_COUNT)
+        return _series_from_df(df)
     if mac_client is not None:
         try:
             df = await mac_client.get_stock_kline(
@@ -247,13 +281,14 @@ async def _returns_for(
     day: str,
     mac_client: Any,
     client: Any,
+    gateway: Any = None,
 ) -> WatchReturnsItem:
     """单只自选 → 锚点结果；任何失败都收敛成 ``error``（整表不受影响）。"""
     try:
         cached = _bars_cache.get(item.symbol)
         bars = cached[1] if cached is not None and cached[0] == day else None
         if bars is None:
-            bars = await _fetch_bars(item.market, item.code, mac_client, client)
+            bars = await _fetch_bars(item.market, item.code, mac_client, client, gateway=gateway)
             if bars:
                 _bars_cache[item.symbol] = (day, bars)
         if not bars:
@@ -295,6 +330,7 @@ async def list_watchlist(
 async def watchlist_returns(
     mac_client: Any = Depends(get_mac_client_optional),
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> WatchlistReturnsResponse:
     """自选列表「近 3 日 / 近 1 周 / 近 2 周」涨跌幅的**锚点收盘价**（前端用实时价现算）。
 
@@ -332,7 +368,9 @@ async def watchlist_returns(
 
     async def one(item: WatchItem) -> tuple[str, WatchReturnsItem]:
         async with sem:
-            return item.symbol, await _returns_for(item, calendar, today, day, mac_client, client)
+            return item.symbol, await _returns_for(
+                item, calendar, today, day, mac_client, client, gateway
+            )
 
     pairs = await asyncio.gather(*(one(i) for i in items))
     return WatchlistReturnsResponse(trade_date=trade_date.isoformat(), items=dict(pairs))
@@ -348,11 +386,18 @@ async def add_watch_item(req: WatchItemAdd) -> dict[str, object]:
 @router.delete("/watchlist/{market}/{code}", response_model=dict[str, object])
 async def remove_watch_item(
     market: str,
-    code: str = PathParam(..., pattern=_CODE_PATTERN, description="6位数字代码"),
+    code: str = PathParam(
+        ..., pattern=_CODE_PATTERN, description="证券代码（A 股 6 位 / 港股 4-5 位 / 美股字母）"
+    ),
 ) -> dict[str, object]:
     """移除自选。"""
-    if market.upper() not in {"SZ", "SH", "BJ"}:
-        raise HTTPException(status_code=400, detail=f"非法市场: {market}")
+    if market.upper() not in _MARKETS:
+        valid = " / ".join(sorted(_MARKETS))
+        raise HTTPException(status_code=400, detail=f"非法市场: {market}（可选：{valid}）")
+    try:
+        validate_code(code, market)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     removed = get_watchlist_store().remove(market, code)
     if not removed:
         raise HTTPException(status_code=404, detail=f"自选中不存在 {market}{code}")

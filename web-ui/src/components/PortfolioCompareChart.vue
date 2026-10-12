@@ -3,7 +3,7 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts from '../echarts-setup'
+import echarts, { initChart, useChartRedraw } from '../echarts-setup'
 import { fmt2 } from '../format'
 import type { BacktestResult } from '../types'
 
@@ -18,7 +18,7 @@ function render() {
   if (!container.value) return
   const series = buildSeries()
   if (series.length === 0) return
-  chart ??= echarts.init(container.value, 'dark')
+  chart ??= initChart(container.value)
   chart.setOption(buildOption(series), true)
 }
 
@@ -85,7 +85,14 @@ function buildOption(
 
 function resize() {
   chart?.resize()
-}
+}// 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，
+// 只能 dispose 后按新主题重建（render 内已改成 initChart + 主题感知）。
+useChartRedraw(() => {
+  chart?.dispose()
+  chart = null
+  render()
+})
+
 onMounted(() => {
   render()
   window.addEventListener('resize', resize)

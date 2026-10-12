@@ -24,6 +24,10 @@ warehouse = ["duckdb>=1.0"]
 # baostock 自动兜底数据源（TDX 全部路径失败时的最后一级回退，仅日线及以上）。
 # 可选安装：不装则该回退环自动关闭，核心功能不受影响。
 baostock = ["baostock>=0.9"]
+# akshare 真指数历史数据源（美股 .DJI/.IXIC/.INX + 港股 HSI/HSCEI/HSTECH 全历史日K）。
+# 可选安装：不装则指数 K 线回落到腾讯快照（仅最新 1 根），实时报价不受影响。
+# 可用 EASY_TDX_AKSHARE=0 关闭。
+akshare = ["akshare>=1.19"]
 # 打包成桌面 EXE 用：系统托盘（pystray）+ 图标生成（Pillow）。
 # 仅 PyInstaller 打包态需要，开发态 ``pip install -e .[web]`` 不强制装。
 packaging = ["pystray>=0.19", "Pillow>=10.0"]

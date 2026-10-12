@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from easy_tdx.markets import SYMBOL_PATTERN, SYMBOL_REGEX
+
 __all__ = [
     "BacktestRequest",
     "BacktestResultResponse",
@@ -70,7 +72,7 @@ class BacktestRequest(BaseModel):
     # 数据来源 B：按标的取行情
     symbol: str | None = Field(
         default=None,
-        pattern=r"^(SZ|SH|BJ):\d{6}$",
+        pattern=SYMBOL_PATTERN,
         description="标的代码，格式 市场:代码，如 SZ:000001",
     )
     category: Literal["DAY", "WEEK", "MONTH", "MIN_5", "MIN_15", "MIN_30", "MIN_60"] = Field(
@@ -118,8 +120,10 @@ class PortfolioBacktestRequest(BaseModel):
     @model_validator(mode="after")
     def _check_stocks_format(self) -> PortfolioBacktestRequest:
         for s in self.stocks:
-            if not s.startswith(("SZ:", "SH:", "BJ:")) or len(s) != 9:
-                raise ValueError(f"标的格式应为 '市场:6位代码'，得到 {s!r}")
+            if not SYMBOL_REGEX.match(s):
+                raise ValueError(
+                    f"标的格式应为 '市场:代码'（如 SZ:000001 / HK:00700 / US:AAPL），得到 {s!r}"
+                )
         return self
 
 
@@ -160,7 +164,7 @@ class OptimizeBacktestRequest(BaseModel):
     ohlcv: list[dict[str, Any]] | None = Field(default=None, max_length=2000)
 
     # 数据来源 B：按标的取行情
-    symbol: str | None = Field(default=None, pattern=r"^(SZ|SH|BJ):\d{6}$")
+    symbol: str | None = Field(default=None, pattern=SYMBOL_PATTERN)
     category: Literal["DAY", "WEEK", "MONTH", "MIN_5", "MIN_15", "MIN_30", "MIN_60"] = Field(
         default="DAY"
     )
@@ -200,7 +204,7 @@ class OptimizeAllBacktestRequest(BaseModel):
     ohlcv: list[dict[str, Any]] | None = Field(default=None, max_length=2000)
 
     # 数据来源 B：按标的取行情
-    symbol: str | None = Field(default=None, pattern=r"^(SZ|SH|BJ):\d{6}$")
+    symbol: str | None = Field(default=None, pattern=SYMBOL_PATTERN)
     category: Literal["DAY", "WEEK", "MONTH", "MIN_5", "MIN_15", "MIN_30", "MIN_60"] = Field(
         default="DAY"
     )
@@ -449,7 +453,7 @@ class MultiStrategyItem(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     symbol: str = Field(
         ...,
-        pattern=r"^(SZ|SH|BJ):\d{6}$",
+        pattern=SYMBOL_PATTERN,
         description='标的完整代码，格式 "市场:6位代码"，如 "SH:601088"',
     )
     category: Literal["DAY", "WEEK", "MONTH", "MIN_5", "MIN_15", "MIN_30", "MIN_60"] = Field(
@@ -481,11 +485,20 @@ class MultiStrategyBacktestRequest(BaseModel):
 
 
 class SignalScanRequest(BaseModel):
-    """信号扫描请求：扫描策略库全部已保存策略，只看最近 N 根 K 线内的信号。"""
+    """信号扫描请求：扫描策略库已保存策略最近 N 根 K 线内的信号。
+
+    默认扫全部已保存策略；传 ``symbols`` 则只扫这些标的（"市场:代码"，
+    如 ``HK:00700``），传 ``strategy_ids`` 则只扫这些已保存策略 id。
+    两者可叠加——"某只股票 × 某几个保存策略"的定向扫描。
+    """
 
     window_bars: int = Field(
         default=5, ge=1, le=30, description="检查最近 N 根 K 线内的信号（日线即 N 个交易日）"
     )
+    symbols: list[str] | None = Field(
+        default=None, description="只扫描这些标的（MARKET:CODE，如 HK:00700）"
+    )
+    strategy_ids: list[str] | None = Field(default=None, description="只扫描这些已保存策略 id")
 
 
 class SignalScanRecentSignal(BaseModel):

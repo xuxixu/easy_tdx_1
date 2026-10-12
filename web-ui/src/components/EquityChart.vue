@@ -4,7 +4,7 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts from '../echarts-setup'
+import echarts, { chartAxisColor, initChart, useChartRedraw } from '../echarts-setup'
 import { fmt2 } from '../format'
 import type { EquityPoint } from '../types'
 
@@ -17,7 +17,7 @@ let chart: echarts.ECharts | null = null
 
 function render() {
   if (!container.value || props.equity.length === 0) return
-  chart ??= echarts.init(container.value, 'dark')
+  chart ??= initChart(container.value)
   chart.setOption(buildOption(), true)
 }
 
@@ -49,7 +49,7 @@ function buildOption(): echarts.EChartsCoreOption {
         name: '净值',
         scale: true,
         position: 'left',
-        splitLine: { lineStyle: { color: '#2a2e3a' } },
+        splitLine: { lineStyle: { color: chartAxisColor() } },
         axisLabel: { formatter: (v: number) => fmt2(v) },
       },
       {
@@ -87,6 +87,14 @@ function buildOption(): echarts.EChartsCoreOption {
 function resize() {
   chart?.resize()
 }
+
+// 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，
+// 只能 dispose 后按新主题重建（render 内已改成 initChart + 主题感知）。
+useChartRedraw(() => {
+  chart?.dispose()
+  chart = null
+  render()
+})
 
 onMounted(() => {
   render()

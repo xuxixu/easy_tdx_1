@@ -10,6 +10,7 @@ import {
   formatError,
 } from '../api'
 import { dirClass, fmt2, fmtPctSigned } from '../format'
+import { useMarketStore } from '../stores/market'
 import BoardDialog from '../components/BoardDialog.vue'
 import BoardRankRail from '../components/BoardRankRail.vue'
 import BoardStatStrip from '../components/BoardStatStrip.vue'
@@ -20,9 +21,24 @@ const props = defineProps<{
   boardType: 'HY' | 'GN'
 }>()
 
-// 行业页可切一级(HY)/二级(HY2)分类；概念页固定 GN
-const activeType = ref<'HY' | 'HY2' | 'GN'>(props.boardType)
+const marketStore = useMarketStore()
+
+// 板块类型按顶栏市场映射：A股 HY/HY2/GN；港股 HK_HY/HK_GN；美股 US_HY/US_GN。
+// 港美股没有二级分类（HY2），行业页直接用 HK_HY/US_HY。
+type ExBoard = 'HY' | 'HY2' | 'GN' | 'HK_HY' | 'HK_GN' | 'US_HY' | 'US_GN'
+
+function resolveBoardType(): ExBoard {
+  const m = marketStore.market
+  if (m === 'HK') return props.boardType === 'GN' ? 'HK_GN' : 'HK_HY'
+  if (m === 'US') return props.boardType === 'GN' ? 'US_GN' : 'US_HY'
+  return props.boardType === 'GN' ? 'GN' : activeTypeA.value
+}
+
+// A 股行业一/二级切换（港美股无二级，固定）。
+const activeTypeA = ref<'HY' | 'HY2'>('HY')
+const activeType = ref<ExBoard>(resolveBoardType())
 const isIndustry = computed(() => props.boardType !== 'GN')
+const isAShare = computed(() => marketStore.isAShareMode)
 
 const title = computed(() => (props.boardType === 'GN' ? '概念总览' : '行业总览'))
 const titleSub = computed(() =>
@@ -61,6 +77,11 @@ async function loadOverview() {
 }
 
 async function loadStat() {
+  // 市场统计条只有 A 股口径；港美股降级隐藏（BoardStatStrip 判空不渲染）
+  if (!marketStore.isAShareMode) {
+    stat.value = null
+    return
+  }
   try {
     stat.value = await fetchMarketStat()
   } catch {
@@ -141,7 +162,9 @@ const sortedRows = computed(() => {
 })
 
 function setLevel(t: 'HY' | 'HY2') {
-  if (activeType.value === t) return
+  if (!isAShare.value) return
+  if (activeTypeA.value === t) return
+  activeTypeA.value = t
   activeType.value = t
   resetAndReload()
 }
@@ -155,8 +178,18 @@ function resetAndReload() {
 
 watch(
   () => props.boardType,
-  (t) => {
-    activeType.value = t
+  () => {
+    activeType.value = resolveBoardType()
+    search.value = ''
+    resetAndReload()
+  },
+)
+
+// 顶栏市场切换 → 板块类型重映射并重载
+watch(
+  () => marketStore.market,
+  () => {
+    activeType.value = resolveBoardType()
     search.value = ''
     resetAndReload()
   },
@@ -176,6 +209,8 @@ function isTradeSession(now = new Date()): boolean {
   const day = now.getDay()
   if (day === 0 || day === 6) return false
   const m = now.getHours() * 60 + now.getMinutes()
+  if (marketStore.market === 'HK') return (m >= 570 && m <= 720) || (m >= 780 && m <= 960)
+  if (marketStore.market === 'US') return m >= 1290 || m <= 240
   return (m >= 555 && m <= 690) || (m >= 780 && m <= 905)
 }
 
@@ -223,7 +258,7 @@ function openBoard(r: BoardOverviewRow) {
   <div class="board-view">
     <div class="view-head">
       <h2>{{ title }}<span v-if="titleSub" class="dim head-sub">{{ titleSub }}</span></h2>
-      <template v-if="isIndustry">
+      <template v-if="isIndustry && isAShare">
         <button class="chip" :class="{ on: activeType === 'HY' }" @click="setLevel('HY')">一级</button>
         <button class="chip" :class="{ on: activeType === 'HY2' }" @click="setLevel('HY2')">二级</button>
       </template>

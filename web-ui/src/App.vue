@@ -1,18 +1,39 @@
 <script setup lang="ts">
 // 根组件：侧边栏终端外壳 + 路由出口。
 // 布局借鉴专业看盘终端（侧边栏分组导航 + 底部实时连接状态徽标）。
-import { onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { fetchMeta } from './api'
+import MarketTopbar from './components/MarketTopbar.vue'
+import { useMarketStore } from './stores/market'
 import { useQuoteStore } from './stores/quotes'
+import { marketLabel } from './market'
 
 const quoteStore = useQuoteStore()
+const marketStore = useMarketStore()
+const route = useRoute()
+
+// 涨停生态暂只支持 A 股（涨跌停制度/连板统计无港美股来源），
+// 港美股模式下显示降级提示而不是空白页。
+const ASHARE_ONLY_ROUTES = new Set(['limitup'])
+const showAshareNotice = computed(
+  () =>
+    !marketStore.isAShareMode &&
+    typeof route.name === 'string' &&
+    ASHARE_ONLY_ROUTES.has(route.name),
+)
 
 // 应用版本号（GET /meta），品牌区展示；取不到（旧后端/源码未装包）则不显示
 const appVersion = ref('')
 onMounted(async () => {
   quoteStore.connect()
   appVersion.value = (await fetchMeta()).version
+})
+// 卸载时关闭全局 SSE：否则 App 被卸载（HMR / 微前端 / app.unmount）时
+// EventSource 与内部重连定时器都不回收，永久占一条连接。
+onBeforeUnmount(() => {
+  quoteStore.close()
 })
 
 const sseLabel: Record<string, string> = {
@@ -24,6 +45,7 @@ const sseLabel: Record<string, string> = {
 
 <template>
   <div class="app">
+    <MarketTopbar />
     <div class="app-row">
       <aside class="sidebar">
         <div class="brand">
@@ -40,7 +62,12 @@ const sseLabel: Record<string, string> = {
           <RouterLink to="/concepts" active-class="active">概念总览</RouterLink>
           <RouterLink to="/hotspots" active-class="active">热点滚动</RouterLink>
           <RouterLink to="/calendar" active-class="active">大盘日历</RouterLink>
-          <RouterLink to="/limitup" active-class="active">涨停生态</RouterLink>
+          <RouterLink
+            v-if="marketStore.isAShareMode"
+            to="/limitup"
+            active-class="active"
+          >涨停生态</RouterLink>
+          <span v-else class="nav-disabled" title="涨停生态暂只支持沪/深/北（港美股无涨跌停制度）">涨停生态</span>
           <RouterLink to="/sentiment" active-class="active">市场情绪</RouterLink>
           <RouterLink to="/watchlist" active-class="active">自选行情</RouterLink>
           <RouterLink to="/ccpm" active-class="active">期货持仓排名</RouterLink>
@@ -50,10 +77,13 @@ const sseLabel: Record<string, string> = {
           <RouterLink to="/optimize" active-class="active">参数寻优</RouterLink>
           <RouterLink to="/compare" active-class="active">结果对比</RouterLink>
           <RouterLink to="/strategies" active-class="active">策略库</RouterLink>
+          <RouterLink to="/strategy-types" active-class="active">策略类型</RouterLink>
           <RouterLink to="/signals" active-class="active">信号雷达</RouterLink>
           <RouterLink to="/ai-history" active-class="active">AI 解读历史</RouterLink>
           <div class="nav-group">系统</div>
           <RouterLink to="/settings" active-class="active">服务器设置</RouterLink>
+          <RouterLink to="/index-settings" active-class="active">指数设置</RouterLink>
+          <RouterLink to="/push" active-class="active">推送设置</RouterLink>
           <RouterLink to="/llm" active-class="active">AI 设置</RouterLink>
         </nav>
         <div class="side-footer">
@@ -64,6 +94,11 @@ const sseLabel: Record<string, string> = {
         </div>
       </aside>
       <main class="app-main">
+        <div v-if="showAshareNotice" class="ashare-notice">
+          「{{ route.meta?.label ?? '本页' }}」暂只支持 A 股数据（板块 / 涨跌停 /
+          情绪采样无港美股来源）。当前为{{ marketLabel(marketStore.market) }}模式：
+          可用「市场看板」（指数K线+榜单）、「自选行情」、「单标的回测」。
+        </div>
         <RouterView />
       </main>
     </div>
@@ -154,6 +189,15 @@ const sseLabel: Record<string, string> = {
   border-left-color: var(--accent);
   background: var(--bg-elevated);
 }
+.nav-disabled {
+  display: block;
+  padding: 7px 16px;
+  font-size: 13px;
+  color: var(--text-dim);
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-left: 2px solid transparent;
+}
 .side-footer {
   display: flex;
   align-items: center;
@@ -186,5 +230,21 @@ const sseLabel: Record<string, string> = {
 .app-main {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.app-main > :last-child {
+  flex: 1;
+  min-height: 0;
+}
+.ashare-notice {
+  flex-shrink: 0;
+  margin: 10px 16px 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius);
 }
 </style>

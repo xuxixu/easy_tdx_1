@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import _sqlite
+
 __all__ = [
     "WatchItem",
     "WatchlistStore",
@@ -90,9 +92,8 @@ class WatchlistStore:
             conn.executescript(self._SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+        # 退出 with 时真正 close（裸 sqlite3.connect 只 commit 不 close → fd 泄漏）
+        return _sqlite.connect(self.db_path)
 
     def list_all(self, group: str | None = None) -> list[WatchItem]:
         """列出全部自选（按 sort_order 升序），可按分组过滤。"""

@@ -3,7 +3,7 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts from '../echarts-setup'
+import echarts, { chartHeatNeutral, DOWN_COLOR, initChart, UP_COLOR, useChartRedraw } from '../echarts-setup'
 import type { OptimizeHeatmap } from '../types'
 
 const props = defineProps<{
@@ -15,7 +15,7 @@ let chart: echarts.ECharts | null = null
 
 function render() {
   if (!container.value) return
-  chart ??= echarts.init(container.value, 'dark')
+  chart ??= initChart(container.value)
   chart.setOption(buildOption(), true)
 }
 
@@ -48,7 +48,7 @@ function buildOption(): echarts.EChartsCoreOption {
       left: 'center',
       bottom: 0,
       formatter: (v: number) => `${(v * 100).toFixed(2)}%`,
-      inRange: { color: ['#18a058', '#2a2e3a', '#ef4146'] }, // 绿(低)→暗→红(高)
+      inRange: { color: [DOWN_COLOR, chartHeatNeutral(), UP_COLOR] }, // 绿(低)→中性→红(高)
     },
     series: [
       {
@@ -63,7 +63,14 @@ function buildOption(): echarts.EChartsCoreOption {
 
 function resize() {
   chart?.resize()
-}
+}// 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，
+// 只能 dispose 后按新主题重建（render 内已改成 initChart + 主题感知）。
+useChartRedraw(() => {
+  chart?.dispose()
+  chart = null
+  render()
+})
+
 onMounted(() => {
   render()
   window.addEventListener('resize', resize)

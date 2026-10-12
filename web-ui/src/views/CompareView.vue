@@ -6,7 +6,7 @@ import { onMounted, ref, watch } from 'vue'
 
 import CompareChart from '../components/CompareChart.vue'
 import CompareTable from '../components/CompareTable.vue'
-import { fetchTask, fetchTaskList, formatError } from '../api'
+import { deleteTask, fetchTask, fetchTaskList, formatError } from '../api'
 import type { BacktestResult, EquityPoint, TaskSummary } from '../types'
 
 /** 统一的可对比项：无论单标的还是组合，都归一化为 equity + performance。 */
@@ -84,8 +84,28 @@ async function toggle(taskId: string) {
 }
 
 const compareItems = ref<Array<{ label: string; result: BacktestResult }>>([])
-function refreshItems() {
-  // CompareChart/CompareTable 期望 { label, result: BacktestResult }，
+
+const deletingId = ref<string | null>(null)
+
+/** 删除任务（已勾选的同步移出对比；运行中任务后端 409 拒绝）。 */
+async function onDelete(taskId: string) {
+  if (!confirm('确定删除该任务及其回测结果？此操作不可撤销。')) return
+  deletingId.value = taskId
+  try {
+    await deleteTask(taskId)
+    taskList.value = taskList.value.filter((t) => t.task_id !== taskId)
+    selectedIds.value.delete(taskId)
+    details.value.delete(taskId)
+    selectedIds.value = new Set(selectedIds.value)
+    details.value = new Map(details.value)
+  } catch (e) {
+    error.value = formatError(e)
+  } finally {
+    deletingId.value = null
+  }
+}
+
+function refreshItems() {  // CompareChart/CompareTable 期望 { label, result: BacktestResult }，
   // 这里把归一化的 equity/performance 包装回去
   compareItems.value = Array.from(details.value.values()).map((item) => ({
     label: item.label,
@@ -116,7 +136,17 @@ watch(details, refreshItems, { deep: true })
             />
             <span class="task-desc">{{ t.description || t.task_id.slice(0, 8) }}</span>
           </label>
-          <span class="task-meta">{{ t.elapsed.toFixed(1) }}s</span>
+          <span class="task-right">
+            <span class="task-meta">{{ t.elapsed.toFixed(1) }}s</span>
+            <button
+              class="del-btn"
+              title="删除该任务"
+              :disabled="deletingId === t.task_id"
+              @click="onDelete(t.task_id)"
+            >
+              {{ deletingId === t.task_id ? '…' : '删' }}
+            </button>
+          </span>
         </div>
       </section>
     </aside>
@@ -203,6 +233,25 @@ watch(details, refreshItems, { deep: true })
   color: var(--text-dim);
   font-size: 11px;
   flex-shrink: 0;
+}
+.task-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.del-btn {
+  padding: 1px 7px;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.del-btn:hover:not(:disabled) {
+  border-color: var(--up);
+  color: var(--up);
 }
 .report-panel {
   flex: 1;

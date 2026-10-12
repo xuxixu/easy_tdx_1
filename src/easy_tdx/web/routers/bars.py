@@ -8,9 +8,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from easy_tdx._df import _category_to_minutes
+from easy_tdx.markets import is_ex, market_label
 from easy_tdx.web.convert import (
     adjust_from_str,
     category_from_str,
@@ -18,7 +19,8 @@ from easy_tdx.web.convert import (
     market_value_from_str,
     period_times_from_category,
 )
-from easy_tdx.web.deps import get_client, get_mac_client_optional
+from easy_tdx.web.deps import get_client, get_gateway, get_mac_client_optional
+from easy_tdx.web.market_gateway import validate_code
 from easy_tdx.web.schemas import BarsResponse, DataFrameResponse
 
 _logger = logging.getLogger(__name__)
@@ -277,8 +279,8 @@ def _bars_resp(df: pd.DataFrame | None, source: str | None) -> BarsResponse:
 
 @router.get("/bars", response_model=BarsResponse)
 async def security_bars(
-    market: str = Query(..., description="市场: SZ, SH, BJ"),
-    code: str = Query(..., min_length=6, max_length=6),
+    market: str = Query("SH", description="市场: SH(沪) / SZ(深) / BJ(北) / HK(港股) / US(美股)"),
+    code: str = Query(..., min_length=1, max_length=12),
     category: str = Query(
         "DAY",
         description=(
@@ -296,10 +298,14 @@ async def security_bars(
     ),
     mac_client: Any = Depends(get_mac_client_optional),
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> BarsResponse:
-    """获取股票K线数据（MAC 协议，支持复权）。
+    """获取股票K线数据（自动按市场分流）。
 
-    多级自动回退：MAC 优先（支持 NONE/QFQ/HFQ 复权 + QFQ 负价兜底）→
+    **市场分流**：美股（``market=US``）走 MAC 扩展市场协议栈（0x122F，
+    端口 7727）；A 股走 MAC 协议栈 → 标准协议栈。两条栈互不相通。
+
+    A 股多级自动回退：MAC 优先（支持 NONE/QFQ/HFQ 复权 + QFQ 负价兜底）→
     失败/为空转标准 TdxClient（无复权，adjust 参数忽略）→ 仍失败/为空且
     周期为日线及以上时，最后一级自动兜底 baostock（需 ``pip install
     easy-tdx[baostock]``，可用 ``EASY_TDX_BAOSTOCK=0`` 关闭）。兜底命中时
@@ -317,6 +323,20 @@ async def security_bars(
     vol 单位：分钟线/日线 = 成交量(股)；周/月/季/年线服务端原样返回真实
     成交量/100，回退路径（标准 TdxClient）已 ×100 还原为股。
     """
+    cat = category_from_str(category)
+    code = validate_code(code, market)
+
+    # --- 港股 / 美股：独立协议栈，A股的回退链（复权/baostock）不适用 ---
+    if is_ex(market):
+        if gateway is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"{market_label(market)}行情网关未初始化"
+                "（扩展市场协议栈 7727 不可用），请检查服务器设置",
+            )
+        ex_df = await gateway.bars(market, code, cat, start, count, adjust=adjust_from_str(adjust))
+        return _bars_resp(_attach_derived(ex_df), None)
+
     if category.upper() in _MIN_120_ALIASES:
         df120 = await _fetch_120m(market, code, start, count, adjust, bar_time, mac_client, client)
         return _bars_resp(_attach_derived(df120), None)
@@ -380,7 +400,7 @@ async def security_bars(
 
 @router.get("/bars/index", response_model=BarsResponse)
 async def index_bars(
-    market: str = Query(..., description="市场: SZ, SH"),
+    market: str = Query(..., description="市场: SH(沪) / SZ(深) / BJ(北) / HK(港股) / US(美股)"),
     code: str = Query(..., min_length=6, max_length=6),
     category: str = Query("DAY", description="K线周期"),
     start: int = Query(0, ge=0),
@@ -433,19 +453,24 @@ async def index_bars(
 
 @router.get("/minute", response_model=DataFrameResponse)
 async def minute_time(
-    market: str = Query(..., description="市场: SZ, SH"),
-    code: str = Query(..., min_length=6, max_length=6),
-    client: Any = Depends(get_client),
+    market: str = Query("SH", description="市场: SH(沪) / SZ(深) / BJ(北) / HK(港股) / US(美股)"),
+    code: str = Query(..., min_length=1, max_length=12),
+    gateway: Any = Depends(get_gateway),
 ) -> DataFrameResponse:
-    """获取最近交易日分时数据（盘中=今日实时分时；盘前/周末/节假日=最近交易日历史分时）。"""
-    df = await client.get_minute_time_data(market_from_str(market), code)
+    """获取最近交易日分时数据（盘中=今日实时分时；盘前/周末/节假日=最近交易日历史分时）。
+
+    美股分时的分钟序列原封不动嵌在 ``charts`` 字段里，本端点已展开为
+    一行一分钟的平表（``datetime`` / ``price`` / ``avg_price`` / ``vol``），
+    与 A 股分时结构对齐，前端图表组件无需两套渲染逻辑。
+    """
+    df = await gateway.minute(market, validate_code(code, market))
     return _df_resp(df)
 
 
 @router.get("/minute/history", response_model=DataFrameResponse)
 async def history_minute_time(
-    market: str = Query(..., description="市场: SZ, SH"),
-    code: str = Query(..., min_length=6, max_length=6),
+    market: str = Query("SH", description="市场: SH(沪) / SZ(深) / BJ(北) / HK(港股) / US(美股)"),
+    code: str = Query(..., min_length=1, max_length=12),
     date: int = Query(..., description="日期 YYYYMMDD"),
     client: Any = Depends(get_client),
 ) -> DataFrameResponse:
@@ -456,20 +481,20 @@ async def history_minute_time(
 
 @router.get("/transaction", response_model=DataFrameResponse)
 async def transaction_data(
-    market: str = Query(..., description="市场: SZ, SH"),
-    code: str = Query(..., min_length=6, max_length=6),
+    market: str = Query("SH", description="市场: SH(沪) / SZ(深) / BJ(北) / HK(港股) / US(美股)"),
+    code: str = Query(..., min_length=1, max_length=12),
     start: int = Query(0, ge=0),
     count: int = Query(800, ge=1, le=800),
-    client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> DataFrameResponse:
     """获取当日逐笔成交。"""
-    df = await client.get_transaction_data(market_from_str(market), code, start, count)
+    df = await gateway.transactions(market, validate_code(code, market), start, count)
     return _df_resp(df)
 
 
 @router.get("/transaction/history", response_model=DataFrameResponse)
 async def history_transaction_data(
-    market: str = Query(..., description="市场: SZ, SH"),
+    market: str = Query(..., description="市场: SH(沪) / SZ(深) / BJ(北) / HK(港股) / US(美股)"),
     code: str = Query(..., min_length=6, max_length=6),
     date: int = Query(..., description="日期 YYYYMMDD"),
     start: int = Query(0, ge=0),

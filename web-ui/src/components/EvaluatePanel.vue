@@ -183,7 +183,7 @@ function fmtCapm(v: number, fmt: string): string {
   color: var(--up);
 }
 .neg {
-  color: #2ebd85;
+  color: var(--good);
 }
 .badge {
   font-size: 12px;
@@ -193,8 +193,8 @@ function fmtCapm(v: number, fmt: string): string {
 }
 .badge-ok {
   background: rgba(46, 189, 133, 0.15);
-  color: #2ebd85;
-  border: 1px solid #2ebd85;
+  color: var(--good);
+  border: 1px solid var(--good);
 }
 .badge-warn {
   background: rgba(239, 65, 70, 0.12);
@@ -291,7 +291,7 @@ function fmtCapm(v: number, fmt: string): string {
   flex-shrink: 0;
 }
 .check-list li.ok .check-mark {
-  color: #2ebd85;
+  color: var(--good);
 }
 .check-list li.bad .check-mark {
   color: var(--up);

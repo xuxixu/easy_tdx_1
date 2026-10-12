@@ -29,6 +29,14 @@ export function fmtVol(v: number | null | undefined): string {
   return v.toFixed(0)
 }
 
+/** 港美股成交量（股 → 万股/亿股）：港美股没有"手"概念，后端 vol 即股数。 */
+export function fmtVolShares(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '-'
+  if (Math.abs(v) >= 1e8) return `${(v / 1e8).toFixed(2)}亿股`
+  if (Math.abs(v) >= 1e4) return `${(v / 1e4).toFixed(2)}万股`
+  return v.toFixed(0)
+}
+
 /** 涨跌幅带号（接受百分数如 2.35 → "+2.35%"）。 */
 export function fmtPctSigned(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '-'

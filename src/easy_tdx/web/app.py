@@ -98,20 +98,55 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # --- 实时行情 SSE 推送器（共享轮询 + fan-out；mock 模式轮询合成数据） ---
     try:
-        from easy_tdx.models.enums import Market
         from easy_tdx.web.quote_streamer import QuoteStreamer
         from easy_tdx.web.watchlist_store import get_watchlist_store
 
         store = get_watchlist_store()
 
-        async def _watch_symbols() -> list[tuple[Market, str]]:
-            # SQLite 存 "SH"/"SZ"/"BJ" 字符串，轮询器需要 Market 枚举
-            return [(Market[mkt], code) for mkt, code in store.symbols()]
+        async def _watch_symbols() -> list[tuple[str, str]]:
+            # SQLite 存 "SH"/"SZ"/"BJ"/"HK"/"US" 字符串；
+            # _stream_fetch 内部再按市场分流，不在这里转 Market 枚举
+            # （Market 枚举没有 HK/US 成员，直接 Market[mkt] 会 KeyError）。
+            return [(mkt, code) for mkt, code in store.symbols()]
+
+        async def _stream_fetch(symbols: list[tuple[Any, str]]) -> Any:
+            """SSE 轮询统一取数：A 股走标准协议，港股/美股走扩展栈。
+
+            闭包延迟读 ``app.state.gateway``——streamer 在 mac_ex 建连之前
+            创建，不能在构造时把 gateway 绑死。
+            """
+            import pandas as _pd
+
+            from easy_tdx.markets import is_ex, normalize_market
+
+            grouped: dict[str, list[tuple[Any, str]]] = {}
+            for mkt, code in symbols:
+                try:
+                    token = normalize_market(mkt.name if hasattr(mkt, "name") else mkt)
+                except ValueError:
+                    continue  # 未知市场标记直接丢弃，不让整轮轮询失败
+                grouped.setdefault(token, []).append((mkt, code))
+
+            frames: list[Any] = []
+            gateway = getattr(app.state, "gateway", None)
+            for token, pairs in grouped.items():
+                try:
+                    if is_ex(token):
+                        if gateway is None or not gateway.ex_available:
+                            continue
+                        frames.append(await gateway.quotes(token, [code for _, code in pairs]))
+                    else:
+                        frames.append(await client.get_security_quotes(pairs))
+                except Exception:
+                    logger.warning("SSE 行情拉取失败（%s %d 只）", token, len(pairs))
+            if not frames:
+                return _pd.DataFrame()
+            return frames[0] if len(frames) == 1 else _pd.concat(frames, ignore_index=True)
 
         # mock 模式不受真实限流/交易时段约束，缩短轮询间隔让 E2E 的
         # SSE 断言（首帧价格渲染）秒级到达，而不是等盘外 60s 慢拍
         streamer = QuoteStreamer(
-            client.get_security_quotes,
+            _stream_fetch,
             _watch_symbols,
             trading_interval=2.0 if mock_mode else 8.0,
             idle_interval=2.0 if mock_mode else 60.0,
@@ -158,20 +193,52 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.warning("RealtimeStreamHub 挂载失败 — WS 实时推送不可用", exc_info=True)
 
-    # --- 扩展市场客户端（可选） ---
-    ex_client = None
+    # --- 扩展市场客户端（可选，两条协议栈） ---
+    # ex_client:老 ex 协议（0x23FC / 0x2406），覆盖港股 / 期货。
+    # mac_ex_client:MAC 协议（0x122F），覆盖**美股**（ExMarket.US_STOCK=74）。
+    #   美股只走后者——两条栈互不相通，缺任何一个都会让对应市场整片 503。
+    app.state.ex_client = None
+    app.state.mac_ex_client = None
+
     enable_ex = getattr(app.state, "enable_ex", False)
     if enable_ex:
         try:
             from easy_tdx.ex.client import AsyncExTdxClient
 
-            ex_client = AsyncExTdxClient.from_best_host()
-            await ex_client.connect()
+            client_ex = AsyncExTdxClient.from_best_host()
+            await client_ex.connect()
+            app.state.ex_client = client_ex
             logger.info("Ex market client connected")
         except Exception:
             logger.warning("Ex market client connection failed — Ex endpoints will return 503")
-            ex_client = None
-    app.state.ex_client = ex_client
+
+    if getattr(app.state, "enable_mac_ex", True):
+        try:
+            from easy_tdx.ex.mac_client import AsyncMacExClient
+
+            mac_ex = AsyncMacExClient.from_best_host()
+            await mac_ex.connect()
+            app.state.mac_ex_client = mac_ex
+            logger.info("MAC Ex client connected (US market / futures)")
+        except Exception:
+            logger.warning("MAC Ex client connection failed — US market endpoints will return 503")
+
+    # --- 统一取数网关（按市场分流到对应协议栈） ---
+    from easy_tdx.web.market_gateway import MarketGateway
+
+    app.state.gateway = MarketGateway(
+        mac_client=mac_client,
+        tdx_client=client,
+        mac_ex_client=app.state.mac_ex_client,
+    )
+
+    # --- 自定义策略类型装配（SQLite 定义 → 全局注册表，失败只记日志） ---
+    try:
+        from easy_tdx.web.custom_strategies import load_custom_types
+
+        load_custom_types()
+    except Exception:
+        logger.warning("自定义策略类型装配失败 — 仅内置类型可用", exc_info=True)
 
     # --- 板块资金采样器（交易日 14:45 后记一次行业主力净流入排行，供资金日历） ---
     app.state.fund_flow_sampler = None
@@ -237,8 +304,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("RealtimeStreamHub shutdown failed", exc_info=True)
 
     # --- 依次关闭 ---
+    # 用 getattr 兜底：app.state 上的这些属性并非在所有启动路径下都必然存在，
+    # 直接取属性会在关闭阶段抛 AttributeError，掩盖真正的关闭失败。
     for name, cli in [
-        ("Ex market client", ex_client),
+        ("Ex market client", getattr(app.state, "ex_client", None)),
+        ("MAC Ex client", getattr(app.state, "mac_ex_client", None)),
         ("MAC client", mac_client),
         ("TDX client", client),
     ]:
@@ -247,7 +317,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await cli.close()
                 logger.info("%s disconnected", name)
             except Exception:
-                pass
+                # 静默吞掉会让"关闭失败"完全不可见——排障时无从下手。
+                logger.warning("%s close failed", name, exc_info=True)
 
     # --- 关闭回测任务执行器（取消 pending，等待 running） ---
     # shutdown 是同步阻塞调用，包在 to_thread 里避免阻塞 event loop
@@ -311,15 +382,19 @@ def _create_app(
     app.state.tdx_timeout = timeout
     app.state.tdx_client = None  # will be set in lifespan
     app.state.mac_client = None
-    app.state.ex_client = None
     app.state.enable_mac = enable_mac
     app.state.enable_ex = enable_ex
+    app.state.mac_ex_client = None  # 美股协议栈，lifespan 里连接
 
-    # CORS middleware (permissive for development)
+    # CORS：本服务定位本机自用（默认监听 127.0.0.1），UI 与 API 同源，
+    # 无需凭据（无 Cookie/无会话）。allow_origins=["*"] 与
+    # allow_credentials=True 是 CORS 规范禁止的组合——Starlette 在 credentials
+    # 场景下会退化为"回显请求 Origin"，等于对所有站点开放；而本应用根本不用
+    # 凭据，故显式关掉 credentials，保持通配 Origin 的合法语义。
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -343,10 +418,13 @@ def _create_app(
     from easy_tdx.web.routers.mac_data import router as mac_data_router
     from easy_tdx.web.routers.mac_quotes import router as mac_quotes_router
     from easy_tdx.web.routers.market import router as market_router
+    from easy_tdx.web.routers.overseas import router as overseas_router
+    from easy_tdx.web.routers.push import router as push_router
     from easy_tdx.web.routers.realtime import router as realtime_router
     from easy_tdx.web.routers.server import router as server_router
     from easy_tdx.web.routers.sina import router as sina_router
     from easy_tdx.web.routers.strategies import router as strategies_router
+    from easy_tdx.web.routers.strategy_types import router as strategy_types_router
     from easy_tdx.web.routers.stream import router as stream_router
     from easy_tdx.web.routers.watchlist import router as watchlist_router
 
@@ -363,6 +441,8 @@ def _create_app(
     app.include_router(mac_quotes_router, prefix="/api/v1")
     # 扩展市场路由
     app.include_router(ex_market_router, prefix="/api/v1")
+    # 港股 / 美股专用路由（/symbols 搜索、/quotes 批量、/meta 市场元信息）
+    app.include_router(overseas_router, prefix="/api/v1")
     # 技术指标路由
     app.include_router(indicator_router, prefix="/api/v1")
     # 公告检索路由（巨潮资讯网，独立数据源）
@@ -375,12 +455,16 @@ def _create_app(
     app.include_router(backtest_router, prefix="/api/v1")
     # 策略库路由（SQLite 持久化，纯数据 CRUD）
     app.include_router(strategies_router, prefix="/api/v1")
+    # 策略类型路由（内置浏览 + 自定义类型增删改，无行情依赖）
+    app.include_router(strategy_types_router, prefix="/api/v1")
     # 服务器设置路由（列出/测速/切换 TDX host）
     app.include_router(server_router, prefix="/api/v1")
     # LLM 配置与对话路由（AI 设置页 / AI 解读直连，无行情依赖）
     app.include_router(llm_router, prefix="/api/v1")
     # 自选股路由（SQLite 持久化，纯 CRUD，不依赖行情连接）
     app.include_router(watchlist_router, prefix="/api/v1")
+    # 推送服务路由（key-only 买卖信号推送，无行情依赖）
+    app.include_router(push_router, prefix="/api/v1")
     # 实时行情 SSE 路由（依赖 lifespan 里的 QuoteStreamer）
     app.include_router(stream_router, prefix="/api/v1")
 

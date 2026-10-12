@@ -35,7 +35,7 @@ from easy_tdx.web.backtest_schemas import (
     TaskSummary,
     serialize_result,
 )
-from easy_tdx.web.deps import get_client
+from easy_tdx.web.deps import get_client, get_gateway
 from easy_tdx.web.task_runner import get_runner
 
 router = APIRouter(tags=["backtest"])
@@ -84,6 +84,7 @@ async def run_backtest(req: BacktestRequest) -> BacktestResultResponse:
 async def run_backtest_async(
     req: BacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交后台回测任务，立即返回 task_id。
 
@@ -95,7 +96,7 @@ async def run_backtest_async(
         df = _ohlcv_to_df(req.ohlcv)
         bars_desc = f"{len(df)} 根"
     elif req.symbol is not None:
-        df = await _fetch_bars(client, req.symbol, req.category, req.count)
+        df = await _fetch_bars(client, req.symbol, req.category, req.count, gateway)
         bars_desc = f"{req.symbol} {req.category}×{req.count}"
     else:
         # BacktestRequest 校验器已保证二者至少其一，此处不可达
@@ -152,6 +153,24 @@ async def get_task(task_id: str) -> TaskStateResponse:
         description=state.description,
         elapsed=(state.finished_at or _now()) - (state.started_at or state.created_at),
     )
+
+
+@router.delete("/backtest/tasks/{task_id}")
+async def delete_task(task_id: str) -> dict[str, Any]:
+    """删除一个已终态（done/failed）的后台任务（结果对比页清理用）。
+
+    运行中/排队中拒绝（409），未知任务 400。
+    """
+    from fastapi import HTTPException
+
+    runner = get_runner()
+    try:
+        state = runner.delete(task_id)
+    except KeyError as exc:
+        raise ValueError(str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "task_id": state.task_id}
 
 
 @router.get("/backtest/tasks/{task_id}/export")
@@ -231,6 +250,7 @@ async def export_task(task_id: str, format: str = "json") -> Any:
 async def run_portfolio_backtest_async(
     req: PortfolioBacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交组合（多标的）回测后台任务。
 
@@ -239,7 +259,7 @@ async def run_portfolio_backtest_async(
     """
     # 1. 逐个标的取行情（async 上下文内）
     stock_data_list = await _fetch_portfolio_bars(
-        client, req.stocks, req.category, req.start_date, req.end_date
+        client, req.stocks, req.category, req.start_date, req.end_date, gateway
     )
     if not stock_data_list:
         raise ValueError("所有标的均未取到有效行情数据")
@@ -267,6 +287,7 @@ async def run_portfolio_backtest_async(
 async def run_multi_strategy_backtest_async(
     req: MultiStrategyBacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交多策略组合回测后台任务（资金分仓 / 并行制）。
 
@@ -274,7 +295,7 @@ async def run_multi_strategy_backtest_async(
     单个策略取数失败则跳过（不中断整组），全部失败返回 400。结果为
     MultiStrategyResult（结构同 PortfolioResult），通过 GET /backtest/tasks/{task_id} 轮询。
     """
-    slots = await _fetch_multi_strategy_bars(client, req.items)
+    slots = await _fetch_multi_strategy_bars(client, req.items, gateway)
     if not slots:
         raise ValueError("所有策略槽位均未取到有效行情数据")
 
@@ -297,6 +318,7 @@ async def run_multi_strategy_walkforward_async(
     req: MultiStrategyBacktestRequest,
     n_windows: int = 7,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交多策略组合级 Walk-Forward 样本外验证后台任务。
 
@@ -304,7 +326,7 @@ async def run_multi_strategy_walkforward_async(
     每窗各槽位独立回测并合成组合窗内净值。结果为 ``{"walkforward": {...}}``
     （与单标的 WF 同构），通过 GET /backtest/tasks/{task_id} 轮询。
     """
-    slots = await _fetch_multi_strategy_bars(client, req.items)
+    slots = await _fetch_multi_strategy_bars(client, req.items, gateway)
     if not slots:
         raise ValueError("所有策略槽位均未取到有效行情数据")
 
@@ -328,6 +350,7 @@ async def run_multi_strategy_walkforward_async(
 async def run_multi_strategy_evaluate_async(
     req: MultiStrategyBacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交多策略组合级一条龙评估后台任务：组合回测 + 组合 WF + 跨槽位适配性
     体检 + 综合评分 + 组合评级 + 等权买入持有基准对比。
@@ -335,7 +358,7 @@ async def run_multi_strategy_evaluate_async(
     结果结构见 ``easy_tdx.backtest.benchmark.evaluate_multi`` 文档（与
     单标的 evaluate_strategy 同构），通过 GET /backtest/tasks/{task_id} 轮询。
     """
-    slots = await _fetch_multi_strategy_bars(client, req.items)
+    slots = await _fetch_multi_strategy_bars(client, req.items, gateway)
     if not slots:
         raise ValueError("所有策略槽位均未取到有效行情数据")
 
@@ -355,6 +378,7 @@ async def run_multi_strategy_evaluate_async(
 async def run_optimize_async(
     req: OptimizeBacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交参数网格寻优后台任务。
 
@@ -366,7 +390,7 @@ async def run_optimize_async(
         df = _ohlcv_to_df(req.ohlcv)
         desc_bars = f"{len(df)} 根"
     elif req.symbol is not None:
-        df = await _fetch_bars(client, req.symbol, req.category, 800)
+        df = await _fetch_bars(client, req.symbol, req.category, 800, gateway)
         desc_bars = f"{req.symbol}"
         if req.start_date or req.end_date:
             df = _filter_df_by_date(df, req.start_date, req.end_date)
@@ -397,6 +421,7 @@ async def run_optimize_async(
 async def run_optimize_all_async(
     req: OptimizeAllBacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交「一键寻优所有策略」后台任务。
 
@@ -409,7 +434,7 @@ async def run_optimize_all_async(
         df = _ohlcv_to_df(req.ohlcv)
         desc_bars = f"{len(df)} 根"
     elif req.symbol is not None:
-        df = await _fetch_bars(client, req.symbol, req.category, 800)
+        df = await _fetch_bars(client, req.symbol, req.category, 800, gateway)
         desc_bars = f"{req.symbol}"
         if req.start_date or req.end_date:
             df = _filter_df_by_date(df, req.start_date, req.end_date)
@@ -437,6 +462,7 @@ async def run_optimize_all_async(
 async def run_signal_scan_async(
     req: SignalScanRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交「信号雷达」后台任务：扫描策略库全部已保存策略的最近买卖信号。
 
@@ -452,8 +478,10 @@ async def run_signal_scan_async(
     if not records:
         raise ValueError("策略库为空，请先在回测页保存策略")
 
-    targets = expand_targets(records)
-    bars = await fetch_scan_bars(client, targets)
+    targets = expand_targets(records, symbols=req.symbols, strategy_ids=req.strategy_ids)
+    if not targets:
+        raise ValueError("过滤后无待扫描任务（标的/策略 id 无匹配）")
+    bars = await fetch_scan_bars(client, targets, gateway)
     description = (
         f"信号扫描 | {len(records)}条策略 · {len(targets)}个子任务 · 窗口{req.window_bars}根"
     )
@@ -475,6 +503,7 @@ async def run_walkforward_async(
     req: BacktestRequest,
     n_windows: int = 7,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交 Walk-Forward 样本外验证后台任务（默认 7 窗、每窗独立开仓）。
 
@@ -482,7 +511,7 @@ async def run_walkforward_async(
     结果含逐窗收益、盈利窗占比 consistency、连乘收益等，通过
     GET /backtest/tasks/{task_id} 轮询。
     """
-    df = await _resolve_df(client, req)
+    df = await _resolve_df(client, req, gateway)
     snapshot = req.model_copy()
     description = f"{snapshot.strategy} WF验证 | {len(df)}根 | {snapshot.symbol or '内联数据'}"
     runner = get_runner()
@@ -497,6 +526,7 @@ async def run_walkforward_async(
 async def run_evaluate_async(
     req: BacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交一条龙评估后台任务：回测 + WF + 适配性体检 + 综合评分 + S-D 评级
     + 买入持有基准对比（excess_return）。
@@ -505,7 +535,7 @@ async def run_evaluate_async(
     通过 GET /backtest/tasks/{task_id} 轮询；可用
     GET /backtest/tasks/{task_id}/export?format=json 导出。
     """
-    df = await _resolve_df(client, req)
+    df = await _resolve_df(client, req, gateway)
     snapshot = req.model_copy()
     description = f"{snapshot.strategy} 一条龙评估 | {snapshot.symbol or '内联数据'}"
     runner = get_runner()
@@ -522,6 +552,7 @@ async def run_portfolio_walkforward_async(
     req: PortfolioBacktestRequest,
     n_windows: int = 7,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交组合级 Walk-Forward 样本外验证后台任务。
 
@@ -531,7 +562,7 @@ async def run_portfolio_walkforward_async(
     GET /backtest/tasks/{task_id} 轮询。
     """
     stock_data_list = await _fetch_portfolio_bars(
-        client, req.stocks, req.category, req.start_date, req.end_date
+        client, req.stocks, req.category, req.start_date, req.end_date, gateway
     )
     if not stock_data_list:
         raise ValueError("所有标的均未取到有效行情数据")
@@ -553,6 +584,7 @@ async def run_portfolio_walkforward_async(
 async def run_portfolio_evaluate_async(
     req: PortfolioBacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交组合级一条龙评估后台任务：组合回测 + 组合 WF + 跨标的适配性体检
     + 综合评分 + 组合评级 + 等权买入持有基准对比。
@@ -561,7 +593,7 @@ async def run_portfolio_evaluate_async(
     单标的 evaluate_strategy 同构），通过 GET /backtest/tasks/{task_id} 轮询。
     """
     stock_data_list = await _fetch_portfolio_bars(
-        client, req.stocks, req.category, req.start_date, req.end_date
+        client, req.stocks, req.category, req.start_date, req.end_date, gateway
     )
     if not stock_data_list:
         raise ValueError("所有标的均未取到有效行情数据")
@@ -577,12 +609,12 @@ async def run_portfolio_evaluate_async(
     return TaskSubmitResponse(task_id=task_id, status=state.status)
 
 
-async def _resolve_df(client: Any, req: BacktestRequest) -> pd.DataFrame:
+async def _resolve_df(client: Any, req: BacktestRequest, gateway: Any = None) -> pd.DataFrame:
     """内联 ohlcv 或按 symbol 取行情（/backtest/run/async 同逻辑的复用封装）。"""
     if req.ohlcv is not None:
         return _ohlcv_to_df(req.ohlcv)
     if req.symbol is not None:
-        return await _fetch_bars(client, req.symbol, req.category, max(req.count, 800))
+        return await _fetch_bars(client, req.symbol, req.category, max(req.count, 800), gateway)
     raise ValueError("必须提供 ohlcv 或 symbol")
 
 
@@ -590,6 +622,7 @@ async def _resolve_df(client: Any, req: BacktestRequest) -> pd.DataFrame:
 async def run_multiseed_async(
     req: MultiSeedRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交多 seed 随机抽样验证后台任务（v1.25 晋级门槛）。
 
@@ -756,6 +789,7 @@ def _run_portfolio_evaluate(
 async def run_rotation_async(
     req: RotationBacktestRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> TaskSubmitResponse:
     """提交轮动组合回测后台任务（v1.27）。
 
@@ -927,8 +961,53 @@ async def _fetch_bars_paged(client: Any, symbol: str, category: str, count: int)
     return df
 
 
-async def _fetch_bars(client: Any, symbol: str, category: str, count: int) -> pd.DataFrame:
-    """按标的取 K 线（async，必须在 event loop 内调用）。"""
+async def _fetch_bars(
+    client: Any, symbol: str, category: str, count: int, gateway: Any = None
+) -> pd.DataFrame:
+    """按标的取 K 线（async，必须在 event loop 内调用）。
+
+    港股 / 美股走扩展市场协议栈（``gateway``，翻页语义与 A 股一致：
+    start=0,800,… 逐页取，末页不足 800 即停）。A 股走原标准协议路径。
+    """
+    from easy_tdx.markets import is_ex, normalize_market
+
+    market_str, _, code = symbol.partition(":")
+    token = normalize_market(market_str.strip().upper())
+    if is_ex(token):
+        if gateway is None or not gateway.ex_available:
+            raise ValueError(f"标的 {symbol} 需要扩展市场协议栈（端口 7727），当前未连接")
+        from easy_tdx.web.convert import category_from_str
+
+        cat = category_from_str(category)
+        frames: list[pd.DataFrame] = []
+        fetched = 0
+        while fetched < count:
+            page_size = min(_BARS_PAGE_SIZE, count - fetched)
+            page_df = await gateway.bars(token, code, cat, fetched, page_size)
+            if page_df is None or len(page_df) == 0:
+                break
+            frames.append(page_df)
+            fetched += len(page_df)
+            if len(page_df) < page_size:
+                break
+        if not frames:
+            raise ValueError(f"标的 {symbol} 未取到任何 K 线数据")
+        df = pd.concat(frames, ignore_index=True)
+        dt_col = "datetime" if "datetime" in df.columns else "date"
+        if dt_col in df.columns:
+            df = df.sort_values(dt_col).reset_index(drop=True)
+        df = _normalize_bars_dt(df)
+        # 美股分钟线只留盘中（美东 09:30–16:00）：盘前盘后流动性 regime 完全
+        # 不同，混入会污染信号。日线及以上不过滤（本身就是盘中聚合）。
+        if token == "US":
+            from easy_tdx.us_session import filter_us_regular_hours
+
+            filtered: Any = filter_us_regular_hours(df)
+            df = filtered if isinstance(filtered, pd.DataFrame) else df
+            if len(df) == 0:
+                raise ValueError(f"标的 {symbol} 过滤盘前盘后后无剩余 K 线")
+        return df
+
     df = await _fetch_bars_paged(client, symbol, category, count)
     if len(df) == 0:
         raise ValueError(f"标的 {symbol} 未取到任何 K 线数据")
@@ -983,29 +1062,48 @@ async def _fetch_portfolio_bars(
     category: str,
     start_date: str | None,
     end_date: str | None,
+    gateway: Any = None,
 ) -> list[Any]:
     """逐个标的取 K 线并组装 StockData 列表（async，必须在 event loop 内调用）。
 
     当 start_date 超出单次 800 根覆盖范围时，自动翻页拉取（与前端 fetchBars
-    同逻辑）。单个标的取数失败时跳过（不中断整个组合），全部失败返回空列表。
+    同逻辑）。港股 / 美股走扩展栈（``gateway``）。单个标的取数失败时跳过
+    （不中断整个组合），全部失败返回空列表。
     """
     from easy_tdx.backtest.portfolio_engine import StockData
+    from easy_tdx.markets import is_ex, normalize_market
     from easy_tdx.web.convert import category_from_str, market_from_str
 
     max_pages = 10  # 翻页上限：10 × 800 = 8000 根
     stock_data_list: list[StockData] = []
     for symbol in stocks:
-        market_str, code = symbol.split(":", 1)
+        market_str, _, code = symbol.partition(":")
+        use_ex = False
+        try:
+            use_ex = is_ex(market_str)
+        except ValueError:
+            continue  # 市场无法识别，跳过该标的
         frames: list[pd.DataFrame] = []
         for page in range(max_pages):
             try:
-                page_df = await client.get_security_bars(
-                    market_from_str(market_str),
-                    code,
-                    category_from_str(category),
-                    page * 800,
-                    800,
-                )
+                if use_ex:
+                    if gateway is None or not gateway.ex_available:
+                        break
+                    page_df = await gateway.bars(
+                        normalize_market(market_str),
+                        code,
+                        category_from_str(category),
+                        page * 800,
+                        800,
+                    )
+                else:
+                    page_df = await client.get_security_bars(
+                        market_from_str(market_str),
+                        code,
+                        category_from_str(category),
+                        page * 800,
+                        800,
+                    )
             except Exception:
                 break  # 单页失败则停止该标的的翻页
             if len(page_df) == 0:
@@ -1030,6 +1128,15 @@ async def _fetch_portfolio_bars(
         # 翻页拼接后按时间正序排序（页间逆序）
         df = df.sort_values("datetime").reset_index(drop=True)
         df = _normalize_bars_dt(df)
+        # 美股分钟线只留盘中（与 _fetch_bars 同口径）
+        if use_ex:
+            try:
+                if normalize_market(market_str) == "US":
+                    from easy_tdx.us_session import filter_us_regular_hours
+
+                    df = filter_us_regular_hours(df)
+            except ValueError:
+                pass
         # 日期范围过滤
         if start_date or end_date:
             dt_str = df["datetime"].astype(str).str.slice(0, 10)
@@ -1050,15 +1157,19 @@ async def _fetch_portfolio_bars(
 async def _fetch_multi_strategy_bars(
     client: Any,
     items: list[Any],
+    gateway: Any = None,
 ) -> list[Any]:
     """逐个策略槽位取行情 + 构造策略实例，组装 StrategySlot 列表（async）。
 
-    每条 item 自带 symbol（如 "SH:601088"）、category、start/end_date、strategy+params。
-    单条取数或策略构造失败则跳过（不中断整组）。返回的 StrategySlot 已绑定好策略
+    每条 item 自带 symbol（如 "SH:601088" / "HK:00700" / "US:AAPL"）、
+    category、start/end_date、strategy+params。
+    港美股走扩展栈（``gateway``），A 股走标准协议；单条取数或策略构造
+    失败则跳过（不中断整组）。返回的 StrategySlot 已绑定好策略
     实例与 df，可直接交给后台线程跑引擎（避免把 async client 带进线程）。
     """
     from easy_tdx.backtest.multi_strategy_engine import StrategySlot
     from easy_tdx.backtest.strategies import get_registry
+    from easy_tdx.markets import is_ex, normalize_market
     from easy_tdx.web.convert import category_from_str, market_from_str
 
     registry = get_registry()
@@ -1070,17 +1181,33 @@ async def _fetch_multi_strategy_bars(
         except KeyError:
             continue
         # 2. 逐页取行情（覆盖 start_date，最多 10 页 = 8000 根）
-        market_str, code = item.symbol.split(":", 1)
+        market_str, _, code = item.symbol.partition(":")
         frames: list[pd.DataFrame] = []
+        use_ex = False
+        try:
+            use_ex = is_ex(market_str)
+        except ValueError:
+            continue  # 市场无法识别，跳过该条
         for page in range(10):
             try:
-                page_df = await client.get_security_bars(
-                    market_from_str(market_str),
-                    code,
-                    category_from_str(item.category),
-                    page * 800,
-                    800,
-                )
+                if use_ex:
+                    if gateway is None or not gateway.ex_available:
+                        break
+                    page_df = await gateway.bars(
+                        normalize_market(market_str),
+                        code,
+                        category_from_str(item.category),
+                        page * 800,
+                        800,
+                    )
+                else:
+                    page_df = await client.get_security_bars(
+                        market_from_str(market_str),
+                        code,
+                        category_from_str(item.category),
+                        page * 800,
+                        800,
+                    )
             except Exception:
                 break
             if len(page_df) == 0:
@@ -1101,6 +1228,15 @@ async def _fetch_multi_strategy_bars(
             df["datetime"] = df["date"]
         df = df.sort_values("datetime").reset_index(drop=True)
         df = _normalize_bars_dt(df)
+        # 美股分钟线只留盘中（与 _fetch_bars 同口径）
+        if use_ex:
+            try:
+                if normalize_market(market_str) == "US":
+                    from easy_tdx.us_session import filter_us_regular_hours
+
+                    df = filter_us_regular_hours(df)
+            except ValueError:
+                pass
         # 日期范围过滤
         if item.start_date or item.end_date:
             df = _filter_df_by_date(df, item.start_date, item.end_date)

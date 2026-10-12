@@ -6,6 +6,9 @@
  * 覆盖：
  * 1. fetchRankList 的 market 归一化——北交所(market=2)必须映射为 'BJ'
  *    （与 fetchBoardMembers 同口径；错标 'SZ' 会导致榜单点开个股用错市场拉行情）。
+ * 1b. fetchBoardMembers 的扩展板块归一化——美股板块成员(market=74)必须映射为
+ *    'US'、港股(31)为 'HK'，不能按 A 股口径全标 'SZ'（否则点开成分股报
+ *    "A股代码应为6位数字"）。
  * 2. runLlmChatWithPolling 的可选 AbortSignal——signal 中止后循环立即以
  *    AbortError 退出，不再继续轮询（弹窗卸载清理依赖此行为）。
  */
@@ -13,7 +16,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { fetchRankList, runLlmChatWithPolling } from '../api.ts'
+import { deleteTask, fetchBoardMembers, fetchRankList, runLlmChatWithPolling } from '../api.ts'
 import type { TaskState } from '../types.ts'
 
 /** 临时替换 globalThis.fetch，返回可编程响应序列。 */
@@ -59,6 +62,63 @@ test('fetchRankList: market=2（北交所）归一化为 BJ', async () => {
     assert.ok(Math.abs((rows[0].change_pct ?? 0) - ((10.5 / 9.55 - 1) * 100)) < 1e-6)
   } finally {
     stub.restore()
+  }
+})
+
+// ── 1b. fetchBoardMembers 扩展板块映射 ─────────────────────────────────────────
+
+test('fetchBoardMembers: 美股/港股板块成员按扩展口径归一，不误标 SZ', async () => {
+  const stub = stubFetch(() => ({
+    data: [
+      { close: 15.04, pre_close: 13.27, market: 74, code: 'PHOS', name: 'First Phosphate' },
+    ],
+  }))
+  try {
+    const us = await fetchBoardMembers('US0003', 10)
+    assert.equal(us[0].market, 'US', 'market=74 应映射为 US（旧码错标 SZ）')
+  } finally {
+    stub.restore()
+  }
+  const stub2 = stubFetch(() => ({
+    data: [{ close: 10, pre_close: 9, market: 31, code: '00700', name: '腾讯控股' }],
+  }))
+  try {
+    const hk = await fetchBoardMembers('HK0100', 10)
+    assert.equal(hk[0].market, 'HK', 'market=31 应映射为 HK')
+  } finally {
+    stub2.restore()
+  }
+  const stub3 = stubFetch(() => ({
+    data: [{ close: 10, pre_close: 9, market: 1, code: '600519', name: '贵州茅台' }],
+  }))
+  try {
+    const ashare = await fetchBoardMembers('881001', 10)
+    assert.equal(ashare[0].market, 'SH', 'A 股板块保持原口径：market=1 → SH')
+  } finally {
+    stub3.restore()
+  }
+})
+
+// ── 1c. deleteTask 与自定义类型接口 ────────────────────────────────────────────
+
+test('deleteTask: DELETE 方法打到 /backtest/tasks/{id}', async () => {
+  const seen: Array<{ url: string; method: string }> = []
+  const original = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({ url: String(input instanceof URL ? input : input), method: init?.method ?? 'GET' })
+    return new Response(JSON.stringify({ ok: true, task_id: 'abc' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+  try {
+    const r = await deleteTask('abc')
+    assert.equal(r.ok, true)
+    assert.equal(seen.length, 1)
+    assert.ok(seen[0].url.includes('/backtest/tasks/abc'))
+    assert.equal(seen[0].method, 'DELETE')
+  } finally {
+    globalThis.fetch = original
   }
 })
 

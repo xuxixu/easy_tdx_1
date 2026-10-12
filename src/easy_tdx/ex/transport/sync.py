@@ -123,6 +123,15 @@ class ExTdxConnection:
                 pass
             self._sock = None
 
+    def _discard_socket_unlocked(self) -> None:
+        """关闭并丢弃底层 socket（调用方须已持有 ``self._lock``）。"""
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
     def execute(self, cmd: "BaseCommand[T]") -> T:
         """执行一条命令：发送请求，接收并解压响应，返回解析结果。"""
         with self._lock:
@@ -137,6 +146,9 @@ class ExTdxConnection:
                 header = parse_header(header_buf)
                 raw_body = self._recv_exact(header.zipsize)
             except OSError as e:
+                # 同 transport/sync.py：通信失败后必须作废连接，否则残留字节会被
+                # 下一条请求当成帧头解析，产出日期/价格错误的"合法"数据。
+                self._discard_socket_unlocked()
                 raise TdxConnectionError(f"通信错误: {e}") from e
             body = decompress_body(header, raw_body)
             return cmd.parse_response(body)

@@ -16,11 +16,13 @@ from easy_tdx.realtime.session import SHANGHAI_TZ, is_trading_time
 from easy_tdx.web.convert import (
     board_sort_from_str,
     board_type_from_str,
+    ex_board_type_from_str,
+    is_ex_board_type,
     market_value_from_str,
     sort_order_from_str,
     sort_type_from_str,
 )
-from easy_tdx.web.deps import get_mac_client
+from easy_tdx.web.deps import get_gateway, get_mac_client, get_mac_ex_client_optional
 from easy_tdx.web.schemas import DataFrameResponse, DictResponse, _json_safe
 
 _logger = logging.getLogger(__name__)
@@ -50,9 +52,34 @@ def _df_resp(df: Any) -> DataFrameResponse:
     return DataFrameResponse.from_dataframe(df)
 
 
+def _resolve_board_stack(board_type: str, mac_client: Any, mac_ex_client: Any) -> tuple[Any, Any]:
+    """按板块类型选协议栈。
+
+    港美股板块（HK_ALL/HK_GN/HK_HY/US_ALL/US_GN/US_HY）走 7727 扩展栈，
+    其余走 A 股 MAC 栈。扩展栈未连接时 503（不静默回落成 A 股数据）。
+
+    Returns:
+        ``(client, board_type_enum)``。
+    """
+    from fastapi import HTTPException
+
+    if is_ex_board_type(board_type):
+        if mac_ex_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"{board_type} 需要扩展市场协议栈（端口 7727），当前未连接",
+            )
+        return mac_ex_client, ex_board_type_from_str(board_type)
+    return mac_client, board_type_from_str(board_type)
+
+
 @router.get("/board-mac/list", response_model=DataFrameResponse)
 async def board_list(
-    board_type: str = Query("ALL", description="板块类型: ALL/HY/HY2/GN/FG/DQ"),
+    board_type: str = Query(
+        "ALL",
+        description="板块类型: ALL/HY/HY2/GN/FG/DQ（A股）"
+        "或 HK_ALL/HK_GN/HK_HY/US_ALL/US_GN/US_HY（港美股）",
+    ),
     count: int = Query(500, ge=1, le=50000),
     sort_column: str = Query(
         "CHANGE_PCT",
@@ -63,10 +90,12 @@ async def board_list(
         ),
     ),
     client: Any = Depends(get_mac_client),
+    mac_ex_client: Any = Depends(get_mac_ex_client_optional),
 ) -> DataFrameResponse:
     """获取板块列表（默认按涨跌幅降序；要取涨速传 sort_column=SPEED）。"""
-    df = await client.get_board_list(
-        board_type=board_type_from_str(board_type),
+    stack, bt = _resolve_board_stack(board_type, client, mac_ex_client)
+    df = await stack.get_board_list(
+        board_type=bt,
         count=count,
         sort_column=board_sort_from_str(sort_column),
     )
@@ -75,14 +104,29 @@ async def board_list(
 
 @router.get("/board-mac/members", response_model=DataFrameResponse)
 async def board_members(
-    board_symbol: str = Query(..., description="板块代码，如 881001"),
+    board_symbol: str = Query(
+        ..., description="板块代码，如 881001（A股）或 HK0285/US0467（港美股）"
+    ),
     count: int = Query(100, ge=1, le=100000),
     sort_type: str = Query("CHANGE_PCT", description="排序字段"),
     sort_order: str = Query("DESC", description="排序方向: ASC/DESC"),
     client: Any = Depends(get_mac_client),
+    mac_ex_client: Any = Depends(get_mac_ex_client_optional),
 ) -> DataFrameResponse:
-    """获取板块成分股。"""
-    df = await client.get_board_members(
+    """获取板块成分股。港美股板块代码（HK/US 开头）走扩展栈。"""
+    from fastapi import HTTPException
+
+    sym = (board_symbol or "").strip().upper()
+    if sym.startswith(("HK", "US")):
+        if mac_ex_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"{board_symbol} 需要扩展市场协议栈（端口 7727），当前未连接",
+            )
+        stack = mac_ex_client
+    else:
+        stack = client
+    df = await stack.get_board_members(
         board_symbol=board_symbol,
         count=count,
         sort_type=sort_type_from_str(sort_type),
@@ -120,15 +164,29 @@ async def board_summary(
 
 @router.get("/board-mac/ranking", response_model=DataFrameResponse)
 async def board_ranking(
-    board_type: str = Query("HY", description="板块类型: HY/HY2/GN/FG/DQ"),
+    board_type: str = Query(
+        "HY", description="板块类型: HY/HY2/GN/FG/DQ（A股）或 HK_HY/HK_GN/US_HY/US_GN（港美股）"
+    ),
     top_n: int = Query(10, ge=1, le=200),
     sort_by: str = Query("change_pct", description="排序字段名"),
     ascending: bool = Query(False, description="是否升序"),
     client: Any = Depends(get_mac_client),
+    mac_ex_client: Any = Depends(get_mac_ex_client_optional),
 ) -> DataFrameResponse:
-    """获取板块涨幅排名。"""
-    df = await client.get_board_ranking(
-        board_type=board_type_from_str(board_type),
+    """获取板块涨幅排名。港美股走扩展栈（无资金流字段，main_net_amount 为空）。"""
+    from fastapi import HTTPException
+
+    if is_ex_board_type(board_type):
+        if mac_ex_client is None:
+            raise HTTPException(status_code=503, detail="扩展市场协议栈未连接")
+        return _df_resp(
+            await _ex_board_ranking(
+                mac_ex_client, ex_board_type_from_str(board_type), top_n, sort_by, ascending
+            )
+        )
+    stack, bt = _resolve_board_stack(board_type, client, mac_ex_client)
+    df = await stack.get_board_ranking(
+        board_type=bt,
         top_n=top_n,
         sort_by=sort_by,
         ascending=ascending,
@@ -136,18 +194,90 @@ async def board_ranking(
     return _df_resp(df)
 
 
+async def _ex_board_ranking(
+    mac_ex_client: Any, bt: Any, top_n: int, sort_by: str, ascending: bool
+) -> Any:
+    """港美股板块排名（本地聚合：change_pct/amount/vol；无资金流）。"""
+    import pandas as pd
+
+    if sort_by not in ("change_pct", "amount", "vol"):
+        raise ValueError(f"港美股排名 sort_by 仅支持 change_pct/amount/vol，收到 '{sort_by}'")
+    boards_df = await mac_ex_client.get_board_list(board_type=bt, count=5000)
+    if boards_df.empty:
+        return pd.DataFrame()
+    boards_df = boards_df.copy()
+    pre = boards_df["pre_close"].replace(0, float("nan"))
+    boards_df["change_pct"] = (boards_df["price"] - boards_df["pre_close"]) / pre * 100
+    boards_df = boards_df.sort_values("change_pct", ascending=False).head(top_n)
+
+    rows: list[dict[str, Any]] = []
+    for _, row in boards_df.iterrows():
+        code = str(row["code"])
+        amount = 0.0
+        vol = 0.0
+        up = down = count = 0
+        try:
+            members = await mac_ex_client.get_board_members(code, count=100000)
+            if members is not None and not members.empty:
+                m = members.copy()
+                for col in ("amount", "vol", "close", "pre_close"):
+                    if col in m.columns:
+                        m[col] = pd.to_numeric(m[col], errors="coerce")
+                amount = float(m["amount"].sum()) if "amount" in m.columns else 0.0
+                vol = float(m["vol"].sum()) if "vol" in m.columns else 0.0
+                count = len(m)
+                if "close" in m.columns and "pre_close" in m.columns:
+                    chg = m["close"] / m["pre_close"].replace(0, float("nan")) - 1
+                    up = int((chg > 0).sum())
+                    down = int((chg < 0).sum())
+        except Exception:  # noqa: BLE001 — 单板块聚合失败不阻断整榜
+            _logger.warning("港美股板块 %s 成分聚合失败", code)
+        rows.append(
+            {
+                "code": code,
+                "name": row.get("name", ""),
+                "change_pct": round(float(row.get("change_pct", 0.0)), 2),
+                "amount": amount,
+                "vol": vol,
+                "main_net_amount": None,
+                "up_count": up,
+                "down_count": down,
+                "member_count": count,
+            }
+        )
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result = result.sort_values(sort_by, ascending=ascending).reset_index(drop=True)
+    return result
+
+
 @router.get("/board-mac/change-ranking", response_model=DataFrameResponse)
 async def board_change_ranking(
-    board_type: str = Query("HY", description="板块类型: HY/HY2/GN/FG/DQ"),
+    board_type: str = Query(
+        "HY", description="板块类型: HY/HY2/GN/FG/DQ（A股）或 HK_HY/HK_GN/US_HY/US_GN（港美股）"
+    ),
     days: int = Query(20, ge=1, le=250, description="统计天数"),
     top_n: int = Query(10, ge=1, le=200),
     target_date: int | None = Query(None, description="目标日期，如 20250101"),
     ascending: bool = Query(False, description="是否升序"),
     client: Any = Depends(get_mac_client),
+    mac_ex_client: Any = Depends(get_mac_ex_client_optional),
+    gateway: Any = Depends(get_gateway),
 ) -> DataFrameResponse:
-    """获取板块 N 日涨幅排名。"""
-    df = await client.get_board_change_ranking(
-        board_type=board_type_from_str(board_type),
+    """获取板块 N 日涨幅排名。港美股走扩展栈板块指数 K 线。"""
+    from fastapi import HTTPException
+
+    if is_ex_board_type(board_type):
+        if mac_ex_client is None:
+            raise HTTPException(status_code=503, detail="扩展市场协议栈未连接")
+        return _df_resp(
+            await _ex_board_change_ranking(
+                mac_ex_client, ex_board_type_from_str(board_type), days, top_n, ascending
+            )
+        )
+    stack, bt = _resolve_board_stack(board_type, client, mac_ex_client)
+    df = await stack.get_board_change_ranking(
+        board_type=bt,
         target_date=target_date,
         days=days,
         top_n=top_n,
@@ -156,9 +286,46 @@ async def board_change_ranking(
     return _df_resp(df)
 
 
+async def _ex_board_change_ranking(
+    mac_ex_client: Any, bt: Any, days: int, top_n: int, ascending: bool
+) -> Any:
+    """港美股板块 N 日涨幅排名（板块指数 K 线首尾收盘价比）。"""
+    import pandas as pd
+
+    boards_df = await mac_ex_client.get_board_list(board_type=bt, count=5000)
+    if boards_df.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, Any]] = []
+    for rec in boards_df.to_dict(orient="records"):
+        code = str(rec["code"])
+        try:
+            # 板块指数挂在 market=70 分区
+            df = await mac_ex_client.goods_kline(70, code, 4, 0, days + 5, 0)
+            if df is None or len(df) < 2:
+                continue
+            closes = pd.to_numeric(df["close"], errors="coerce").dropna()
+            if len(closes) < 2:
+                continue
+            tail = closes.iloc[-days:] if len(closes) >= days else closes
+            chg = (float(tail.iloc[-1]) / float(tail.iloc[0]) - 1) * 100
+            rows.append(
+                {"code": code, "name": str(rec.get("name", "")), "change_pct": round(chg, 2)}
+            )
+        except Exception:  # noqa: BLE001 — 单板块失败不阻断
+            continue
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result = (
+            result.sort_values("change_pct", ascending=ascending).head(top_n).reset_index(drop=True)
+        )
+    return result
+
+
 @router.get("/board-mac/overview", response_model=DictResponse)
 async def board_overview(
-    board_type: str = Query("HY", description="板块类型: HY/HY2/GN/FG/DQ"),
+    board_type: str = Query(
+        "HY", description="板块类型: HY/HY2/GN/FG/DQ（A股）或 HK_HY/HK_GN/US_HY/US_GN（港美股）"
+    ),
     metrics: str = Query(
         "SPEED,CHANGE_3D,CHANGE_5D,CHANGE_20D,YTD",
         description=(
@@ -168,29 +335,35 @@ async def board_overview(
     ),
     count: int = Query(2000, ge=1, le=20000),
     client: Any = Depends(get_mac_client),
+    mac_ex_client: Any = Depends(get_mac_ex_client_optional),
 ) -> DictResponse:
     """板块总览：一次返回全部板块的当日涨跌幅 + 领涨股 + 多周期指标。
 
     以默认（涨跌幅）排序的板块列表为基表归并各 metrics 排序列的 sort_value，
     避免前端直连 N 次 ``/board-mac/list``。结果服务端缓存 15s。
     当日涨跌幅按 price/pre_close-1 计算（CHANGE_PCT 的 sort_value 恒 0）。
+    港美股板块走扩展栈（排序键实测可用），领涨股为成分涨幅第一。
     """
-    bt = board_type_from_str(board_type)
+    stack, bt = _resolve_board_stack(board_type, client, mac_ex_client)
     sort_names = [m.strip().upper() for m in metrics.split(",") if m.strip()]
     invalid = [m for m in sort_names if m not in _OVERVIEW_METRIC_FIELDS]
     if invalid:
         valid = ", ".join(_OVERVIEW_METRIC_FIELDS)
         raise ValueError(f"无效指标 '{','.join(invalid)}'，可选值: {valid}")
 
-    cache_key = (bt.name, tuple(sort_names), count)  # count 影响 payload 行数，必须入键
+    cache_key = (
+        str(board_type).upper(),
+        tuple(sort_names),
+        count,
+    )  # count 影响 payload 行数，必须入键
     cached = _overview_cache.get(cache_key)
     if cached is not None and _now() < cached[0]:
         return DictResponse.from_dict(cached[1])
 
     results = await asyncio.gather(
-        client.get_board_list(board_type=bt, count=count),
+        stack.get_board_list(board_type=bt, count=count),
         *(
-            client.get_board_list(board_type=bt, count=count, sort_column=board_sort_from_str(name))
+            stack.get_board_list(board_type=bt, count=count, sort_column=board_sort_from_str(name))
             for name in sort_names
         ),
     )
@@ -273,8 +446,12 @@ def _today_str() -> str:
     return datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d")
 
 
-async def _hotspot_build(board_key: str, bt: Any, client: Any) -> None:
-    """后台构建板块历史日度涨跌矩阵，结果写入 _hotspot_history_cache。"""
+async def _hotspot_build(board_key: str, bt: Any, client: Any, *, is_ex: bool = False) -> None:
+    """后台构建板块历史日度涨跌矩阵，结果写入 _hotspot_history_cache。
+
+    港美股板块（``is_ex=True``）的板块指数 K 线挂在 market=70 分区，
+    走扩展栈 ``goods_kline``；A 股走标准 ``get_stock_kline``。
+    """
     state = _hotspot_builds[board_key]
     try:
         boards_df = await client.get_board_list(board_type=bt, count=5000)
@@ -296,13 +473,18 @@ async def _hotspot_build(board_key: str, bt: Any, client: Any) -> None:
             nonlocal done
             async with sem:
                 try:
-                    df = await client.get_stock_kline(
-                        market=market,
-                        code=code,
-                        period=Period.DAILY,
-                        count=_HOTSPOT_KLINE_COUNT,
-                        adjust=Adjust.NONE,
-                    )
+                    if is_ex:
+                        df = await client.goods_kline(
+                            70, code, Period.DAILY, 0, _HOTSPOT_KLINE_COUNT, 0
+                        )
+                    else:
+                        df = await client.get_stock_kline(
+                            market=market,
+                            code=code,
+                            period=Period.DAILY,
+                            count=_HOTSPOT_KLINE_COUNT,
+                            adjust=Adjust.NONE,
+                        )
                 except Exception:  # noqa: BLE001 — 单板块缺K线不阻塞整体
                     df = None
             done += 1
@@ -348,6 +530,7 @@ def _hotspot_history_or_build(
     client: Any,
     *,
     retry: bool = False,
+    is_ex: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """热点历史缓存的公共入口。
 
@@ -367,7 +550,7 @@ def _hotspot_history_or_build(
         if need_build:
             state = {"status": "building", "progress": 0.0, "task": None, "error": ""}
             _hotspot_builds[key] = state
-            state["task"] = asyncio.create_task(_hotspot_build(key, bt, client))
+            state["task"] = asyncio.create_task(_hotspot_build(key, bt, client, is_ex=is_ex))
             running = True
     assert state is not None  # running 分支的 state 必然存在；error 分支同理
     if running:
@@ -381,12 +564,15 @@ def _hotspot_history_or_build(
 
 @router.get("/board-mac/hotspot", response_model=DictResponse)
 async def board_hotspot(
-    board_type: str = Query("HY", description="板块类型: HY/HY2/GN/FG/DQ"),
+    board_type: str = Query(
+        "HY", description="板块类型: HY/HY2/GN/FG/DQ（A股）或 HK_HY/HK_GN/US_HY/US_GN（港美股）"
+    ),
     days: int = Query(20, ge=1, le=_HOTSPOT_MAX_DAYS, description="窗口交易日数（1=仅今日）"),
     mode: str = Query("top", description="top=领涨(每日最强入选) / bottom=领跌(每日最弱入选)"),
     per_day: int = Query(5, ge=2, le=10, description="每日入选名次阈值"),
     retry: bool = Query(False, description="上次构建失败后强制重建"),
     client: Any = Depends(get_mac_client),
+    mac_ex_client: Any = Depends(get_mac_ex_client_optional),
 ) -> DictResponse:
     """市场热点滚动：交易日 × 板块 每日涨跌矩阵 + 当日排名。
 
@@ -403,10 +589,12 @@ async def board_hotspot(
     if mode_norm not in ("top", "bottom"):
         raise ValueError(f"mode 仅支持 top/bottom，got {mode}")
 
-    bt = board_type_from_str(board_type)
-    key = bt.name
+    stack, bt = _resolve_board_stack(board_type, client, mac_ex_client)
+    key = f"EX_{bt.name}" if is_ex_board_type(board_type) else bt.name
 
-    history, build_payload = _hotspot_history_or_build(key, bt, client, retry=retry)
+    history, build_payload = _hotspot_history_or_build(
+        key, bt, stack, retry=retry, is_ex=is_ex_board_type(board_type)
+    )
     if build_payload is not None or history is None:
         return DictResponse.from_dict(build_payload or {"status": "error"})
     axis_all: list[str] = history["axis"]
@@ -418,7 +606,7 @@ async def board_hotspot(
     window = [d for d in axis_all if d != today][-days:]
 
     # 今日列：实时报价（1–2 页，廉价）。全市场无一移动（盘前/休市）则不追加
-    live_df = await client.get_board_list(board_type=bt, count=5000)
+    live_df = await stack.get_board_list(board_type=bt, count=5000)
     live_change: dict[str, float] = {}
     any_moved = False
     if live_df is not None and not live_df.empty:
@@ -524,11 +712,14 @@ async def board_hotspot(
 
 @router.get("/board-mac/hotspot-correlation", response_model=DictResponse)
 async def board_hotspot_correlation(
-    board_type: str = Query("HY", description="板块类型: HY/HY2/GN/FG/DQ"),
+    board_type: str = Query(
+        "HY", description="板块类型: HY/HY2/GN/FG/DQ（A股）或 HK_HY/HK_GN/US_HY/US_GN（港美股）"
+    ),
     days: int = Query(20, ge=5, le=_HOTSPOT_MAX_DAYS, description="相关性窗口交易日数"),
     per_day: int = Query(5, ge=2, le=10, description="每日入选名次阈值（行集合口径）"),
     top: int = Query(15, ge=5, le=25, description="入阵板块数上限（按上榜次数取前 N）"),
     client: Any = Depends(get_mac_client),
+    mac_ex_client: Any = Depends(get_mac_ex_client_optional),
 ) -> DictResponse:
     """热点板块相关性矩阵：窗口内活跃板块两两日涨跌幅的 Pearson 相关系数。
 
@@ -537,10 +728,12 @@ async def board_hotspot_correlation(
     （无缓存时返回与 hotspot 相同的 building/error 状态，前端先拉 hotspot 即可）。
     相关系数 >0（红）= 同涨同跌，<0（绿）= 跷跷板。
     """
-    bt = board_type_from_str(board_type)
-    key = bt.name
+    stack, bt = _resolve_board_stack(board_type, client, mac_ex_client)
+    key = f"EX_{bt.name}" if is_ex_board_type(board_type) else bt.name
 
-    history, build_payload = _hotspot_history_or_build(key, bt, client)
+    history, build_payload = _hotspot_history_or_build(
+        key, bt, stack, is_ex=is_ex_board_type(board_type)
+    )
     if build_payload is not None or history is None:
         return DictResponse.from_dict(build_payload or {"status": "error"})
     axis_all: list[str] = history["axis"]

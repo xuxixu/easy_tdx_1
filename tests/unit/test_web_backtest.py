@@ -772,7 +772,7 @@ def test_portfolio_backtest_endpoint(client, monkeypatch):
 
     np.random.seed(3)
 
-    async def fake_fetch(client_arg, stocks, category, start, end):  # noqa: ANN001
+    async def fake_fetch(client_arg, stocks, category, start, end, gateway=None):  # noqa: ANN001
         result = []
         for sym in stocks:
             mkt, code = sym.split(":")
@@ -832,7 +832,7 @@ def test_portfolio_backtest_bad_strategy(client, monkeypatch):
     import easy_tdx.web.routers.backtest as bt_router
     from easy_tdx.backtest.portfolio_engine import StockData
 
-    async def fake_fetch(client_arg, stocks, category, start, end):  # noqa: ANN001
+    async def fake_fetch(client_arg, stocks, category, start, end, gateway=None):  # noqa: ANN001
         n = 10
         df = pd.DataFrame(
             {
@@ -1066,7 +1066,7 @@ def test_portfolio_backtest_includes_grade_score_trades(client, monkeypatch):
     import easy_tdx.web.routers.backtest as bt_router
     from easy_tdx.backtest.portfolio_engine import StockData
 
-    async def fake_fetch(client_arg, stocks, category, start, end):  # noqa: ANN001
+    async def fake_fetch(client_arg, stocks, category, start, end, gateway=None):  # noqa: ANN001
         result = []
         for sym in stocks:
             mkt, code = sym.split(":")
@@ -1113,7 +1113,7 @@ def test_portfolio_walkforward_endpoint(client, monkeypatch):
     import easy_tdx.web.routers.backtest as bt_router
     from easy_tdx.backtest.portfolio_engine import StockData
 
-    async def fake_fetch(client_arg, stocks, category, start, end):  # noqa: ANN001
+    async def fake_fetch(client_arg, stocks, category, start, end, gateway=None):  # noqa: ANN001
         result = []
         for sym in stocks:
             mkt, code = sym.split(":")
@@ -1156,7 +1156,7 @@ def test_portfolio_evaluate_endpoint(client, monkeypatch):
     import easy_tdx.web.routers.backtest as bt_router
     from easy_tdx.backtest.portfolio_engine import StockData
 
-    async def fake_fetch(client_arg, stocks, category, start, end):  # noqa: ANN001
+    async def fake_fetch(client_arg, stocks, category, start, end, gateway=None):  # noqa: ANN001
         result = []
         for sym in stocks:
             mkt, code = sym.split(":")
@@ -1200,7 +1200,7 @@ def _fake_multi_slots(n: int = 400):
 
     from easy_tdx.backtest.multi_strategy_engine import StrategySlot
 
-    async def fake_fetch(client_arg, items):  # noqa: ANN001
+    async def fake_fetch(client_arg, items, gateway=None):  # noqa: ANN001
         slots = []
         for item in items:
             mkt, code = item.symbol.split(":")
@@ -1264,7 +1264,7 @@ def test_multi_strategy_wf_endpoint(client, monkeypatch):
     from easy_tdx.backtest.multi_strategy_engine import StrategySlot
     from easy_tdx.backtest.strategies import get_registry
 
-    async def fake_fetch(client_arg, items):  # noqa: ANN001
+    async def fake_fetch(client_arg, items, gateway=None):  # noqa: ANN001
         registry = get_registry()
         slots = []
         for item in items:
@@ -1316,7 +1316,7 @@ def test_multi_strategy_evaluate_endpoint(client, monkeypatch):
     from easy_tdx.backtest.multi_strategy_engine import StrategySlot
     from easy_tdx.backtest.strategies import get_registry
 
-    async def fake_fetch(client_arg, items):  # noqa: ANN001
+    async def fake_fetch(client_arg, items, gateway=None):  # noqa: ANN001
         registry = get_registry()
         slots = []
         for item in items:

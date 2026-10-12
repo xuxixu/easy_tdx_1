@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from easy_tdx.markets import SYMBOL_PATTERN
 from easy_tdx.web.deps import get_client
 from easy_tdx.web.task_runner import get_runner
 
@@ -34,7 +35,7 @@ class FormulaComputeRequest(FormulaValidateRequest):
     """公式计算请求：内联 ohlcv 或按 symbol 取行情（二选一）。"""
 
     ohlcv: list[dict[str, Any]] | None = Field(default=None, max_length=2000)
-    symbol: str | None = Field(default=None, pattern=r"^(SZ|SH|BJ):\d{6}$")
+    symbol: str | None = Field(default=None, pattern=SYMBOL_PATTERN)
     category: str = "DAY"
     count: int = Field(default=250, ge=20, le=2000)
     tail: int = Field(default=10, ge=0, le=100, description="附带最近 N 根输出明细")

@@ -13,7 +13,8 @@ from easy_tdx.exceptions import TdxConnectionError
 
 
 def _pack_frame(body: bytes) -> bytes:
-    return struct.pack("<IIIHH", 0, 0, 0, len(body), len(body)) + body
+    # 真实响应帧头的首字段是协议魔数 7654321；客户端会校验它来识别响应流错位。
+    return struct.pack("<IIIHH", 7654321, 0, 0, len(body), len(body)) + body
 
 
 _HANDSHAKE_LEN = len(build_handshake_command())

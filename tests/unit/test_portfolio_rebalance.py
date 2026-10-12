@@ -129,3 +129,53 @@ class TestRebalanceEngine:
         result = engine.run(_make_market(), start_date=20240101, end_date=20240430)
         md = result.performance["max_drawdown"]
         assert 0.0 <= md <= 1.0, f"max_drawdown={md} 应落在 [0,1]"
+
+    def test_transaction_costs_reduce_equity(self):
+        """交易成本必须真的进入净值曲线。
+
+        回归：此前 _rebalance 末尾用 ``cash = total_value - 新持仓市值`` 整行
+        覆盖现金，把卖出净额与全部佣金/滑点一并抹除 —— 净值等价于"零成本交易"，
+        而 trades_df 照常记录 cost。这里用同一份行情分别跑零成本与高成本，
+        高成本版本的期末净值必须更低。
+        """
+        data = _make_market(n_stocks=5, n_days=120, seed=11)
+        free = RebalanceEngine(
+            optimizer=EqualWeightOptimizer(),
+            n_stocks=3,
+            rebalance_freq="M",
+            cash=1_000_000,
+            commission=0.0,
+            slippage=0.0,
+        ).run(data, start_date=20240101, end_date=20240430)
+        costly = RebalanceEngine(
+            optimizer=EqualWeightOptimizer(),
+            n_stocks=3,
+            rebalance_freq="M",
+            cash=1_000_000,
+            commission=0.01,
+            slippage=0.01,
+        ).run(data, start_date=20240101, end_date=20240430)
+
+        free_end = float(free.equity_curve["total"].iloc[-1])
+        costly_end = float(costly.equity_curve["total"].iloc[-1])
+        assert costly_end < free_end, "高昂交易成本未反映到净值（成本被抹除）"
+
+        # 成本同时须体现在 trades_df 的 cost 列
+        if len(costly.trades) > 0:
+            assert float(costly.trades["cost"].sum()) > 0
+
+    def test_cash_never_negative(self):
+        """全仓重置语义下现金不应转负（防止"卖出加、买入减"式重复计价回归）。"""
+        engine = RebalanceEngine(
+            optimizer=EqualWeightOptimizer(),
+            n_stocks=3,
+            rebalance_freq="M",
+            cash=1_000_000,
+        )
+        result = engine.run(
+            _make_market(n_stocks=4, n_days=120, seed=5),
+            start_date=20240101,
+            end_date=20240430,
+        )
+        for st in result.states:
+            assert st.cash >= -1e-6, f"{st.date} 现金为负: {st.cash}"

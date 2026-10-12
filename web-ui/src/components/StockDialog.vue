@@ -13,13 +13,17 @@ import {
   fetchHistoryMinute,
   fetchIndexBars,
   fetchMinute,
+  fetchQuotes,
   fetchWatchlist,
   formatError,
   removeWatchItem,
 } from '../api'
-import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol } from '../format'
+import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol, fmtVolShares } from '../format'
+import { loadIndicatorParams, saveIndicatorParams, type IndicatorParams } from '../indicatorParams'
+import { isExMarket } from '../market'
 import { useQuoteStore } from '../stores/quotes'
-import type { Bar, MinutePoint } from '../types'
+import type { Bar, MinutePoint, SecurityQuote } from '../types'
+import IndicatorEditor from './IndicatorEditor.vue'
 import IntradayChart from './IntradayChart.vue'
 import StockKline, { type Overlay, type SubPane } from './StockKline.vue'
 
@@ -43,7 +47,6 @@ const changePct = computed(() => {
 // ── tab / 指标 ──────────────────────────────────────────────────────────────
 
 const tab = ref<'minute' | 'daily'>('minute')
-const overlay = ref<Overlay>('ma')
 const subPane = ref<SubPane>('macd')
 const minuteDays = ref<1 | 3 | 5>(1)
 const DAY_OPTIONS: Array<{ value: 1 | 3 | 5; label: string }> = [
@@ -56,14 +59,32 @@ const overlayOptions: Array<{ value: Overlay; label: string }> = [
   { value: 'ma', label: 'MA' },
   { value: 'boll', label: 'BOLL' },
   { value: 'ema', label: 'EMA' },
-  { value: 'none', label: '主图无' },
 ]
+
+/** 主图叠加多选：勾选态写回 indParams.overlays（全局共用配置）。 */
+const overlays = computed<Overlay[]>(() => indParams.value.overlays ?? [])
+
+function toggleOverlay(v: Overlay) {
+  const cur = overlays.value
+  const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
+  indParams.value.overlays = next
+  indParams.value.overlay = next[0] ?? 'ma'
+  saveIndicatorParams(indParams.value)
+}
 const subOptions: Array<{ value: SubPane; label: string }> = [
   { value: 'macd', label: 'MACD' },
   { value: 'kdj', label: 'KDJ' },
   { value: 'rsi', label: 'RSI' },
   { value: 'none', label: '副图无' },
 ]
+
+// ── 指标参数（全局共用，编辑器写入 localStorage 后这里同步） ────────────────
+
+const indParams = ref<IndicatorParams>(loadIndicatorParams())
+const showIndEditor = ref(false)
+
+const isEx = isExMarket(props.market)
+if (isEx) minuteDays.value = 1
 
 // ── 图表数据（独立容错） ────────────────────────────────────────────────────
 
@@ -78,6 +99,15 @@ const loading = ref(false)
 async function loadMinute() {
   minuteError.value = ''
   try {
+    // 外盘只有当日分时（/minute/history 是 A 股标准协议接口），直接拉当日
+    if (isEx) {
+      minutePoints.value = await fetchMinute(props.market, props.code)
+      minuteDayMarks.value =
+        minutePoints.value.length > 0
+          ? [{ start: 0, date: new Date().toISOString().slice(0, 10) }]
+          : []
+      return
+    }
     // 交易日从日K尾部取（末日=今天），今天走 /minute，历史日走 /minute/history
     const dates = dailyBars.value.slice(-minuteDays.value).map((b) => b.datetime.slice(0, 10))
     const all: MinutePoint[] = []
@@ -121,11 +151,19 @@ async function loadDaily() {
   }
 }
 
+// 请求序号守卫：loadCharts 内部先 await 日K、再 await 分时，而分时依赖日K
+// 尾部日期。快速连点两只标的时两次 loadCharts 并发，后发的日K可能先返回，
+// 导致旧标的的 loadMinute 拿着新标的的 dailyBars —— 分时与日K分属两只票。
+let chartSeq = 0
+
 async function loadCharts() {
+  const my = ++chartSeq
   loading.value = true
   // 先日K后分时：多日分时的交易日列表取自 dailyBars 尾部
   await loadDaily()
+  if (my !== chartSeq) return // 已被更新的标的取代
   await loadMinute()
+  if (my !== chartSeq) return
   loading.value = false
 }
 
@@ -167,6 +205,63 @@ async function toggleWatch() {
 }
 
 // ── 五档 ────────────────────────────────────────────────────────────────────
+// 盘口只依赖 SSE 全局 store 时，非自选股打开弹窗必然空白（store 里没它）。
+// 这里主动拉一次 REST 快照写入 store 兜底；港美股扩展报价若无五档字段，
+// 则降级显示实时快照（股单位），盘口区永不空白。
+
+const quoteLoading = ref(false)
+const quoteError = ref('')
+
+async function ensureQuote() {
+  const symbol = `${props.market}${props.code}`
+  if (quoteStore.getQuote(symbol)) {
+    quoteError.value = ''
+    return
+  }
+  quoteLoading.value = true
+  quoteError.value = ''
+  try {
+    const rows = await fetchQuotes([{ market: props.market, code: props.code }])
+    const hit = rows.find((r) => r.symbol === symbol) ?? rows[0]
+    if (hit) {
+      quoteStore.quotes.set(symbol, hit as SecurityQuote)
+    } else {
+      quoteError.value = '暂无该股实时报价'
+    }
+  } catch (e) {
+    quoteError.value = formatError(e)
+  } finally {
+    quoteLoading.value = false
+  }
+}
+
+onMounted(ensureQuote)
+watch([() => props.market, () => props.code], ensureQuote)
+
+/** 是否有五档数据（任一买卖档有正价格）。扩展市场报价无五档字段、或补 0
+ * 填充时为 false，走快照降级（0 价不可能是真实挂单）。 */
+const hasDepth = computed(() => {
+  const q = quote.value
+  if (!q) return false
+  const rec = q as unknown as Record<string, number | null>
+  for (let i = 1; i <= 5; i++) {
+    const b = rec[`bid${i}`]
+    const a = rec[`ask${i}`]
+    if ((typeof b === 'number' && b > 0) || (typeof a === 'number' && a > 0)) return true
+  }
+  return false
+})
+
+/** 港美股 vol 单位是股，A 股是手。 */
+function fmtDepthVol(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '-'
+  return isEx ? fmtVolShares(v) : String(Math.round(v))
+}
+
+function fmtTotalVol(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '-'
+  return isEx ? fmtVolShares(v) : fmtVol(v)
+}
 
 const bids = computed(() => {
   const q = quote.value
@@ -239,44 +334,54 @@ function gotoOptimize() {
         </div>
 
         <div class="dlg-body">
-          <!-- 五档盘口 -->
+          <!-- 五档盘口（按市场自适应：无五档数据的市场显示实时快照） -->
           <div class="depth">
-            <div class="depth-title">五档盘口</div>
-            <table class="depth-table">
-              <tbody>
-                <tr v-for="lv in asks" :key="`a${lv.level}`">
-                  <td class="lv">卖{{ lv.level }}</td>
-                  <td class="mono" :class="lv.price && quote?.pre_close ? dirClass(lv.price - quote.pre_close) : 'flat'">
-                    {{ fmt2(lv.price) }}
-                  </td>
-                  <td class="vol-cell">
-                    <div class="vol-bar ask" :style="{ width: `${((lv.vol ?? 0) / maxDepthVol) * 100}%` }"></div>
-                    <span class="mono">{{ lv.vol ? Math.round(lv.vol) : '-' }}</span>
-                  </td>
-                </tr>
-                <tr class="sep-row">
-                  <td colspan="3"><div class="sep"></div></td>
-                </tr>
-                <tr v-for="lv in bids" :key="`b${lv.level}`">
-                  <td class="lv">买{{ lv.level }}</td>
-                  <td class="mono" :class="lv.price && quote?.pre_close ? dirClass(lv.price - quote.pre_close) : 'flat'">
-                    {{ fmt2(lv.price) }}
-                  </td>
-                  <td class="vol-cell">
-                    <div class="vol-bar bid" :style="{ width: `${((lv.vol ?? 0) / maxDepthVol) * 100}%` }"></div>
-                    <span class="mono">{{ lv.vol ? Math.round(lv.vol) : '-' }}</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-if="quote" class="depth-stats mono">
-              <div><span class="dim2">量</span>{{ fmtVol(quote.vol) }}</div>
-              <div><span class="dim2">额</span>{{ fmtAmount(quote.amount) }}</div>
-              <div><span class="dim2">高</span>{{ fmt2(quote.high) }}</div>
-              <div><span class="dim2">低</span>{{ fmt2(quote.low) }}</div>
-              <div><span class="dim2">开</span>{{ fmt2(quote.open) }}</div>
-              <div><span class="dim2">昨收</span>{{ fmt2(quote.pre_close) }}</div>
+            <div class="depth-title">{{ hasDepth ? '五档盘口' : '实时快照' }}</div>
+            <div v-if="!quote && quoteLoading" class="depth-msg">盘口加载中…</div>
+            <div v-else-if="!quote && quoteError" class="depth-msg error">
+              {{ quoteError }}
+              <button class="chip retry" @click="ensureQuote">重试</button>
             </div>
+            <template v-else-if="quote">
+              <table v-if="hasDepth" class="depth-table">
+                <tbody>
+                  <tr v-for="lv in asks" :key="`a${lv.level}`">
+                    <td class="lv">卖{{ lv.level }}</td>
+                    <td class="mono" :class="lv.price && quote?.pre_close ? dirClass(lv.price - quote.pre_close) : 'flat'">
+                      {{ fmt2(lv.price) }}
+                    </td>
+                    <td class="vol-cell">
+                      <div class="vol-bar ask" :style="{ width: `${((lv.vol ?? 0) / maxDepthVol) * 100}%` }"></div>
+                      <span class="mono">{{ fmtDepthVol(lv.vol) }}</span>
+                    </td>
+                  </tr>
+                  <tr class="sep-row">
+                    <td colspan="3"><div class="sep"></div></td>
+                  </tr>
+                  <tr v-for="lv in bids" :key="`b${lv.level}`">
+                    <td class="lv">买{{ lv.level }}</td>
+                    <td class="mono" :class="lv.price && quote?.pre_close ? dirClass(lv.price - quote.pre_close) : 'flat'">
+                      {{ fmt2(lv.price) }}
+                    </td>
+                    <td class="vol-cell">
+                      <div class="vol-bar bid" :style="{ width: `${((lv.vol ?? 0) / maxDepthVol) * 100}%` }"></div>
+                      <span class="mono">{{ fmtDepthVol(lv.vol) }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="no-depth-hint">该市场暂不提供五档盘口，仅显示实时快照</div>
+              <div class="depth-stats mono">
+                <div><span class="dim2">现价</span>{{ fmt2(quote.price) }}</div>
+                <div><span class="dim2">涨跌</span>{{ fmtPctSigned(changePct) }}</div>
+                <div><span class="dim2">量</span>{{ fmtTotalVol(quote.vol) }}</div>
+                <div><span class="dim2">额</span>{{ fmtAmount(quote.amount) }}</div>
+                <div><span class="dim2">高</span>{{ fmt2(quote.high) }}</div>
+                <div><span class="dim2">低</span>{{ fmt2(quote.low) }}</div>
+                <div><span class="dim2">开</span>{{ fmt2(quote.open) }}</div>
+                <div><span class="dim2">昨收</span>{{ fmt2(quote.pre_close) }}</div>
+              </div>
+            </template>
           </div>
 
           <!-- 图表区 -->
@@ -284,7 +389,7 @@ function gotoOptimize() {
             <div class="tabs">
               <button :class="{ active: tab === 'minute' }" @click="tab = 'minute'">分时</button>
               <button :class="{ active: tab === 'daily' }" @click="tab = 'daily'">日K</button>
-              <span v-if="tab === 'minute'" class="ind-group">
+              <span v-if="tab === 'minute' && !isEx" class="ind-group">
                 <button
                   v-for="opt in DAY_OPTIONS"
                   :key="opt.value"
@@ -301,11 +406,13 @@ function gotoOptimize() {
                     v-for="opt in overlayOptions"
                     :key="opt.value"
                     class="chip"
-                    :class="{ on: overlay === opt.value }"
-                    @click="overlay = opt.value"
+                    :class="{ on: overlays.includes(opt.value) }"
+                    :title="overlays.includes(opt.value) ? '点击取消叠加' : '点击叠加'"
+                    @click="toggleOverlay(opt.value)"
                   >
                     {{ opt.label }}
                   </button>
+                  <span v-if="overlays.length > 1" class="dim ov-multi">叠加 {{ overlays.length }} 项</span>
                 </span>
                 <span class="ind-group">
                   <button
@@ -313,11 +420,14 @@ function gotoOptimize() {
                     :key="opt.value"
                     class="chip"
                     :class="{ on: subPane === opt.value }"
-                    @click="subPane = opt.value"
+                    @click="subPane = opt.value; indParams.subPane = opt.value"
                   >
                     {{ opt.label }}
                   </button>
                 </span>
+                <button class="chip ind-edit" title="编辑指标参数（周期/倍数）" @click="showIndEditor = true">
+                  ⚙ 指标
+                </button>
               </template>
             </div>
             <div v-if="loading" class="chart-msg">加载中…</div>
@@ -329,17 +439,31 @@ function gotoOptimize() {
                   :points="minutePoints"
                   :pre-close="preClose"
                   :day-marks="minuteDayMarks"
+                  :vol-unit-shares="isEx"
                 />
               </template>
               <template v-else>
                 <div v-if="dailyError" class="chart-msg error">日K：{{ dailyError }}</div>
-                <StockKline v-else :bars="dailyBars" :overlay="overlay" :sub-pane="subPane" />
+                <StockKline
+                  v-else
+                  :bars="dailyBars"
+                  :overlays="overlays"
+                  :sub-pane="subPane"
+                  :params="indParams"
+                  :pre-close="preClose"
+                  :vol-unit-shares="isEx"
+                />
               </template>
             </template>
           </div>
         </div>
       </div>
     </div>
+    <IndicatorEditor
+      v-if="showIndEditor"
+      v-model="indParams"
+      @close="showIndEditor = false"
+    />
   </teleport>
 </template>
 
@@ -347,7 +471,7 @@ function gotoOptimize() {
 .dlg-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -429,6 +553,29 @@ function gotoOptimize() {
   font-size: 12px;
   color: var(--text-dim);
   margin-bottom: 6px;
+}
+.depth-msg {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 24px 0;
+  text-align: center;
+}
+.depth-msg.error {
+  color: var(--up);
+}
+.depth-msg .retry {
+  margin-left: 8px;
+  padding: 2px 10px;
+  font-size: 11px;
+}
+.no-depth-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  line-height: 1.5;
 }
 .depth-table {
   width: 100%;
@@ -512,6 +659,10 @@ function gotoOptimize() {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(74, 158, 255, 0.12);
+}
+.ov-multi {
+  font-size: 11px;
+  margin-left: 4px;
 }
 .chart-msg {
   padding: 40px 0;

@@ -21,6 +21,9 @@ from ..exceptions import TdxDecodeError
 
 HEADER_SIZE: int = 16
 _HEADER_FMT = "<IIIHH"
+# 协议魔数，恒为 7654321 (0x0074CBB1)。响应流错位时（前一条响应残留字节被当成
+# 新帧头）这里会读到任意值——校验它能把"静默产出错误行情"变成"触发重连"。
+_MAGIC = 7654321
 
 
 @dataclass(frozen=True)
@@ -33,13 +36,25 @@ class FrameHeader:
 
 
 def parse_header(buf: bytes) -> FrameHeader:
-    """解析 16 字节响应帧头。"""
+    """解析 16 字节响应帧头。
+
+    magic 与协议常量不符时抛 :class:`TdxConnectionError`（而非 ``TdxDecodeError``）：
+    这通常意味着 socket 里残留着上一条响应的字节、流已错位，只有作废连接重连才能
+    恢复；而 ``TdxDecodeError`` 不会被上层重连逻辑捕获。
+    """
     magic, seq_id, method, zipsize, unzipsize = unpack_from(
         _HEADER_FMT,
         buf,
         0,
         "frame header",
     )
+    if magic != _MAGIC:
+        # 延迟导入避免与 exceptions 模块形成循环依赖
+        from ..exceptions import TdxConnectionError
+
+        raise TdxConnectionError(
+            f"帧头 magic 不符: 期望 {_MAGIC}, 实际 {magic}（响应流可能已错位）"
+        )
     return FrameHeader(magic, seq_id, method, zipsize, unzipsize)
 
 

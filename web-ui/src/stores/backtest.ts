@@ -37,13 +37,15 @@ import type {
   WalkForwardResult,
 } from '../types'
 
-/** 轮询后台任务直到终态（done 返回 result，failed/超时抛错）。 */
+/** 轮询后台任务直到终态（done 返回 result，failed/超时/结果缺失抛错）。 */
 async function pollTask<T>(taskId: string, timeoutMs: number, what: string): Promise<T> {
   const start = Date.now()
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const state = await fetchTask(taskId)
     if (state.status === 'done' && state.result) return state.result as T
+    // done 但 result 为空：不能继续等（会一直空转到超时），直接报错更易排查
+    if (state.status === 'done') throw new Error(`${what}结果为空`)
     if (state.status === 'failed') throw new Error(state.error || `${what}失败`)
     if (Date.now() - start > timeoutMs) throw new Error(`${what}超时（${timeoutMs / 1000}s）`)
     await new Promise((r) => setTimeout(r, 400))
@@ -358,10 +360,18 @@ export const useBacktestStore = defineStore('backtest', () => {
     category: Category
     startDate: string
     endDate: string
+    /** SymbolPicker 市场：'A' = A 股，'HK'/'US' = 港美股（回测页据此还原市场选项）。 */
+    market: string
   } | null>(null)
 
-  function setOptimizeContext(ctx: { code: string; category: Category; startDate: string; endDate: string }) {
-    optimizeContext.value = ctx
+  function setOptimizeContext(ctx: {
+    code: string
+    category: Category
+    startDate: string
+    endDate: string
+    market?: string
+  }) {
+    optimizeContext.value = { market: 'A', ...ctx }
   }
 
   /** 提交寻优后台任务并轮询直到完成。 */

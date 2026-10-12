@@ -147,6 +147,8 @@ function normalizeBar(row: Record<string, unknown>): Bar {
     close: Number(row.close),
     vol: Number(row.vol),
     amount: Number(row.amount),
+    // 数据源透传（tdx/ak/sina/qq），K线面板据此展示实时/延时/快照徽标
+    source: typeof row.source === 'string' ? row.source : undefined,
   }
 }
 
@@ -319,6 +321,13 @@ export async function fetchTaskList(limit = 20): Promise<TaskListResponse> {
   return (await resp.json()) as TaskListResponse
 }
 
+/** 删除一个已终态的后台任务（运行中 409 拒绝）。 */
+export async function deleteTask(taskId: string): Promise<{ ok: boolean; task_id: string }> {
+  const resp = await fetch(`${BASE}/backtest/tasks/${taskId}`, { method: 'DELETE' })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as { ok: boolean; task_id: string }
+}
+
 /**
  * 提交后台任务并轮询直到 done/failed。
  * @param req 回测请求
@@ -372,11 +381,15 @@ export async function runSignalScanWithPolling(
   onPoll?: (state: TaskState) => void,
   intervalMs = 500,
   timeoutMs = 300_000,
+  signal?: AbortSignal,
 ): Promise<TaskState> {
   const { task_id } = await submitSignalScanTask(req)
   const start = Date.now()
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    // 支持调用方中止：扫描可能耗时数分钟，组件卸载后必须能停掉轮询，
+    // 否则会持续打 HTTP 并往已卸载组件的 ref 里写结果。
+    if (signal?.aborted) throw new DOMException('信号扫描已取消', 'AbortError')
     const state = await fetchTask(task_id)
     onPoll?.(state)
     if (state.status === 'done' || state.status === 'failed') return state
@@ -384,6 +397,7 @@ export async function runSignalScanWithPolling(
       throw new Error(`信号扫描超时（${timeoutMs / 1000}s），可稍后重试或减小窗口`)
     }
     await new Promise((r) => setTimeout(r, intervalMs))
+    if (signal?.aborted) throw new DOMException('信号扫描已取消', 'AbortError')
   }
 }
 
@@ -428,6 +442,20 @@ export async function deleteSavedStrategy(id: string): Promise<void> {
   if (!resp.ok) await throwError(resp)
 }
 
+/** 部分更新一条已保存策略（名称 / 策略类型 / 参数 / 备注 / 标签 / 上下文）。 */
+export async function updateSavedStrategy(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<SavedStrategy> {
+  const resp = await fetch(`${BASE}/strategies/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as SavedStrategy
+}
+
 // ── 服务器设置 ──────────────────────────────────────────────────────────────
 
 /** 列出所有候选通达信服务器 + 当前使用的 host（不含延迟，需点测速）。 */
@@ -470,6 +498,113 @@ export async function fetchMeta(): Promise<AppMeta> {
   }
 }
 
+// ── 港股 / 美股（扩展市场）────────────────────────────────────────────────────
+
+/** 一个港美股标的（自带市场标识）。 */
+export interface OverseasSymbol {
+  symbol: string
+  market: string
+  code: string
+  name: string
+  /** 通达信扩展市场 int（港股 31/48/49/27/98，美股 74）。 */
+  ex_market: number
+  /** 子市场中文名，如「主板」「创业板」；美股为空串。 */
+  sub_market: string
+  category: number
+}
+
+export interface OverseasMeta {
+  default_market: string
+  markets: Record<string, MarketMetaRow>
+  ex_markets: Record<string, { value: number; label: string }[]>
+}
+
+export interface MarketMetaRow {
+  label: string
+  currency: string
+  currency_label: string
+  available: boolean
+  symbol_count?: number | null
+  unavailable_reason?: string
+}
+
+/** 拉取全市场元信息（顶栏市场切换器渲染用）。失败抛错，由调用方兜底。 */
+export async function fetchOverseasMeta(): Promise<OverseasMeta> {
+  const resp = await fetch(`${BASE}/overseas/meta`)
+  if (!resp.ok) throw new Error(`市场元信息不可用 (HTTP ${resp.status})`)
+  return (await resp.json()) as OverseasMeta
+}
+
+/**
+ * 搜索港股 / 美股标的。
+ *
+ * 走服务端索引（`~/.easy_tdx/cache/`，12h TTL），不是全量拉回来在前端过滤——
+ * 美股 1.3 万只每次输入都拉一遍会把服务器打爆。
+ */
+export async function searchOverseasSymbols(
+  market: string,
+  keyword: string,
+  limit = 30,
+): Promise<{ market: string; label: string; total: number; count: number; data: OverseasSymbol[] }> {
+  const qs = new URLSearchParams({ market, limit: String(limit) })
+  if (keyword) qs.set('keyword', keyword)
+  const resp = await fetch(`${BASE}/overseas/symbols?${qs}`)
+  if (!resp.ok) throw new Error(`标的搜索失败 (HTTP ${resp.status})`)
+  return (await resp.json()) as {
+    market: string
+    label: string
+    total: number
+    count: number
+    data: OverseasSymbol[]
+  }
+}
+
+/** 一只榜单行（自带市场标识）。 */
+export interface RankEntry {
+  market: string
+  code: string
+  name: string
+  close: number | null
+  pre_close: number | null
+  change_pct: number | null
+  amount: number | null
+  vol: number | null
+  ex_market: number
+}
+
+export interface OverseasRank {
+  status: 'building' | 'ready'
+  progress?: string
+  market?: string
+  label?: string
+  total?: number
+  up?: number
+  down?: number
+  flat?: number
+  gainers?: RankEntry[]
+  losers?: RankEntry[]
+  by_amount?: RankEntry[]
+  /** 成交量 Top30（v1.33+，老后端缺省，前端判空降级）。 */
+  by_vol?: RankEntry[]
+  /** 全市场涨跌分布（22 桶，与 A 股看板 BUCKETS 同口径；老后端缺省）。 */
+  dist_counts?: number[]
+  dist_total?: number
+  dist_gt5?: number
+  dist_lt5?: number
+}
+
+/**
+ * 港股 / 美股全市场榜单。
+ *
+ * 后端全量翻页港股约 20 秒、美股约 70 秒，首次返回 building，
+ * 调用方轮询直到 ready（快照缓存 5 分钟）。
+ */
+export async function fetchOverseasRank(market: string): Promise<OverseasRank> {
+  const resp = await fetch(`${BASE}/overseas/rank?${new URLSearchParams({ market })}`)
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as OverseasRank
+}
+
 // ── 行情终端 ────────────────────────────────────────────────────────────────
 
 /** 批量拉实时五档（REST 一次性；持续刷新走 SSE，见 stores/quotes.ts）。
@@ -487,19 +622,46 @@ export async function fetchQuotes(symbols: Array<{ market: string; code: string 
 
 /** 后端 quotes 行 → SecurityQuote（补 symbol 键；数值列容错 null）。 */
 function normalizeQuote(row: Record<string, unknown>): SecurityQuote {
-  const market = String(row.market ?? '')
+  const market = marketToken(String(row.market ?? ''))
   const code = String(row.code ?? '')
   const num = (v: unknown): number | null => {
     const n = Number(v)
     return v == null || Number.isNaN(n) ? null : n
   }
   const q = { ...row } as Record<string, unknown>
+  q.market = market
   q.symbol = `${market}${code}`
+  // 扩展市场（港美股）报价列叫 close，标准协议叫 price——统一成 price，
+  // 否则自选页/个股弹窗的现价整列显示 "-"。
+  if (q.price == null && q.close != null) q.price = q.close
   for (const k of Object.keys(q)) {
     if (k === 'symbol' || k === 'market' || k === 'code' || k === 'server_time') continue
     q[k] = num(q[k])
   }
   return q as unknown as SecurityQuote
+}
+
+/**
+ * market 原始值 → 前端市场令牌。
+ *
+ * 后端三条协议栈的 market 列口径不一：标准协议是 Market 枚举名（SH），
+ * 扩展市场是 int（74=美股，31/48/49/27/98=港股，0/1/2=A股），
+ * 板块接口是 70（港美股板块）或 1（A股板块）。
+ * 不归一的话美股 symbol 会拼成 "74AAPL"，自选页按 "USAAPL" 查不到，
+ * 现价整列显示 "-"。
+ */
+export function marketToken(raw: string): string {
+  const s = raw.trim().toUpperCase()
+  if (s === '74') return 'US'
+  if (s === '31' || s === '48' || s === '49' || s === '27' || s === '98') return 'HK'
+  if (s === '0') return 'SZ'
+  if (s === '1') return 'SH'
+  if (s === '2') return 'BJ'
+  // "Market.SH" 这类枚举字符串只取冒号/点后的名字
+  const base = s.split('.').pop() ?? s
+  return base === 'SH' || base === 'SZ' || base === 'BJ' || base === 'HK' || base === 'US'
+    ? base
+    : s
 }
 
 /** 全市场涨跌统计（涨/跌/平/涨停/跌停家数 + 总成交）。 */
@@ -685,16 +847,25 @@ export async function fetchBoardMembers(
   const resp = await fetch(`${BASE}/board-mac/members?${params}`)
   if (!resp.ok) await throwError(resp)
   const body = (await resp.json()) as DataFrameResponse
+  // 港美股板块（HK/US 开头）走 7727 扩展栈：成员 market 列是扩展市场 int
+  //（74=美股，31/48/49/27/98=港股），必须按扩展口径归一；按 A 股口径
+  //（1=SH/2=BJ/其余SZ）会把全部外盘成员误标成 SZ，点开就是 A 股报错。
+  const isExBoard = /^(HK|US)/i.test(boardSymbol.trim())
   return body.data.map((row) => {
     const close = Number(row.close ?? row.price ?? 0)
     const pre = Number(row.pre_close ?? 0)
     const r = { ...row } as Record<string, unknown>
     r.price = close
     r.change_pct = pre > 0 ? (close / pre - 1) * 100 : 0
-    const m = Number(row.market)
-    r.market = m === 1 ? 'SH' : m === 2 ? 'BJ' : 'SZ'
+    r.market = isExBoard ? marketToken(String(row.market ?? '')) : numberMarket(row.market)
     return r as RankRow
   })
+}
+
+/** MAC 排行 market int → A 股市场（1=SH / 2=BJ / 其余 SZ）。 */
+function numberMarket(v: unknown): string {
+  const m = Number(v)
+  return m === 1 ? 'SH' : m === 2 ? 'BJ' : 'SZ'
 }
 
 // ── 自选 ────────────────────────────────────────────────────────────────────
@@ -960,4 +1131,136 @@ export async function fetchCcpmRank(product: string, date?: string): Promise<Ccp
   const resp = await fetch(`${BASE}/ccpm/rank?${params.toString()}`)
   if (!resp.ok) await throwError(resp)
   return (await resp.json()) as CcpmRankResponse
+}
+
+// ── 自定义策略类型（/strategy-types CRUD，基于内置策略的命名预设包） ────────
+
+import type {
+  CustomStrategyTypeCreate,
+  CustomStrategyTypeDeleteResult,
+  CustomStrategyTypeSaveResult,
+  CustomStrategyTypeUpdate,
+} from './types'
+
+/** 新增自定义策略类型（label + 基准内置策略 + 默认参数 + 预设网格）。 */
+export async function createCustomType(
+  req: CustomStrategyTypeCreate,
+): Promise<CustomStrategyTypeSaveResult> {
+  const resp = await fetch(`${BASE}/strategy-types`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as CustomStrategyTypeSaveResult
+}
+
+/** 编辑自定义策略类型（可换基准，注册表键不变）。 */
+export async function updateCustomType(
+  name: string,
+  req: CustomStrategyTypeUpdate,
+): Promise<CustomStrategyTypeSaveResult> {
+  const resp = await fetch(`${BASE}/strategy-types/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as CustomStrategyTypeSaveResult
+}
+
+/** 删除自定义策略类型（返回引用计数；内置类型 400 拒绝）。 */
+export async function deleteCustomType(name: string): Promise<CustomStrategyTypeDeleteResult> {
+  const resp = await fetch(`${BASE}/strategy-types/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as CustomStrategyTypeDeleteResult
+}
+
+// ── 自定义策略类型存储记录（含基准名，编辑表单用） ────────────────────────────
+
+import type { CustomStrategyType } from './types'
+
+/** 列出全部自定义类型存储记录。 */
+export async function fetchCustomTypes(): Promise<{ items: CustomStrategyType[]; count: number }> {
+  const resp = await fetch(`${BASE}/strategy-types`)
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as { items: CustomStrategyType[]; count: number }
+}
+
+// ── 服务器增删改 ────────────────────────────────────────────────────────────
+
+import type {
+  PushConfigResponse,
+  PushSendResult,
+} from './types'
+
+/** 新增一台候选服务器（去重追加，持久化）。 */
+export async function addServerHost(host: string): Promise<ServerHostListResponse> {
+  const resp = await fetch(`${BASE}/server/hosts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host }),
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as ServerHostListResponse
+}
+
+/** 删除一台候选服务器（至少保留 1 台）。 */
+export async function removeServerHost(host: string): Promise<ServerHostListResponse> {
+  const resp = await fetch(`${BASE}/server/hosts/${encodeURIComponent(host)}`, {
+    method: 'DELETE',
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as ServerHostListResponse
+}
+
+// ── 推送服务（买卖信号 key-only 推送） ───────────────────────────────────────
+
+export interface PushChannelUpdate {
+  provider: string
+  key: string
+  endpoint: string
+  enabled: boolean
+}
+
+/** 当前推送配置（key 脱敏）+ 通道表。 */
+export async function fetchPushConfig(): Promise<PushConfigResponse> {
+  const resp = await fetch(`${BASE}/push/config`)
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as PushConfigResponse
+}
+
+/** 保存推送通道配置（空 key/脱敏串回传 = 不修改已存 key）。 */
+export async function savePushConfig(channels: PushChannelUpdate[]): Promise<PushConfigResponse> {
+  const resp = await fetch(`${BASE}/push/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channels }),
+  })
+  if (!resp.ok) await throwError(resp)
+  await resp.json() // 丢弃 PUT 体，统一 GET 回读（脱敏 key 同步刷新）
+  return fetchPushConfig()
+}
+
+/** 发一条测试消息，验证通道可达性。 */
+export async function testPush(): Promise<PushSendResult> {
+  const resp = await fetch(`${BASE}/push/test`, { method: 'POST' })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as PushSendResult
+}
+
+/** 把信号雷达的买入/卖出信号推送出去（标题自动汇总）。 */
+export async function sendSignalPush(
+  rows: Array<Record<string, unknown>>,
+  windowBars: number,
+): Promise<PushSendResult & { title: string; content: string }> {
+  const resp = await fetch(`${BASE}/push/send-signal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows, window_bars: windowBars }),
+  })
+  if (!resp.ok) await throwError(resp)
+  return (await resp.json()) as PushSendResult & { title: string; content: string }
 }

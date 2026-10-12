@@ -239,6 +239,10 @@ class RegisteredStrategy:
     description: str
     strategy_cls: type[ParametrizedStrategy]
     params: list[Param] = field(default_factory=list)
+    #: 自定义类型（WebUI「策略类型」页创建）为 True，内置为 False。
+    custom: bool = False
+    #: 预设寻优网格覆盖（自定义类型用；None = 走全局 STRATEGY_PRESETS）。
+    preset_grid: dict[str, list[Any]] | None = None
 
     def to_schema(self) -> dict[str, Any]:
         """序列化为 JSON 兼容的策略描述（供前端策略下拉框 + 参数表单）。"""
@@ -250,7 +254,10 @@ class RegisteredStrategy:
             "label": self.label,
             "description": self.description,
             "params": [p.to_schema() for p in self.params],
-            "preset_grid": get_preset(self.name),
+            "preset_grid": self.preset_grid
+            if self.preset_grid is not None
+            else get_preset(self.name),
+            "custom": self.custom,
         }
 
     def build(
@@ -280,6 +287,8 @@ class StrategyRegistry:
         name: str,
         label: str = "",
         description: str = "",
+        custom: bool = False,
+        preset_grid: dict[str, list[Any]] | None = None,
     ) -> type[ParametrizedStrategy]:
         """登记一个策略类。重复 name 抛 ValueError。"""
         if name in self._strategies:
@@ -291,6 +300,8 @@ class StrategyRegistry:
             description=description,
             strategy_cls=strategy_cls,
             params=params,
+            custom=custom,
+            preset_grid=preset_grid,
         )
         return strategy_cls
 
@@ -298,6 +309,13 @@ class StrategyRegistry:
         """按 name 取策略，不存在抛 KeyError。"""
         try:
             return self._strategies[name]
+        except KeyError:
+            raise KeyError(f"未知策略 '{name}'，可选: {sorted(self._strategies)}") from None
+
+    def unregister(self, name: str) -> RegisteredStrategy:
+        """注销一个策略（自定义类型删除用），不存在抛 KeyError，返回被删条目。"""
+        try:
+            return self._strategies.pop(name)
         except KeyError:
             raise KeyError(f"未知策略 '{name}'，可选: {sorted(self._strategies)}") from None
 

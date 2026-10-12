@@ -2,24 +2,24 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/easy-tdx.svg)](https://pypi.org/project/easy-tdx/)
-[![GitHub Repo stars](https://img.shields.io/github/stars/awayings/easy_tdx?style=social)](https://github.com/awayings/easy_tdx)
-[![GitHub last commit](https://img.shields.io/github/last-commit/awayings/easy_tdx)](https://github.com/awayings/easy_tdx)
+[![GitHub Repo stars](https://img.shields.io/github/stars/xuxixu/easy_tdx_1?style=social)](https://github.com/xuxixu/easy_tdx_1)
+[![GitHub last commit](https://img.shields.io/github/last-commit/xuxixu/easy_tdx_1)](https://github.com/xuxixu/easy_tdx_1)
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://www.mypy-lang.org/)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/handsomejustin/easy_tdx)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/xuxixu/easy_tdx_1)
 
 <!-- <img src="./docs/top_img.png" alt="头部宣传图" /> -->
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=handsomejustin%2Feasy_tdx&type=timeline&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=xuxixu%2Feasy_tdx_1&type=timeline&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=handsomejustin/easy_tdx&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=handsomejustin/easy_tdx&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=handsomejustin/easy_tdx&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xuxixu/easy_tdx_1&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xuxixu/easy_tdx_1&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xuxixu/easy_tdx_1&type=timeline&legend=top-left" />
  </picture>
 </a>
 
-它是一个完全免费、无需注册、无需 API Key、纯开源的 A 股量化工具箱。对通达信网络协议净室实现（不依赖通达信客户端，也能直接读写本地数据文件），一行命令即可拉取 K 线、报价、板块、资金流、分时、逐笔成交；Python API / CLI / Web API 三通道，输出 JSON 天然喂给 AI Agent。
+它是一个完全免费、无需注册、无需 API Key、纯开源的量化工具箱，覆盖 **A 股 / 港股 / 美股**：对通达信网络协议净室实现（不依赖通达信客户端，也能直接读写本地数据文件），一行命令即可拉取 K 线、报价、板块、资金流、分时、逐笔成交；Python API / CLI / Web API 三通道，输出 JSON 天然喂给 AI Agent。
 
 ## 四大能力
 
@@ -30,6 +30,8 @@
 - **市场看板**：五大指数实时推送（SSE）、全市场涨跌统计、四维情绪雷达、涨停雷达、两市异动雷达、全市场涨跌分布
 - **行业总览 / 概念总览**：全部板块一屏尽览（一级行业/二级行业/概念），热力图 + 表格双视图、板块广度统计与涨跌幅分布、涨幅/跌幅/涨速异动三榜、翻红/翻绿轮动时间线，点击板块下钻分时/日K + 成分股涨跌榜
 - **自选行情**：全表 SSE 实时刷新、行内迷你分时；**龙头池**：159 只核心龙头一键扫描
+- **多市场切换**：顶栏一键在 **A 股 / 港股 / 美股** 间切换，各市场独立指数条（含纳斯达克100 真指数）、独立交易时段（含美股夏令时）判定；港美股走扩展行情协议，标的搜索由服务端索引提供
+- **大盘日历 / 指数设置**：指数日 K、涨跌统计与自定义指数组合
 - **期货持仓排名**：中金所每日成交/持仓前 20 名会员一键采集（含新手科普）
 
   <img src="./docs/web-ui-page-qh.png" width="860" alt="期货持仓排名页：品种/日期选择、主力合约页签、三组排名并排" />
@@ -55,8 +57,11 @@
 - **防过拟合验证链**：Walk-Forward 样本外验证（逐窗独立开仓）、训练/验证/测试三段适配性体检、0-100 综合评分、多 seed 晋级门槛、买入持有基准对比（α/β/信息比率/跟踪误差）
 - **25 项绩效指标 + S/A/B/C/D 评级**：SQN、Ulcer、95% VaR/CVaR、最大连胜/连亏……评级不看收益率，只看风险调整后的持有体验
 - **组合与寻优**：多标的组合回测、多策略资金分仓、参数网格寻优（单策略/一键全策略）、策略库 SQLite 持久化、策略选股全市场扫描
+- **策略类型自定义**：在 Web UI 里新增/删除自定义策略类型并落库，内置策略可直接作为基底继承
+- **信号雷达**：全市场（或指定标的）跑内置/已保存策略，扫出近期买卖信号；结果可一键推送
 - **通达信公式**：不会 Python 也能玩——粘贴公式（`买入: CROSS(MA(C,5), MA(C,20));`）即可计算/选股/回测，30+ 函数白名单向量化求值，无未来数据
 - **AI 解读**：配置你自己的模型（DeepSeek / 通义千问 / 智谱 GLM / Kimi / OpenAI / Claude / Ollama 本地免 Key 等 9 家 Provider），一键把整份回测报告变成「老手朋友」口吻的大白话 + 改进建议 + 信心分；解读历史自动归档、一键复现
+- **信号推送**：Server酱 / WXPush / 百度云 / MobPush / 通用 Webhook 五种通道，填 key 即用，可直接推到企业微信机器人、钉钉、Bark
 
 <img src="./docs/web-ui-page-5.png" alt="回测报告：评级徽章、25 项绩效指标与 AI 解读" />
 
@@ -105,7 +110,7 @@ easy-tdx serve                                  # 行情终端 + 回测工作台
 
 `pip install easy-tdx`，30秒后——你屏幕上的数据，和机构看到的**是同一份**。
 
-📖 **文档**：[GitHub Wiki](https://github.com/handsomejustin/easy_tdx/wiki)（各模块指南） ·
+📖 **文档**：[GitHub Wiki](https://github.com/xuxixu/easy_tdx_1/wiki)（各模块指南） ·
 [回测系统完全上手手册](./docs/回测系统完全上手手册.html)（零基础图文，13 章） ·
 [docs/](./docs) 目录（策略开发手册 / 量化指南 / API 字段参考）
 
@@ -140,15 +145,19 @@ pip install -e ".[dev]"             # 开发模式（测试 / 静态检查工具
 pip install -e ".[web]"             # Web API 模式（FastAPI + Uvicorn）
 ```
 
-可选依赖分组：`warehouse`（DuckDB 本地 K 线仓库）、`baostock`（通达信全部路径失败时的最后一级兜底数据源，仅日/周/月线，`EASY_TDX_BAOSTOCK=0` 可关闭）、`packaging`（PyInstaller 打包 EXE）。开发环境初始化（uv）与完整开发流程见 [docs/development.md](./docs/development.md)。
+可选依赖分组：`warehouse`（DuckDB 本地 K 线仓库）、`baostock`（通达信全部路径失败时的最后一级兜底数据源，仅日/周/月线，`EASY_TDX_BAOSTOCK=0` 可关闭）、`akshare`（美股 `.DJI/.IXIC/.INX` 与港股 `HSI/HSCEI/HSTECH` 的真指数全历史日 K，不装则指数 K 线回落到腾讯快照、实时报价不受影响，`EASY_TDX_AKSHARE=0` 可关闭）、`science`（scipy，部分统计指标）、`web`（FastAPI + Uvicorn）、`packaging`（PyInstaller 打包 EXE）。开发环境初始化（uv）与完整开发流程见 [docs/development.md](./docs/development.md)。
 
 ## Web UI 零代码使用
 
 `easy-tdx serve` 一条命令启动行情终端 + 回测工作台，浏览器自动打开 `http://localhost:8000`；不想装 Python 可下载 Windows 单文件 EXE 双击使用。页面操作手册见 [docs/web-ui.md](./docs/web-ui.md)。
 
+左侧「系统」分组里可完成全部配置：**服务器设置**（候选行情服务器增删、测速、热切换，无需重启）、**指数设置**、**推送设置**、**AI 设置**。
+
+> ⚠️ **安全说明**：本服务定位**本机自用**，默认仅监听回环地址，且**不内置鉴权**。所有写操作（删除策略、修改 AI api_key、增删服务器等）都可被能访问该端口的程序调用；请勿直接暴露到公网或不可信内网。CORS 已按规范关闭 `allow_credentials`（本应用不使用 Cookie/会话）。推送 webhook 地址仅允许 `http/https` 且不跟随重定向，避免被用于探测本地文件。
+
 ## 文档导航
 
-**快速入口**：[GitHub Wiki](https://github.com/handsomejustin/easy_tdx/wiki) · [回测系统完全上手手册](./docs/回测系统完全上手手册.html)（零基础图文，13 章）· [交互式架构图](./docs/architecture.html)
+**快速入口**：[GitHub Wiki](https://github.com/xuxixu/easy_tdx_1/wiki) · [回测系统完全上手手册](./docs/回测系统完全上手手册.html)（零基础图文，13 章）· [交互式架构图](./docs/architecture.html)
 
 | 域 | 文档 | 说明 |
 |----|------|------|

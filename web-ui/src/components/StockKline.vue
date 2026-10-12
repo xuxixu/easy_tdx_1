@@ -5,19 +5,53 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts, { DOWN_COLOR, UP_COLOR } from '../echarts-setup'
+import echarts, { chartAxisColor, DOWN_COLOR, initChart, UP_COLOR, useChartRedraw } from '../echarts-setup'
 import { boll, ema, macd as calcMacd, kdj as calcKdj, rsi as calcRsi } from '../indicators'
-import { fmt2 } from '../format'
+import {
+  DEFAULT_INDICATOR_PARAMS,
+  maColors,
+  rsiColors,
+  type IndicatorParams,
+} from '../indicatorParams'
+import { fmt2, fmtAmount, fmtVol } from '../format'
 import type { Bar } from '../types'
 
-export type Overlay = 'none' | 'ma' | 'boll' | 'ema'
+/** 主图指标（可多选叠加；'none' 表示主图不画指标线）。 */
+export type Overlay = 'ma' | 'boll' | 'ema'
+/** 副图指标（'none' 表示不画副图）。 */
 export type SubPane = 'none' | 'macd' | 'kdj' | 'rsi'
 
 const props = defineProps<{
   bars: Bar[]
-  overlay?: Overlay
+  /** 单个主图指标（兼容旧调用点；与 overlays 同时给出时以 overlays 为准）。 */
+  overlay?: Overlay | 'none'
+  /** 主图叠加列表（v1.33：支持 MA+EMA+BOLL 同时显示）。 */
+  overlays?: Overlay[]
   subPane?: SubPane
+  /** 指标参数（不传 = 默认口径）。由指标编辑器写入 localStorage 后经父组件传入。 */
+  params?: IndicatorParams
+  /** 首根 K 线的前收盘（首根涨跌幅基准；缺省用该根开盘价）。 */
+  preClose?: number | null
+  /** 成交量单位：A 股=手（万手/亿手），港美股=股（万股/亿股）。 */
+  volUnitShares?: boolean
 }>()
+
+/** 生效参数：显式 prop > 默认。 */
+const eff = computed<IndicatorParams>(() => props.params ?? DEFAULT_INDICATOR_PARAMS)
+/**
+ * 生效的主图叠加列表：显式 overlays prop 优先；其次单个 overlay prop
+ * （兼容弹窗快捷切换）；否则取 params 里的多选列表，最后兜底单值。
+ */
+const effOverlays = computed<Overlay[]>(() => {
+  const clean = (list: Array<Overlay | 'none'>): Overlay[] =>
+    list.filter((o): o is Overlay => o !== 'none')
+  if (Array.isArray(props.overlays)) return clean(props.overlays)
+  if (props.overlay) return clean([props.overlay])
+  const list = eff.value.overlays
+  if (Array.isArray(list) && list.length > 0) return clean(list)
+  return clean([eff.value.overlay])
+})
+const effSubPane = computed<SubPane>(() => props.subPane ?? eff.value.subPane)
 
 const container = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
@@ -26,6 +60,16 @@ const closes = computed(() => props.bars.map((b) => b.close))
 const highs = computed(() => props.bars.map((b) => b.high))
 const lows = computed(() => props.bars.map((b) => b.low))
 
+/** 成交量格式化（A 股手 / 港美股股）。 */
+function fmtVolUnit(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '-'
+  if (!props.volUnitShares) return fmtVol(v)
+  const n = Math.abs(v)
+  if (n >= 1e8) return `${(v / 1e8).toFixed(2)}亿股`
+  if (n >= 1e4) return `${(v / 1e4).toFixed(2)}万股`
+  return String(Math.round(v))
+}
+
 interface LineSpec {
   name: string
   data: Array<number | null>
@@ -33,32 +77,27 @@ interface LineSpec {
   dashed?: boolean
 }
 
-/** 主图指标线（随 overlay 切换）。 */
+/** 主图指标线：按叠加列表依次产出（MA+EMA+BOLL 可同时出现）。 */
 const overlayLines = computed<LineSpec[]>(() => {
   const c = closes.value
-  if (props.overlay === 'ma') {
-    const colors = ['#f0a020', '#4a9eff', '#c084fc', '#22d3ee']
-    return [5, 10, 20, 60].map((n, i) => ({
-      name: `MA${n}`,
-      data: maLocal(c, n),
-      color: colors[i],
-    }))
+  const p = eff.value
+  const out: LineSpec[] = []
+  for (const kind of effOverlays.value) {
+    if (kind === 'ma') {
+      p.maPeriods.forEach((n, i) => {
+        out.push({ name: `MA${n}`, data: maLocal(c, n), color: maColors(i) })
+      })
+    } else if (kind === 'ema') {
+      out.push({ name: `EMA${p.emaFast}`, data: ema(c, p.emaFast), color: '#22d3ee' })
+      out.push({ name: `EMA${p.emaSlow}`, data: ema(c, p.emaSlow), color: '#c084fc' })
+    } else if (kind === 'boll') {
+      const { mid, upper, lower } = boll(c, p.bollN, p.bollP)
+      out.push({ name: 'BOLL中轨', data: mid, color: '#f0a020' })
+      out.push({ name: 'BOLL上轨', data: upper, color: '#94a3b8', dashed: true })
+      out.push({ name: 'BOLL下轨', data: lower, color: '#94a3b8', dashed: true })
+    }
   }
-  if (props.overlay === 'ema') {
-    return [
-      { name: 'EMA12', data: ema(c, 12), color: '#f0a020' },
-      { name: 'EMA26', data: ema(c, 26), color: '#4a9eff' },
-    ]
-  }
-  if (props.overlay === 'boll') {
-    const { mid, upper, lower } = boll(c)
-    return [
-      { name: 'BOLL中轨', data: mid, color: '#f0a020' },
-      { name: '上轨', data: upper, color: '#c084fc', dashed: true },
-      { name: '下轨', data: lower, color: '#c084fc', dashed: true },
-    ]
-  }
-  return []
+  return out
 })
 
 function maLocal(data: number[], n: number): Array<number | null> {
@@ -74,7 +113,7 @@ function maLocal(data: number[], n: number): Array<number | null> {
 
 function render() {
   if (!container.value || props.bars.length === 0) return
-  chart ??= echarts.init(container.value, 'dark')
+  chart ??= initChart(container.value)
   chart.setOption(buildOption(), true)
 }
 
@@ -82,7 +121,8 @@ function buildOption(): echarts.EChartsCoreOption {
   const bars = props.bars
   const dates = bars.map((b) => b.datetime.slice(0, 10))
   const ohlc = bars.map((b) => [b.open, b.close, b.low, b.high])
-  const hasSub = props.subPane !== 'none'
+  const sub = effSubPane.value
+  const hasSub = sub !== 'none'
   const start = Math.max(0, 100 - (120 / bars.length) * 100)
 
   // 布局：K 区 / 量区 /（可选）副图区
@@ -95,7 +135,7 @@ function buildOption(): echarts.EChartsCoreOption {
     { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisTick: { show: false } },
   ]
   const yAxes: echarts.EChartsCoreOption[] = [
-    { gridIndex: 0, scale: true, axisLabel: { formatter: (v: number) => fmt2(v) }, splitLine: { lineStyle: { color: '#2a2e3a' } } },
+    { gridIndex: 0, scale: true, axisLabel: { formatter: (v: number) => fmt2(v) }, splitLine: { lineStyle: { color: chartAxisColor() } } },
     { gridIndex: 1, axisLabel: { show: false }, splitLine: { show: false } },
   ]
   if (hasSub) {
@@ -145,10 +185,11 @@ function buildOption(): echarts.EChartsCoreOption {
     },
   ]
 
-  // 副图指标
+  // 副图指标（参数取自指标编辑器）
   const c = closes.value
-  if (props.subPane === 'macd') {
-    const { dif, dea, hist } = calcMacd(c)
+  const ip = eff.value
+  if (sub === 'macd') {
+    const { dif, dea, hist } = calcMacd(c, ip.macdFast, ip.macdSlow, ip.macdSignal)
     series.push(
       {
         name: 'DIF',
@@ -180,8 +221,8 @@ function buildOption(): echarts.EChartsCoreOption {
         barWidth: '50%',
       },
     )
-  } else if (props.subPane === 'kdj') {
-    const { k, d, j } = calcKdj(highs.value, lows.value, c)
+  } else if (sub === 'kdj') {
+    const { k, d, j } = calcKdj(highs.value, lows.value, c, ip.kdjN)
     series.push(
       {
         name: 'K',
@@ -211,43 +252,24 @@ function buildOption(): echarts.EChartsCoreOption {
         lineStyle: { width: 1, color: '#c084fc' },
       },
     )
-  } else if (props.subPane === 'rsi') {
-    series.push(
-      {
-        name: 'RSI6',
+  } else if (sub === 'rsi') {
+    for (let i = 0; i < ip.rsiPeriods.length; i++) {
+      const n = ip.rsiPeriods[i]
+      series.push({
+        name: `RSI${n}`,
         type: 'line',
         xAxisIndex: 2,
         yAxisIndex: 2,
-        data: calcRsi(c, 6),
+        data: calcRsi(c, n),
         showSymbol: false,
-        lineStyle: { width: 1, color: '#f0a020' },
-      },
-      {
-        name: 'RSI12',
-        type: 'line',
-        xAxisIndex: 2,
-        yAxisIndex: 2,
-        data: calcRsi(c, 12),
-        showSymbol: false,
-        lineStyle: { width: 1, color: '#4a9eff' },
-      },
-      {
-        name: 'RSI24',
-        type: 'line',
-        xAxisIndex: 2,
-        yAxisIndex: 2,
-        data: calcRsi(c, 24),
-        showSymbol: false,
-        lineStyle: { width: 1, color: '#c084fc' },
-      },
-    )
+        lineStyle: { width: 1, color: rsiColors(i) },
+      })
+    }
   }
 
   const legendNames = ['K线', ...overlayLines.value.map((l) => l.name)]
   if (hasSub) {
-    legendNames.push(
-      props.subPane === 'macd' ? 'DIF,DEA' : props.subPane === 'kdj' ? 'K,D,J' : 'RSI',
-    )
+    legendNames.push(sub === 'macd' ? 'DIF,DEA' : sub === 'kdj' ? 'K,D,J' : 'RSI')
   }
 
   return {
@@ -255,8 +277,32 @@ function buildOption(): echarts.EChartsCoreOption {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' },
-      // OHLC/指标全部两位小数（用户约定：价格一律 2 位）
-      valueFormatter: (v: number | string) => fmt2(Number(v)),
+      // OHLC/指标全部两位小数（用户约定：价格一律 2 位）。
+      // 首行补当日涨跌幅（该 K 线收盘相对前收）+ 成交量/额，
+      // 与主流行情悬浮窗一致；实时模式下最后一根为盘中未收盘 K 线，
+      // 其涨跌幅即当前涨跌幅（数据源即最新报价）。
+      formatter: (params: unknown) => {
+        const arr = params as Array<{ dataIndex: number; seriesName?: string; value?: unknown; data?: unknown }>
+        if (!arr.length) return ''
+        const i = arr[0].dataIndex
+        const b = bars[i]
+        if (!b) return ''
+        const prevClose = i > 0 ? bars[i - 1].close : (props.preClose ?? b.open)
+        const pct = prevClose > 0 ? ((b.close / prevClose - 1) * 100) : null
+        const color = b.close >= b.open ? UP_COLOR : DOWN_COLOR
+        const pctText = pct === null ? '-' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`
+        const head = [
+          `<b>${b.datetime.slice(0, 10)}</b>`,
+          `开 <span style="color:${color}">${fmt2(b.open)}</span>　高 <span style="color:${color}">${fmt2(b.high)}</span>`,
+          `低 <span style="color:${color}">${fmt2(b.low)}</span>　收 <b style="color:${color}">${fmt2(b.close)}</b>`,
+          `涨跌 <b style="color:${color}">${pctText}</b>　量 ${fmtVolUnit(b.vol)}　额 ${fmtAmount(b.amount)}`,
+        ]
+        const rest = arr
+          .filter((x) => x.seriesName && x.seriesName !== 'K线' && x.seriesName !== '成交量')
+          .filter((x) => x.value != null && Number.isFinite(Number(x.value)))
+          .map((x) => `${x.seriesName} ${fmt2(Number(x.value))}`)
+        return [...head, ...rest].join('<br/>')
+      },
     },
     legend: { data: legendNames, top: 0, textStyle: { fontSize: 11 } },
     grid: grids,
@@ -274,6 +320,14 @@ function resize() {
   chart?.resize()
 }
 
+// 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，
+// 只能 dispose 后按新主题重建（render 内已改成 initChart + 主题感知）。
+useChartRedraw(() => {
+  chart?.dispose()
+  chart = null
+  render()
+})
+
 onMounted(() => {
   render()
   window.addEventListener('resize', resize)
@@ -283,7 +337,14 @@ onBeforeUnmount(() => {
   chart?.dispose()
   chart = null
 })
-watch(() => [props.bars, props.overlay, props.subPane], render, { deep: false })
+// 注意：必须把 props.overlays 纳入监听。父组件（个股/板块弹窗）的 MA/BOLL/EMA
+// 勾选按钮是**原地修改**指标参数对象后经 computed 传下来的，props.overlays 变了
+// 但 props.params 的引用没变——只监听 params 会导致"chip 高亮变了、图不动"。
+watch(() => [props.bars, props.overlay, props.overlays, props.subPane, props.params], render)
+// overlays 是数组，原地增删元素时引用可能不变，单独用 deep 监听兜底
+// （只深度遍历这个小数组，不碰体量大的 bars）。
+watch(() => props.overlays, render, { deep: true })
+watch(() => [props.preClose, props.volUnitShares], render)
 </script>
 
 <template>

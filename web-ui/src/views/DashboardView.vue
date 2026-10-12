@@ -13,15 +13,19 @@ import {
   fetchMinute,
   formatError,
 } from '../api'
-import { dirClass, fmtAmount, fmtPctSigned } from '../format'
+import { dirClass, fmtAmount, fmtPctSigned, fmtVol } from '../format'
+import { useMarketStore } from '../stores/market'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, BoardRow, MarketStat, RankRow } from '../types'
 import BoardDialog from '../components/BoardDialog.vue'
+import AShareKlinePanel from '../components/AShareKlinePanel.vue'
 import MoodRadar from '../components/MoodRadar.vue'
+import OverseasDashboard from '../components/OverseasDashboard.vue'
 import Sparkline from '../components/Sparkline.vue'
 import StockDialog from '../components/StockDialog.vue'
 
 const quoteStore = useQuoteStore()
+const marketStore = useMarketStore()
 
 // ── 指数条（SSE 实时 + 迷你分时） ────────────────────────────────────────────
 
@@ -316,13 +320,15 @@ const gainers = ref<RankRow[]>([])
 const losers = ref<RankRow[]>([])
 const hotAmount = ref<RankRow[]>([])
 const hotTurnover = ref<RankRow[]>([])
+const hotVolume = ref<RankRow[]>([])
 const rankError = ref('')
-const rankTab = ref<'gain' | 'loss' | 'amount' | 'turnover'>('gain')
+const rankTab = ref<'gain' | 'loss' | 'amount' | 'turnover' | 'volume'>('gain')
 
-const RANK_TABS: Array<{ value: 'gain' | 'loss' | 'amount' | 'turnover'; label: string }> = [
+const RANK_TABS: Array<{ value: 'gain' | 'loss' | 'amount' | 'turnover' | 'volume'; label: string }> = [
   { value: 'gain', label: '涨幅' },
   { value: 'loss', label: '跌幅' },
   { value: 'amount', label: '成交额' },
+  { value: 'volume', label: '成交量' },
   { value: 'turnover', label: '换手' },
 ]
 
@@ -332,6 +338,8 @@ const activeRankRows = computed<RankRow[]>(() => {
       return losers.value
     case 'amount':
       return hotAmount.value
+    case 'volume':
+      return hotVolume.value
     case 'turnover':
       return hotTurnover.value
     default:
@@ -342,24 +350,27 @@ const activeRankRows = computed<RankRow[]>(() => {
 async function loadRanks() {
   rankError.value = ''
   try {
-    const [top, bottom, byAmount, byTurnover] = await Promise.all([
+    const [top, bottom, byAmount, byVolume, byTurnover] = await Promise.all([
       fetchRankList('DESC', 12),
       fetchRankList('ASC', 12),
       fetchRankList('DESC', 12, 'TOTAL_AMOUNT'),
+      // 成交量 Top30（SortType.VOLUME），多服务器容灾由后端 MAC 客户端承担
+      fetchRankList('DESC', 30, 'VOLUME'),
       fetchRankList('DESC', 12, 'TURNOVER_RATE'),
     ])
     gainers.value = top
     losers.value = bottom
     hotAmount.value = byAmount
+    hotVolume.value = byVolume
     hotTurnover.value = byTurnover
   } catch (e) {
     rankError.value = formatError(e)
   }
 }
 
-/** 排行榜第三列内容：涨幅榜显示成交额，其余显示涨跌幅。 */
+/** 排行榜第三列内容：涨幅/跌幅/成交量榜显示成交额，其余显示涨跌幅。 */
 function rankExtra(r: RankRow): { text: string; cls: string } {
-  if (rankTab.value === 'gain' || rankTab.value === 'loss') {
+  if (rankTab.value === 'gain' || rankTab.value === 'loss' || rankTab.value === 'volume') {
     return {
       text: fmtAmount(Number(r.amount ?? 0)),
       cls: 'dim',
@@ -383,13 +394,28 @@ function onSessionToggle() {
   localStorage.setItem('dash.sessionGated', sessionGated.value ? '1' : '0')
 }
 
-/** 本地判断当前是否处于 A 股有效行情时段（09:15~11:30、13:00~15:05，周一至五）。 */
+/** 本地判断当前是否处于有效行情时段（按顶栏市场：A股/港股/美股各自时段，周一至五）。 */
 function isTradeSession(now = new Date()): boolean {
   const day = now.getDay()
   if (day === 0 || day === 6) return false
   const m = now.getHours() * 60 + now.getMinutes()
+  if (marketStore.market === 'HK') {
+    // 港股 09:30~12:00、13:00~16:00（按本地时钟近似，误差 ±1h 内）
+    return (m >= 570 && m <= 720) || (m >= 780 && m <= 960)
+  }
+  if (marketStore.market === 'US') {
+    // 美股夏令 21:30~04:00（跨天）：本地时钟只做粗判
+    return m >= 1290 || m <= 240
+  }
   return (m >= 555 && m <= 690) || (m >= 780 && m <= 905)
 }
+
+/** 时段文案（跟随顶栏市场）。 */
+const sessionHint = computed(() => {
+  if (marketStore.market === 'HK') return '（09:30~12:00, 13:00~16:00）'
+  if (marketStore.market === 'US') return '（21:30~04:00 夏令时）'
+  return '（09:15~11:30, 13:00~15:05）'
+})
 
 /** 会话状态（每分钟重估）：gated 开关 × 是否盘中。 */
 const inSession = ref(isTradeSession())
@@ -453,6 +479,15 @@ onBeforeUnmount(() => {
 const dialog = ref<{ market: string; code: string; name: string } | null>(null)
 const boardDialog = ref<{ code: string; name: string } | null>(null)
 
+/** 指数卡点击 → 下方 K 线面板切换（不再直接弹个股窗）。 */
+const klinePanel = ref<InstanceType<typeof AShareKlinePanel> | null>(null)
+const klineFocalKey = ref('SH000001')
+
+function switchKline(market: string, code: string, name: string) {
+  klineFocalKey.value = `${market}${code}`
+  klinePanel.value?.setFocal(market, code, name)
+}
+
 function openDialog(code: string, name: string, marketHint?: string) {
   if (!code) return
   // 先判北交所再判沪市：920xxx（北交所新段）以 9 开头，若先匹配 9 会被误判 SH
@@ -473,7 +508,7 @@ function openBoard(code: string | undefined, name: string | undefined) {
     <div class="session-bar">
       <span class="dot" :class="{ live: !autoPaused }"></span>
       <span class="session-label" :class="{ paused: autoPaused }">{{ sessionLabel }}</span>
-      <span class="dim session-hint">（09:15~11:30, 13:00~15:05）</span>
+      <span class="dim session-hint">{{ sessionHint }}</span>
       <label class="session-toggle">
         <input v-model="sessionGated" type="checkbox" @change="onSessionToggle" />
         仅交易时段自动刷新
@@ -481,13 +516,14 @@ function openBoard(code: string | undefined, name: string | undefined) {
       <button class="manual-refresh" @click="refreshAll">↻ 手动刷新</button>
     </div>
 
-    <!-- 指数条（内嵌迷你分时） -->
-    <div class="idx-row">
+    <!-- 指数条（内嵌迷你分时，仅 A 股模式；点击切下方 K 线面板） -->
+    <div v-if="marketStore.isAShareMode" class="idx-row">
       <div
         v-for="idx in INDEXES"
         :key="idx.symbol"
         class="idx-card"
-        @click="openDialog(idx.symbol.slice(2), idx.name, idx.symbol.slice(0, 2))"
+        :class="{ active: klineFocalKey === idx.symbol }"
+        @click="switchKline(idx.symbol.slice(0, 2), idx.symbol.slice(2), idx.name)"
       >
         <div class="idx-top">
           <span class="idx-name">{{ idx.name }}</span>
@@ -512,7 +548,15 @@ function openBoard(code: string | undefined, name: string | undefined) {
       </div>
     </div>
 
-    <div class="grid">
+    <!-- A 股 K 线面板（跟随顶栏市场指数，可输代码切换） -->
+    <AShareKlinePanel
+      v-if="marketStore.isAShareMode"
+      ref="klinePanel"
+      :market="marketStore.market"
+      :key="`kline-${marketStore.market}`"
+    />
+
+    <div v-if="marketStore.isAShareMode" class="grid">
       <!-- 市场统计 -->
       <div class="card">
         <h3>市场统计</h3>
@@ -664,7 +708,7 @@ function openBoard(code: string | undefined, name: string | undefined) {
           <tbody>
             <tr v-for="(r, i) in activeRankRows" :key="`${rankTab}${i}`" @click="openDialog(String(r.code ?? ''), String(r.name ?? ''), r.market ? String(r.market) : undefined)">
               <td>{{ i + 1 }}. {{ r.name }}</td>
-              <td class="mono dim">{{ fmtAmount(Number(r.amount ?? 0)) }}</td>
+              <td class="mono dim">{{ rankTab === 'volume' ? fmtVol(Number(r.vol ?? r.volume ?? 0)) : fmtAmount(Number(r.amount ?? 0)) }}</td>
               <td class="mono" :class="rankExtra(r).cls">{{ rankExtra(r).text }}</td>
             </tr>
           </tbody>
@@ -694,6 +738,9 @@ function openBoard(code: string | undefined, name: string | undefined) {
       </div>
 
     </div>
+
+    <!-- 港股/美股模式：外盘看板（默认指数K线 + 搜索 + 榜单） -->
+    <OverseasDashboard v-else :market="marketStore.market" :key="marketStore.market" />
 
     <StockDialog
       v-if="dialog"
@@ -780,6 +827,9 @@ function openBoard(code: string | undefined, name: string | undefined) {
   cursor: pointer;
 }
 .idx-card:hover {
+  border-color: var(--accent);
+}
+.idx-card.active {
   border-color: var(--accent);
 }
 .idx-top {
@@ -931,7 +981,7 @@ function openBoard(code: string | undefined, name: string | undefined) {
   white-space: nowrap;
   pointer-events: none;
   text-align: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 14px var(--shadow);
   z-index: 20;
 }
 .pop-range {

@@ -8,10 +8,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from easy_tdx.web.convert import market_from_str
-from easy_tdx.web.deps import get_client
+from easy_tdx.web.deps import get_client, get_gateway
 from easy_tdx.web.schemas import (
     CountResponse,
     DataFrameResponse,
@@ -28,6 +28,16 @@ _limitup_cache: dict[str | None, tuple[float, dict[str, Any]]] = {}
 _LIMITUP_TTL = 60.0
 # 涨停逐日历史缓存（历史数据不变，10 分钟；键 = (days, effective vipdoc)）
 _limitup_history_cache: dict[tuple[int, str | None], tuple[float, dict[str, Any]]] = {}
+
+# 缓存键由用户可控的 vipdoc 查询参数生成，必须限幅：否则调用方用不同字符串
+# 反复请求即可无上限增长（每条目还持有数千行聚合结果）。超出即整体清空——
+# 这些缓存都是可重建的派生数据，代价只是下一次重扫。
+_MAX_CACHE_ENTRIES = 16
+
+
+def _cache_guard(cache: dict[Any, Any]) -> None:
+    if len(cache) >= _MAX_CACHE_ENTRIES:
+        cache.clear()
 
 
 def _df_response(df: Any) -> DataFrameResponse:
@@ -70,14 +80,39 @@ async def security_list_all(
 async def security_quotes(
     req: QuoteRequest,
     client: Any = Depends(get_client),
+    gateway: Any = Depends(get_gateway),
 ) -> DataFrameResponse:
-    """批量获取实时五档行情（最多80只/次）。"""
-    stocks_parsed: list[tuple[Any, str]] = []
+    """批量获取实时五档行情（最多80只/次）。
+
+    按市场分组分流：A 股走标准协议；港股 / 美股走扩展市场协议栈
+    （``MarketGateway``）。两条栈互相发不了对方的请求，不能混批。
+    """
+    import pandas as pd
+
+    from easy_tdx.markets import is_ex, normalize_market
+
+    grouped: dict[str, list[str]] = {}
     for s in req.stocks:
-        m = market_from_str(s.market)
-        stocks_parsed.append((m, s.code))
-    df = await client.get_security_quotes(stocks_parsed)
-    return _df_response(df)
+        token = normalize_market(s.market)
+        grouped.setdefault(token, []).append(s.code)
+
+    frames: list[pd.DataFrame] = []
+    for token, codes in grouped.items():
+        if is_ex(token):
+            if gateway is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"{token} 行情网关未初始化（扩展市场协议栈 7727 不可用）",
+                )
+            frames.append(await gateway.quotes(token, codes))
+        else:
+            m = market_from_str(token)
+            frames.append(await client.get_security_quotes([(m, c) for c in codes]))
+
+    if not frames:
+        return _df_response(pd.DataFrame())
+    combined = frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
+    return _df_response(combined)
 
 
 @router.get("/market/stat", response_model=DataFrameResponse)
@@ -106,8 +141,15 @@ _VIPDOC_KEY = "vipdoc"
 
 
 def _effective_vipdoc(explicit: str | None) -> str | None:
-    """vipdoc 解析优先级：显式参数 > 已存设置 > 自动检测（None）。"""
+    """vipdoc 解析优先级：显式参数 > 已存设置 > 自动检测（None）。
+
+    显式参数与 PUT /settings/vipdoc 走同一套校验（必须是已存在的目录）：
+    该值会直达文件系统遍历，未校验时任意目录都可被指定为"数据目录"。
+    """
     if explicit:
+        p = Path(explicit)
+        if not p.is_dir():
+            raise ValueError(f"vipdoc 路径不存在或不是目录: {p}")
         return explicit
     from easy_tdx.web.app_settings_store import get_app_settings_store
 
@@ -195,6 +237,7 @@ async def limitup_ecology(
         }
 
     payload = await asyncio.to_thread(_scan)
+    _cache_guard(_limitup_cache)
     _limitup_cache[effective] = (now, payload)
     return DictResponse.from_dict(payload)
 
@@ -258,6 +301,7 @@ async def limitup_history(
         return {"count": len(rows), "days": rows}
 
     payload = await asyncio.to_thread(_scan)
+    _cache_guard(_limitup_history_cache)
     _limitup_history_cache[(days, effective)] = (now, payload)
     return DictResponse.from_dict(payload)
 
