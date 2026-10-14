@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 数据源徽标：tdx=实时，ak=日级（收盘后），sina=延时15分钟，qq=快照。
+// 数据源徽标：tdx=实时，ak=日级（收盘后），sina=延时15分钟，qq=快照，em=免费快照（秒级）。
 //
 // 取数优先级是 服务器 → 免费接口 → 报错；免费接口的数据天然有延时，
 // 必须明确标出来，否则用户会把延时价当实时价用。
@@ -17,6 +17,8 @@ const meta = computed(() => {
       return { label: '延时15′', cls: 'delayed', title: '新浪免费接口，约延时15分钟' }
     case 'qq':
       return { label: '快照', cls: 'snapshot', title: '腾讯快照（仅最新值）' }
+    case 'em':
+      return { label: '快照', cls: 'snapshot', title: '东财/新浪免费快照（秒级，无需Key）' }
     default:
       return null
   }

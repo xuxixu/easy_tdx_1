@@ -252,9 +252,7 @@ class MarketGateway:
             if http_codes:
                 frames.append(await _run_blocking(_http_quotes, token, http_codes))
             if tdx_codes:
-                client = self._require_ex_client(token)
-                stocks = [(_resolve_ex_or_board(token, c), c) for c in tdx_codes]
-                frames.append(_with_source(await client.goods_quotes(stocks), "tdx"))
+                frames.append(await self._ex_quotes_with_fallback(token, tdx_codes))
             if not frames:
                 return pd.DataFrame()
             return frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
@@ -266,6 +264,41 @@ class MarketGateway:
         return _with_source(
             await self.tdx_client.get_security_quotes([(_market_enum(token), c) for c in codes]),
             "tdx",
+        )
+
+    async def _ex_quotes_with_fallback(self, token: str, codes: list[str]) -> pd.DataFrame:
+        """扩展市场报价：7727 栈优先，失败/未连接时回落免费快照源。
+
+        免费快照（us_hk_snapshot，新浪主 + 东财 push2 备）是秒级快照，
+        列契约与扩展栈不完全一致（新浪行无量/额与五档深度），但核心
+        价量列齐全；行自带 ``source`` 标记（sina/em），这里不再整列
+        覆盖——混批时逐行标记比整列标记准（见 :func:`_with_source`）。
+        两路都失败时抛原语义的 TdxConnectionError（上层转 503）。
+        """
+        if self.mac_ex_client is not None:
+            try:
+                client = self.mac_ex_client
+                stocks = [(_resolve_ex_or_board(token, c), c) for c in codes]
+                df = await client.goods_quotes(stocks)
+                if df is not None and not df.empty:
+                    return _with_source(df, "tdx")
+            except Exception as exc:  # noqa: BLE001 — 扩展栈失败走免费兜底
+                logger.warning("扩展栈报价失败 %s，回落免费快照源: %s", token, exc)
+        try:
+            from easy_tdx.sources import us_hk_snapshot
+
+            if us_hk_snapshot.is_enabled():
+                df = await _run_blocking(us_hk_snapshot.fetch_quotes, [(c, token) for c in codes])
+                if df is not None and not df.empty:
+                    return df
+        except Exception as exc:  # noqa: BLE001 — 兜底失败走原错误语义
+            logger.warning("免费快照源报价失败 %s: %s", token, exc)
+        from easy_tdx.exceptions import TdxConnectionError
+        from easy_tdx.markets import market_label
+
+        raise TdxConnectionError(
+            f"{market_label(token)}报价不可用：扩展市场协议栈（端口 7727）"
+            "未连接或取数失败，且免费快照源兜底失败。"
         )
 
     async def transactions(self, market: str, code: str, start: int = 0, count: int = 800) -> Any:

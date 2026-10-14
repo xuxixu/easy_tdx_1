@@ -552,6 +552,12 @@ export interface SecurityQuote {
   ask_vol4: number | null
   ask5: number | null
   ask_vol5: number | null
+  /** 美股扩展时段（盘前/盘后）快照，免费源（新浪）提供；常规时段与港股为 null。 */
+  ext_price?: number | null
+  ext_change?: number | null
+  ext_pct?: number | null
+  ext_vol?: number | null
+  ext_amount?: number | null
 }
 
 /** SSE 消息：quotes_updated / hello。 */

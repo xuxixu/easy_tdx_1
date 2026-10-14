@@ -44,6 +44,31 @@ const changePct = computed(() => {
   return (q.price / q.pre_close - 1) * 100
 })
 
+/**
+ * 扩展时段（盘前/盘后）展示门控：有扩展价、与常规价不同、且带涨跌幅才显示。
+ * 与常规价相同时隐藏（常规时段扩展字段可能镜像常规价，显示即噪音）。
+ */
+const showExt = computed(() => {
+  const q = quote.value
+  return (
+    q?.ext_price != null && q.ext_pct != null && q.price != null && q.ext_price !== q.price
+  )
+})
+
+/**
+ * 扩展时段标签：按北京时间粗分盘前/盘后（与浏览器时区无关）。
+ * 美东夏令时 盘前16:00~21:30 / 盘后04:00~09:00，冬令时整体+1h——边界小时
+ * 可能误标，仅作展示，title 已注明；兜底"扩展时段"。
+ */
+const extSessionLabel = computed(() => {
+  const now = new Date()
+  const bj = new Date(now.getTime() + (now.getTimezoneOffset() + 8 * 60) * 60000)
+  const t = bj.getHours() * 60 + bj.getMinutes()
+  if (t >= 16 * 60 && t < 21 * 60 + 30) return '盘前'
+  if (t >= 4 * 60 && t < 9 * 60 + 30) return '盘后'
+  return '扩展时段'
+})
+
 // ── tab / 指标 ──────────────────────────────────────────────────────────────
 
 const tab = ref<'minute' | 'daily' | 'm15' | 'm30' | 'h1' | 'h4'>('minute')
@@ -377,6 +402,14 @@ function gotoOptimize() {
               {{ fmt2((quote?.price ?? 0) - (quote?.pre_close ?? 0)) }}
               {{ fmtPctSigned(changePct) }}
             </span>
+            <span
+              v-if="showExt"
+              class="ext mono"
+              :class="dirClass(quote?.ext_pct)"
+              :title="`免费快照扩展时段价（${quote?.source ?? '?'}，量 ${fmtAmount(quote?.ext_vol ?? null)}）· 时段按北京时间粗分`"
+            >
+              {{ extSessionLabel }} {{ fmt2(quote?.ext_price) }} {{ fmtPctSigned(quote?.ext_pct) }}
+            </span>
             <button
               class="watch-btn"
               :class="{ watched: inWatchlist }"
@@ -595,6 +628,10 @@ function gotoOptimize() {
 }
 .chg {
   font-size: 13px;
+}
+.ext {
+  font-size: 12px;
+  opacity: 0.85;
 }
 .watch-btn {
   font-size: 12px;
