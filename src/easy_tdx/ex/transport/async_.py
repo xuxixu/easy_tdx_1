@@ -69,7 +69,7 @@ class AsyncExTdxConnection:
             except asyncio.TimeoutError as e:
                 await self._close_unlocked()
                 raise TdxConnectionError(f"通信超时: {self.timeout}s") from e
-            except (OSError, asyncio.IncompleteReadError) as e:
+            except (OSError, asyncio.IncompleteReadError, TdxConnectionError) as e:
                 await self._close_unlocked()
                 raise TdxConnectionError(f"通信错误: {e}") from e
 

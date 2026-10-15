@@ -65,10 +65,36 @@ def _dst_end(year: int) -> date:
     return d
 
 
+def _dst_transitions_utc(year: int) -> tuple[datetime, datetime]:
+    """当年夏令切换的 UTC 精确时刻（02:00 美东墙钟）。
+
+    开始：3月第2个周日 02:00 EST（UTC-5）= 07:00 UTC；
+    结束：11月第1个周日 02:00 EDT（UTC-4）= 06:00 UTC。
+    日级判定在切换日会错1h，此处精确到分钟。
+    """
+    start_day = _dst_start(year)
+    end_day = _dst_end(year)
+    start_utc = datetime(start_day.year, start_day.month, start_day.day, 7, 0, tzinfo=timezone.utc)
+    end_utc = datetime(end_day.year, end_day.month, end_day.day, 6, 0, tzinfo=timezone.utc)
+    return start_utc, end_utc
+
+
+def _is_dst_at_utc(utc: datetime) -> bool:
+    """按 UTC 瞬时判定夏令（精确到切换时刻，而非整日）。"""
+    utc = utc.astimezone(timezone.utc)
+    start_utc, end_utc = _dst_transitions_utc(utc.year)
+    return start_utc <= utc < end_utc
+
+
 def is_dst(day: date | None = None) -> bool:
-    """判断某天是否为夏令时（默认今天，美东口径）。"""
+    """判断某天是否为夏令时（默认今天，美东口径）。
+
+    兼容口径：取该日中午 12:00 美东（UTC-5 基线 17:00 UTC）判定，避免切换日
+    00:00-02:00 的边界歧义；精确到分钟的判定请用 ``_is_dst_at_utc``。
+    """
     day = day or datetime.now(_ET).date()
-    return _dst_start(day.year) <= day < _dst_end(day.year)
+    noon_utc = datetime(day.year, day.month, day.day, 17, 0, tzinfo=timezone.utc)
+    return _is_dst_at_utc(noon_utc)
 
 
 def us_session(now: datetime | None = None) -> USSession:
@@ -85,11 +111,10 @@ def us_session(now: datetime | None = None) -> USSession:
         ``pre`` / ``open`` / ``after`` / ``night``。
     """
     utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    base_date = (utc - timedelta(hours=5)).date()
-    if base_date.weekday() >= 5:
-        return "night"  # 周末全天夜盘
-    summer = is_dst(base_date)
+    summer = _is_dst_at_utc(utc)
     et = utc - timedelta(hours=4 if summer else 5)
+    if et.weekday() >= 5:
+        return "night"  # 周末全天夜盘（按美东星期判定，避免 UTC 日期错位）
     mins = et.hour * 60 + et.minute
     if 4 * 60 <= mins < 9 * 60 + 30:
         return "pre"
@@ -102,8 +127,9 @@ def us_session(now: datetime | None = None) -> USSession:
 
 def us_session_info(now: datetime | None = None) -> dict[str, object]:
     """四态详情（供前端顶栏展示）。"""
+    utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     session = us_session(now)
-    dst = is_dst((now or datetime.now(timezone.utc)).astimezone(_ET).date())
+    dst = _is_dst_at_utc(utc)
     return {
         "session": session,
         "label": SESSION_LABELS[session],
@@ -123,9 +149,7 @@ def is_us_trading_minutes(dt: datetime, *, dst: bool | None = None) -> bool:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_BEIJING)
     utc = dt.astimezone(timezone.utc)
-    # 美东日期决定夏令与否（日期边界按 UTC-5 基线，日级足够）
-    et_base = (utc - timedelta(hours=5)).date()
-    summer = is_dst(et_base) if dst is None else dst
+    summer = _is_dst_at_utc(utc) if dst is None else dst
     # 美东时钟 = UTC - 4h（夏令）/ -5h（冬令）
     et = utc - timedelta(hours=4 if summer else 5)
     if et.weekday() >= 5:

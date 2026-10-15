@@ -32,14 +32,17 @@ async def indicator_compute(
 
     请求体包含 K 线 records 和指标名称列表，返回计算后的 DataFrame。
     """
+    import asyncio
+
     from easy_tdx.indicator import compute_indicators
 
     df = pd.DataFrame(req.data)
-    result = compute_indicators(
+    result = await asyncio.to_thread(
+        compute_indicators,
         df,
-        indicators=req.indicators,
-        params=req.params,
-        keep_ohlcv=req.keep_ohlcv,
-        tail=req.tail,
+        req.indicators,
+        req.params,
+        req.keep_ohlcv,
+        req.tail,
     )
     return _df_resp(result)

@@ -73,11 +73,16 @@ class ExTdxClient:
         timeout: float = 15.0,
         auto_reconnect: bool = True,
     ) -> None:
+        import threading
+
         self._host = host if host is not None else get_best_ex_host()
-        self._port = port
+        self._port = port if port is not None else _DEFAULT_EX_PORT
         self._timeout = timeout
         self._auto_reconnect = auto_reconnect
-        self._conn = ExTdxConnection(self._host, port, timeout)
+        self._conn = ExTdxConnection(self._host, self._port, self._timeout)
+        # 必须是 RLock：_reconnect 内部自加锁，_execute 嵌套调用（换成普通
+        # Lock 即死锁，见 tests/unit/test_client_reconnect.py 类型断言）。
+        self._execute_lock = threading.RLock()
 
     @classmethod
     def from_best_host(
@@ -131,13 +136,17 @@ class ExTdxClient:
 
         扩展行情无心跳，重建仅 close → new ExTdxConnection → connect。
         供 ``_execute`` 同主机重试与跨主机故障转移复用。
+
+        锁纪律：内部自持 ``self._execute_lock``，调用方无需持锁；嵌套调用
+        依赖 ``threading.RLock`` 可重入（换成普通 Lock 即死锁）。
         """
-        target = host if host is not None else self._host
-        if host is not None:
-            self._host = host
-        self._conn.close()
-        self._conn = ExTdxConnection(target, self._port, self._timeout)
-        self._conn.connect()
+        with self._execute_lock:
+            target = host if host is not None else self._host
+            if host is not None:
+                self._host = host
+            self._conn.close()
+            self._conn = ExTdxConnection(target, self._port, self._timeout)
+            self._conn.connect()
 
     def _execute(self, cmd: "BaseCommand[_T]") -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
@@ -146,17 +155,44 @@ class ExTdxClient:
         故障转移（测速切到另一台扩展行情服务器）。
 
         健康分联动与 A 股 client 一致（成功记 success、连接失败记 failure）。
+        线程安全：快路径与同主机重试持 ``self._execute_lock``（RLock，
+        ``_reconnect`` 嵌套自加锁）；跨主机全量测速在锁外执行，重入锁后若
+        已有同伴完成切换则直接复用（见 TdxClient._execute 同构逻辑）。
         """
-        try:
-            result = self._conn.execute(cmd)
-        except TdxConnectionError:
-            if not self._auto_reconnect:
-                raise
-            record_failure(self._host)
-            last_exc: TdxConnectionError | None = None
-            for delay in _RETRY_DELAYS:
-                time.sleep(delay)
-                self._reconnect()
+        with self._execute_lock:
+            try:
+                result = self._conn.execute(cmd)
+            except TdxConnectionError:
+                if not self._auto_reconnect:
+                    raise
+                record_failure(self._host)
+                last_exc: TdxConnectionError | None = None
+                for delay in _RETRY_DELAYS:
+                    time.sleep(delay)
+                    try:
+                        self._reconnect()
+                        result = self._conn.execute(cmd)
+                        record_success(self._host)
+                        return result
+                    except TdxConnectionError as e:
+                        last_exc = e
+                        record_failure(self._host)
+                failed_host = self._host
+            else:
+                record_success(self._host)
+                return result
+        # 第二阶段：跨主机故障转移（锁外测速，见上）
+        new_host = select_best_host_sync(
+            get_ex_hosts(),
+            ping_ex_all,
+            save_best_ex_host,
+            self._port,
+            self._timeout,
+            failed_host,
+        )
+        with self._execute_lock:
+            assert last_exc is not None
+            if self._host != failed_host:
                 try:
                     result = self._conn.execute(cmd)
                     record_success(self._host)
@@ -164,28 +200,16 @@ class ExTdxClient:
                 except TdxConnectionError as e:
                     last_exc = e
                     record_failure(self._host)
-            # 第二阶段：跨主机故障转移
-            new_host = select_best_host_sync(
-                get_ex_hosts(),
-                ping_ex_all,
-                save_best_ex_host,
-                self._port,
-                5.0,
-                self._host,
-            )
-            if new_host is not None:
-                self._reconnect(new_host)
+            elif new_host is not None:
                 try:
+                    self._reconnect(new_host)
                     result = self._conn.execute(cmd)
                     record_success(self._host)
                     return result
                 except TdxConnectionError as e:
                     last_exc = e
                     record_failure(self._host)
-            raise last_exc  # type: ignore[misc]
-        else:
-            record_success(self._host)
-            return result
+            raise last_exc
 
     # ------------------------------------------------------------------ #
     # 市场信息
@@ -416,6 +440,10 @@ class AsyncExTdxClient(AsyncHeartbeatMixin):
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
         健康分联动与 sync 版对称。
+
+        锁纪律：``asyncio.Lock`` 不可重入——``_areconnect`` 内部不加锁，只能
+        在已持锁的本方法内调用；``_find_host_returning_data`` 系方法必须在
+        锁外调用。跨主机测速经 ``to_thread`` 不阻塞事件循环。
         """
         async with self._execute_lock:
             try:
@@ -427,8 +455,8 @@ class AsyncExTdxClient(AsyncHeartbeatMixin):
                 last_exc: TdxConnectionError | None = None
                 for delay in _RETRY_DELAYS:
                     await asyncio.sleep(delay)
-                    await self._areconnect()
                     try:
+                        await self._areconnect()
                         result = await self._conn.execute(cmd)
                         record_success(self._host)
                         return result
@@ -441,19 +469,21 @@ class AsyncExTdxClient(AsyncHeartbeatMixin):
                     ping_ex_all,
                     save_best_ex_host,
                     self._port,
-                    5.0,
+                    self._timeout,
                     self._host,
                 )
                 if new_host is not None:
-                    await self._areconnect(new_host)
                     try:
+                        await self._areconnect(new_host)
                         result = await self._conn.execute(cmd)
                         record_success(self._host)
                         return result
                     except TdxConnectionError as e:
                         last_exc = e
                         record_failure(self._host)
-                raise last_exc  # type: ignore[misc]
+                if last_exc is not None:
+                    raise last_exc
+                raise TdxConnectionError(f"连接 {self._host} 失败且无可用备用主机")
             else:
                 record_success(self._host)
                 return result

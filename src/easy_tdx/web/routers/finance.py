@@ -54,12 +54,21 @@ async def company_info_category(
 async def company_info_content(
     market: str = Query(..., description="市场: SZ, SH"),
     code: str = Query(..., min_length=6, max_length=6),
-    filename: str = Query(..., description="文件名"),
-    offset: int = Query(0, ge=0),
-    length: int = Query(1024, ge=1),
+    filename: str = Query(..., min_length=1, max_length=64, description="文件名"),
+    offset: int = Query(0, ge=0, le=10_000_000),
+    length: int = Query(1024, ge=1, le=65536),
     client: Any = Depends(get_client),
 ) -> dict[str, str]:
     """读取公司信息文本。"""
+    import re
+
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_.\-一-鿿]+", filename)
+        or ".." in filename
+        or "/" in filename
+        or "\\" in filename
+    ):
+        raise ValueError(f"非法文件名: {filename!r}")
     content = await client.get_company_info_content(
         market_from_str(market), code, filename, offset, length
     )
@@ -77,9 +86,15 @@ async def financial_file_list(
 
 @router.get("/financial/records", response_model=DataFrameResponse)
 async def financial_records(
-    filename: str = Query(..., description="财报文件名，如 tdxfin/gpcw20260331.zip"),
+    filename: str = Query(
+        ..., min_length=1, max_length=64, description="财报文件名，如 tdxfin/gpcw20260331.zip"
+    ),
     client: Any = Depends(get_client),
 ) -> DataFrameResponse:
     """下载财报 zip 并解析为记录列表。"""
+    import re
+
+    if not re.fullmatch(r"tdxfin/gpcw\d{8}\.zip", filename):
+        raise ValueError(f"非法财报文件名: {filename!r}（须为 tdxfin/gpcwYYYYMMDD.zip）")
     df = await client.get_financial_records(filename)
     return _df_resp(df)

@@ -319,7 +319,7 @@ def save_best_ex_host(host: str) -> None:
 
     def _mutate(cfg: dict[str, Any]) -> None:
         cfg["best_ex_host"] = host
-        cfg["best_ex_host_updated_at"] = datetime.now().isoformat()
+        cfg["best_ex_host_updated_at"] = datetime.now(_SHANGHAI_TZ).isoformat()
         if "ex_hosts" not in cfg:
             cfg["ex_hosts"] = list(_FALLBACK_EX_HOSTS)
         if "mac_ex_hosts" not in cfg:
@@ -333,7 +333,7 @@ def save_best_mac_ex_host(host: str) -> None:
 
     def _mutate(cfg: dict[str, Any]) -> None:
         cfg["best_mac_ex_host"] = host
-        cfg["best_mac_ex_host_updated_at"] = datetime.now().isoformat()
+        cfg["best_mac_ex_host_updated_at"] = datetime.now(_SHANGHAI_TZ).isoformat()
         if "mac_ex_hosts" not in cfg:
             cfg["mac_ex_hosts"] = list(_FALLBACK_MAC_EX_HOSTS)
 

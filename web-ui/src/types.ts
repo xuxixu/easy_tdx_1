@@ -558,6 +558,8 @@ export interface SecurityQuote {
   ext_pct?: number | null
   ext_vol?: number | null
   ext_amount?: number | null
+  /** 数据源标记（tdx/ak/sina/qq/em）：后端打标，前端据此展示徽标；缺失即未知。 */
+  source?: string
 }
 
 /** SSE 消息：quotes_updated / hello。 */

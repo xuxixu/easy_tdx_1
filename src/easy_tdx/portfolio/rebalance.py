@@ -21,6 +21,7 @@ class RebalanceEngine:
         rebalance_freq: str = "M",
         commission: float = 0.0003,
         slippage: float = 0.001,
+        stamp_tax: float = 0.001,
         cash: float = 1_000_000,
     ) -> None:
         self._optimizer = optimizer
@@ -29,6 +30,7 @@ class RebalanceEngine:
         self._rebalance_freq = rebalance_freq
         self._commission = commission
         self._slippage = slippage
+        self._stamp_tax = stamp_tax
         self._cash = cash
 
     def _get_rebalance_dates(self, dates: pd.DatetimeIndex) -> list[int]:
@@ -184,7 +186,7 @@ class RebalanceEngine:
                 price = prices.get(code, 0)
                 if price > 0:
                     sell_value = holdings[code] * price
-                    cost = sell_value * (self._commission + self._slippage)
+                    cost = sell_value * (self._commission + self._slippage + self._stamp_tax)
                     total_cost += cost
                     trades_list.append(
                         {
@@ -202,7 +204,7 @@ class RebalanceEngine:
         # 买入预算须为"支付交易成本后仍不超支"的额度：
         # 可用资金 = 总市值 − 已发生的卖出成本；买入时还要再扣买入费，
         # 故按 (1 + 费率) 折算预算。否则在满仓（Σweight≈1）时会因费用超支，
-        # 让现金转负（等于被经纪人垫付了手续费）。
+        # 让现金转负（等于被经纪人垫付了手续费）。买入无印花税，卖出已含印花税。
         rate = self._commission + self._slippage
         invest_budget = (total_value - total_cost) / (1.0 + rate) if rate > 0 else total_value
 

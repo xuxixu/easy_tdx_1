@@ -104,11 +104,16 @@ class MacExClient:
         timeout: float = 15.0,
         auto_reconnect: bool = True,
     ) -> None:
+        import threading
+
         self._host = host if host is not None else get_best_mac_ex_host()
-        self._port = port
+        self._port = port if port is not None else _DEFAULT_PORT
         self._timeout = timeout
         self._auto_reconnect = auto_reconnect
-        self._conn = ExTdxConnection(self._host, port, timeout, mac_ex_mode=True)
+        self._conn = ExTdxConnection(self._host, self._port, self._timeout, mac_ex_mode=True)
+        # 必须是 RLock：_reconnect 内部自加锁，_execute 嵌套调用（换成普通
+        # Lock 即死锁，见 tests/unit/test_client_reconnect.py 类型断言）。
+        self._execute_lock = threading.RLock()
 
     @classmethod
     def from_best_host(
@@ -149,14 +154,12 @@ class MacExClient:
         self.close()
 
     def ensure_connected(self) -> None:
-        """验证连接存活，断线则自动重建。"""
-        try:
-            self._execute(GetExInstrumentCountCmd())
-        except TdxConnectionError:
-            self._conn.close()
-            self._conn = ExTdxConnection(self._host, self._port, self._timeout, mac_ex_mode=True)
-            self._conn.connect()
-            self._login()
+        """验证连接存活，断线则自动重建（含 MAC EX 登录）。
+
+        经 :meth:`_execute` 探活（自带重连与故障转移）；仅当完全不可恢复时
+        抛 ``TdxConnectionError``。
+        """
+        self._execute(GetExInstrumentCountCmd())
 
     def __enter__(self) -> "MacExClient":
         self.connect()
@@ -174,6 +177,24 @@ class MacExClient:
         """执行 MAC EX 登录命令。"""
         self._conn.execute(MacExLoginCmd())
 
+    def _reconnect(self, host: str | None = None) -> None:
+        """关闭当前连接并重建（含 MAC EX 登录，默认连 self._host）。
+
+        供 :meth:`_execute` 同主机重试与跨主机故障转移复用（此前两处内联
+        close→重建→connect→login 副本，现收敛到此一处）。
+
+        锁纪律：内部自持 ``self._execute_lock``，调用方无需持锁；嵌套调用
+        依赖 ``threading.RLock`` 可重入（换成普通 Lock 即死锁）。
+        """
+        with self._execute_lock:
+            target = host if host is not None else self._host
+            if host is not None:
+                self._host = host
+            self._conn.close()
+            self._conn = ExTdxConnection(target, self._port, self._timeout, mac_ex_mode=True)
+            self._conn.connect()
+            self._login()
+
     def _execute(self, cmd: "BaseCommand[_T]") -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
@@ -183,58 +204,62 @@ class MacExClient:
         ``connect + login`` 纳入重试的语义。
 
         健康分联动与 A 股 client 一致（成功记 success、连接失败记 failure）。
+        线程安全：快路径与同主机重试持 ``self._execute_lock``（RLock，
+        ``_reconnect`` 嵌套自加锁，含 connect + login）；跨主机全量测速在锁外
+        执行，重入锁后若已有同伴完成切换则直接复用（见 TdxClient._execute）。
         """
-        try:
-            result = self._conn.execute(cmd)
-        except TdxConnectionError:
-            if not self._auto_reconnect:
-                raise
-            record_failure(self._host)
-            last_exc: TdxConnectionError | None = None
-            for delay in _RETRY_DELAYS:
-                time.sleep(delay)
-                self._conn.close()
-                self._conn = ExTdxConnection(
-                    self._host, self._port, self._timeout, mac_ex_mode=True
-                )
-                # connect + login 纳入重试：登录握手期连接再次断开属可重试语义。
+        with self._execute_lock:
+            try:
+                result = self._conn.execute(cmd)
+            except TdxConnectionError:
+                if not self._auto_reconnect:
+                    raise
+                record_failure(self._host)
+                last_exc: TdxConnectionError | None = None
+                for delay in _RETRY_DELAYS:
+                    time.sleep(delay)
+                    # connect + login 纳入重试：登录握手期连接再次断开属可重试语义。
+                    try:
+                        self._reconnect()
+                        result = self._conn.execute(cmd)
+                        record_success(self._host)
+                        return result
+                    except TdxConnectionError as e:
+                        last_exc = e
+                        record_failure(self._host)
+                failed_host = self._host
+            else:
+                record_success(self._host)
+                return result
+        # 第二阶段：跨主机故障转移——测速切到另一台 MAC 扩展行情服务器（锁外测速）
+        new_host = select_best_host_sync(
+            get_mac_ex_hosts(),
+            ping_ex_all,
+            save_best_mac_ex_host,
+            self._port,
+            self._timeout,
+            failed_host,
+        )
+        with self._execute_lock:
+            assert last_exc is not None
+            if self._host != failed_host:
                 try:
-                    self._conn.connect()
-                    self._login()
                     result = self._conn.execute(cmd)
                     record_success(self._host)
                     return result
                 except TdxConnectionError as e:
                     last_exc = e
                     record_failure(self._host)
-            # 第二阶段：跨主机故障转移——测速切到另一台 MAC 扩展行情服务器
-            new_host = select_best_host_sync(
-                get_mac_ex_hosts(),
-                ping_ex_all,
-                save_best_mac_ex_host,
-                self._port,
-                5.0,
-                self._host,
-            )
-            if new_host is not None:
-                self._host = new_host
-                self._conn.close()
-                self._conn = ExTdxConnection(
-                    self._host, self._port, self._timeout, mac_ex_mode=True
-                )
+            elif new_host is not None:
                 try:
-                    self._conn.connect()
-                    self._login()
+                    self._reconnect(new_host)
                     result = self._conn.execute(cmd)
                     record_success(self._host)
                     return result
                 except TdxConnectionError as e:
                     last_exc = e
                     record_failure(self._host)
-            raise last_exc  # type: ignore[misc]
-        else:
-            record_success(self._host)
-            return result
+            raise last_exc
 
     # ------------------------------------------------------------------ #
     # 商品列表
@@ -733,6 +758,9 @@ class AsyncMacExClient(AsyncHeartbeatMixin):
         （登录被拒等确定性失败）不重试，直接抛出。
 
         健康分联动与 sync 版对称。
+
+        锁纪律：``asyncio.Lock`` 不可重入——``_areconnect``/``_login`` 内部不加锁，
+        只能在已持锁的本方法内调用。跨主机测速经 ``to_thread`` 不阻塞事件循环。
         """
         async with self._execute_lock:
             try:
@@ -764,7 +792,7 @@ class AsyncMacExClient(AsyncHeartbeatMixin):
                     ping_ex_all,
                     save_best_mac_ex_host,
                     self._port,
-                    5.0,
+                    self._timeout,
                     self._host,
                 )
                 if new_host is not None:
@@ -782,7 +810,9 @@ class AsyncMacExClient(AsyncHeartbeatMixin):
                     except TdxConnectionError as e:
                         last_exc = e
                         record_failure(self._host)
-                raise last_exc  # type: ignore[misc]
+                if last_exc is not None:
+                    raise last_exc
+                raise TdxConnectionError(f"连接 {self._host} 失败且无可用备用主机")
             else:
                 record_success(self._host)
                 return result

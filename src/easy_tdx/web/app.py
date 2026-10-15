@@ -141,6 +141,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     logger.warning("SSE 行情拉取失败（%s %d 只）", token, len(pairs))
             if not frames:
                 return _pd.DataFrame()
+            frames = [f for f in frames if f is not None and len(f)]
+            if not frames:
+                return _pd.DataFrame()
             return frames[0] if len(frames) == 1 else _pd.concat(frames, ignore_index=True)
 
         # mock 模式不受真实限流/交易时段约束，缩短轮询间隔让 E2E 的

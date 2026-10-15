@@ -94,6 +94,8 @@ async def compute_formula(
     req: FormulaComputeRequest, client: Any = Depends(get_client)
 ) -> dict[str, Any]:
     """在 K 线上计算公式：最后一根各列值 + 可选最近 N 根明细。"""
+    import asyncio
+
     import pandas as pd
 
     from easy_tdx.formula import FormulaError, compile_formula
@@ -105,7 +107,7 @@ async def compute_formula(
 
     df = await _resolve_df(client, req)
     try:
-        result = compiled.compute(df)
+        result = await asyncio.to_thread(compiled.compute, df)
     except FormulaError as exc:
         raise ValueError(str(exc)) from exc
 

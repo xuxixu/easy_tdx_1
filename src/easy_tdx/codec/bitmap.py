@@ -199,14 +199,33 @@ FIELD_POSTPROCESS: dict[int, object] = {
 
 
 # ── 控制区(位128-159, 4字节) ──
-# 前16字节(位0-127)是字段位图, 后4字节(位128-159)是控制区:
-#   字节16(位128-135): 盘口深度(bid3_price~bid4_volume)
-#   字节17(位136-143): 排除/限流位
-#   字节18(位144-151): 日内涨幅(change_at_1000~1430)
-#   字节19(位152-159): 控制字节(CTRL_EXTENDED等)
+# 前16字节(位0-127)是字段位图, 后4字节(位128-159)是控制区。
+# 注意两条 MAC 命令的线格式不同（均经抓包/实测反推，见下）：
+#
+# - ``0x122B``（个股批量报价）：请求体 = 完整 20 字节位图（高位字段直接置位，
+#   见 :func:`build_bitmap`），响应 20 字节位图回显有效字段。
+# - ``0x122C``（板块成分报价）：请求体 = 16 字节位图 + 4 字节控制区，其中
+#   字节17 固定为排除/限流位（:class:`FilterType` 位掩码 1/2/4/.../128），与
+#   字段位 0x88-0x8F（同处字节17）在物理上冲突——因此 0x88-0x8F 字段在此命令
+#   上无法表达（见 :func:`split_control_bytes` 的警告逻辑）。
+#
+# 字节含义（两命令响应通用）：
+#   字节16(位128-135): 盘口深度(bid3_price~bid4_volume，即 0x80-0x87，恰占满一字节)
+#   字节17(位136-143): 0x122B=字段位(0x88-0x8F)；0x122C=排除/限流位（回显排除标志）
+#   字节18(位144-151): 日内涨幅(change_at_1000~1430，即 0x90-0x96)
+#   字节19(位152-159): 控制字节(CTRL_EXTENDED等；当前无 152+ 字段位，恒为纯控制)
+#
+# 解析规则（见 :func:`resolve_response_fields`）：
+#   0x122B 用整 20 字节解析（长度精确拟合校验）；0x122C 只用低 16 字节，
+#   高字节非零且映射到已知字段时打警告（行错位比丢字段更危险）。
 
 CTRL_BYTE = 0  # 控制字节起始位(152)
 CTRL_EXTENDED = 1  # 非0=扩展模式(含北交所等)，0=标准模式(仅A股)
+
+# 0x122C 控制区中专属于排除标志的字节下标（相对 4 字节控制区）。
+_EXCLUDE_BYTE_INDEX = 1  # 整体第 17 字节
+# 落在该字节范围内的字段位（0x88-0x8F），在 0x122C 上无法与排除标志共存。
+_EXCLUDE_CONFLICT_RANGE = range(0x88, 0x90)
 
 
 # ── 预定义字段集合 ──
@@ -440,11 +459,23 @@ def build_bitmap(
     if isinstance(fields, PresetField) and fields is PresetField.DEBUG:
         return bytearray(b"\xff" * 20)
     selection = normalize_fields(fields)
-    bitmap_int = 0
+    low_int = 0
+    high_int = 0
     for bit in selection:
-        bitmap_int |= 1 << bit.value
-    ba = bytearray(bitmap_int.to_bytes(16, "little"))
-    ba.extend(exclude_flags.to_bytes(4, "little"))
+        v = int(bit.value)
+        if v < 0:
+            raise ValueError(f"非法字段位 {v}")
+        if v < 128:
+            low_int |= 1 << v
+        elif v < 160:
+            high_int |= 1 << (v - 128)
+        else:
+            raise ValueError(f"字段位超出20字节位图范围: {v:#x}")
+    control = int(high_int) | int(exclude_flags)
+    if control >= 1 << 32:
+        raise ValueError(f"控制区超出4字节范围: {control:#x}")
+    ba = bytearray(low_int.to_bytes(16, "little"))
+    ba.extend(control.to_bytes(4, "little"))
     return ba
 
 
@@ -462,6 +493,44 @@ def build_exclude_flags(exclude_flags: int = 0) -> bytes:
         4 字节控制区。
     """
     return exclude_flags.to_bytes(4, "little")
+
+
+def split_control_bytes(fields: "Fields") -> tuple[bytes, list[str]]:
+    """把字段选择拆成 0x122C 风格的控制区 4 字节。
+
+    0x122C 请求 = 16 字节位图 + ``(盘口, 排除, 日内, 控制)``，其中字节17
+    专属于排除标志：落在 0x88-0x8F 的字段位无法表达，随 ``unexpressible``
+    返回，由调用方打警告（静默丢字段比报错更危险，故只警告不断链）。
+
+    Returns:
+        ``(control_4bytes, unexpressible_names)``。
+    """
+    import logging
+
+    selection = normalize_fields(fields)
+    b16 = b18 = b19 = 0
+    unexpressible: list[str] = []
+    for bit in selection:
+        v = int(bit.value)
+        if v < 128:
+            continue  # 低 128 位走 16 字节位图，与本函数无关
+        if v >= 160:
+            raise ValueError(f"字段位超出20字节位图范围: {v:#x}")
+        if v in _EXCLUDE_CONFLICT_RANGE:
+            unexpressible.append(bit.name)
+        elif v < 0x88:
+            b16 |= 1 << (v - 128)
+        elif v < 0x98:
+            b18 |= 1 << (v - 144)
+        else:
+            b19 |= 1 << (v - 152)
+    if unexpressible:
+        logging.getLogger(__name__).warning(
+            "0x122C 请求丢弃 %d 个无法表达的字段（与排除字节冲突 0x88-0x8F）：%s",
+            len(unexpressible),
+            ",".join(unexpressible),
+        )
+    return bytes((b16, 0, b18, b19)), unexpressible
 
 
 def get_active_fields(bitmap_bytes: bytes) -> list[tuple[FieldBit, str]]:
@@ -487,3 +556,64 @@ def get_active_fields(bitmap_bytes: bytes) -> list[tuple[FieldBit, str]]:
         if field is not None and isinstance(field, FieldBit):
             active.append((field, field.fmt))
     return active
+
+
+def resolve_response_fields(
+    bitmap20: bytes,
+    *,
+    body_len: int,
+    header_len: int,
+    row_count: int,
+    base_row_len: int = 68,
+    field_len: int = 4,
+    command: str = "0x122B",
+) -> list[tuple[FieldBit, str]]:
+    """选择响应位图解析口径（整 20 字节 vs 低 16 字节）。
+
+    背景：行宽 = ``base_row_len + 4 × 字段数``，选错口径整表错位。决策规则：
+
+    - 整 20 字节解析恰好精确消费整个 body（``header + rows == body_len``）
+      → 用全口径（服务器回显了高位字段）。
+    - 否则回落低 16 字节（历史行为，零回归风险）；若高字节含已知字段位，
+      打警告（说明请求的高位字段被服务端忽略或线格式假设有误）。
+
+    0x122C 调用方不应调本函数（其字节17 为排除标志回显，直接用低 16 字节
+    并用 :func:`check_board_response_control` 做高字节守卫）。
+    """
+    import logging
+
+    full = get_active_fields(bytes(bitmap20[:20]))
+    low = get_active_fields(bytes(bitmap20[:16]))
+    if len(full) != len(low):
+        expected_full = header_len + row_count * (base_row_len + field_len * len(full))
+        if expected_full == body_len:
+            return full
+        high_names = sorted({f.name for f, _ in full} - {f.name for f, _ in low})
+        logging.getLogger(__name__).warning(
+            "%s 响应高字节含已知字段位但长度不拟合（回落低16字节）：%s",
+            command,
+            ",".join(high_names),
+        )
+    return low
+
+
+def check_board_response_control(bitmap20: bytes, *, command: str = "0x122C") -> None:
+    """0x122C 响应高字节守卫：高字节出现已知字段位即打警告。
+
+    该命令字节17 为排除标志回显，只能用低 16 字节解析；若服务端某天开始在
+    高字节回显字段，本函数是第一道哨兵（行错位前先告警）。
+    """
+    import logging
+
+    high = bytes(bitmap20[16:20])
+    if not any(high):
+        return
+    full = {f.name for f, _ in get_active_fields(bytes(bitmap20[:20]))}
+    low = {f.name for f, _ in get_active_fields(bytes(bitmap20[:16]))}
+    extra = sorted(full - low)
+    if extra:
+        logging.getLogger(__name__).warning(
+            "%s 响应高字节出现已知字段位（仍按低16字节解析，行可能错位）：%s",
+            command,
+            ",".join(extra),
+        )

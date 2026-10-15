@@ -400,7 +400,9 @@ class TestMarketStatEmptyFailover:
         assert len(df) == 1
 
     def test_empty_quotes_all_candidates_empty_raises(self) -> None:
-        """所有候选都返回空时，抛 RuntimeError。"""
+        """所有候选都返回空时，抛 TdxError（统一异常契约，原 RuntimeError）。"""
+        from easy_tdx.exceptions import TdxError
+
         client = TdxClient("bad-host", 7709, 1.0, auto_reconnect=True, heartbeat_interval=0)
 
         with (
@@ -411,7 +413,7 @@ class TestMarketStatEmptyFailover:
                 return_value=[("hostA", 0.01), ("hostB", 0.02)],
             ),
         ):
-            with pytest.raises(RuntimeError, match="无法获取市场统计数据"):
+            with pytest.raises(TdxError, match="无法获取市场统计数据"):
                 client.get_market_stat()
 
         # find_working_host 逐台实测了 hostA、hostB（_reconnect 被各调一次）

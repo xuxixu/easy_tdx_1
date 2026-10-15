@@ -28,13 +28,21 @@ class ChanlunBiDir(Factor):
             if not bis:
                 return result
 
+            # BI 只有 start/end 分型（见 chanlun/types.py），无 start_index/end_index。
+            # 用分型中间 K 线的 k_index 映射回原始 bar 序号，避免 getattr 回退导致全序列被末笔覆盖。
+            n = len(df)
             for bi in bis:
+                start_k = getattr(getattr(bi, "start", None), "k", None)
+                end_k = getattr(getattr(bi, "end", None), "k", None)
+                start = getattr(start_k, "k_index", None)
+                end = getattr(end_k, "k_index", None)
+                if start is None or end is None:
+                    continue
                 direction = 1.0 if bi.direction == "up" else -1.0
-                start = getattr(bi, "start_index", 0)
-                end = getattr(bi, "end_index", len(df) - 1)
-                lo = max(0, start)
-                hi = min(len(df), end + 1)
-                result.iloc[lo:hi] = direction
+                lo = max(0, min(int(start), int(end)))
+                hi = min(n, max(int(start), int(end)) + 1)
+                if hi > lo:
+                    result.iloc[lo:hi] = direction
 
             last_bi = bis[-1]
             direction = 1.0 if last_bi.direction == "up" else -1.0
@@ -77,10 +85,21 @@ class ChanlunMMD(Factor):
             if not mmds:
                 return result
 
+            # MMD 字段为 mmd_type/bi/zs（见 chanlun/types.py），无 type/index。
+            # 用触发笔结束分型的 k_index 定位，避免恒 0。
             for mmd in mmds:
-                mmd_type = getattr(mmd, "type", "")
-                mmd_index = getattr(mmd, "index", -1)
-                value = self._MMD_MAP.get(mmd_type, 0.0)
+                mmd_type = getattr(getattr(mmd, "mmd_type", ""), "value", None)
+                if mmd_type is None:
+                    mmd_type = str(getattr(mmd, "mmd_type", "") or "")
+                bi = getattr(mmd, "bi", None)
+                end_fx = getattr(bi, "end", None) if bi is not None else None
+                k = getattr(end_fx, "k", None) if end_fx is not None else None
+                mmd_index = getattr(k, "k_index", -1)
+                try:
+                    mmd_index = int(mmd_index)
+                except (TypeError, ValueError):
+                    continue
+                value = self._MMD_MAP.get(str(mmd_type), 0.0)
                 if 0 <= mmd_index < len(df):
                     result.iloc[mmd_index] = value
 

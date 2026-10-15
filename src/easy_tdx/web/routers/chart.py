@@ -72,6 +72,8 @@ def _axis_labels(datetimes: list[str]) -> list[str]:
 @router.post("/chart/kline-option")
 async def kline_option(req: KlineOptionRequest) -> dict[str, Any]:
     """构建 K 线图完整 option（不含 tooltip/title，前端合并）。"""
+    import asyncio
+
     import pandas as pd
 
     df = pd.DataFrame(
@@ -97,7 +99,7 @@ async def kline_option(req: KlineOptionRequest) -> dict[str, Any]:
         for it in req.items
     ]
     try:
-        mains, subs, candles = compute_item_lines(df, specs)
+        mains, subs, candles = await asyncio.to_thread(compute_item_lines, df, specs)
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -106,7 +108,8 @@ async def kline_option(req: KlineOptionRequest) -> dict[str, Any]:
     ohlc = [[b.open, b.close, b.low, b.high] for b in req.bars]
     vols = [b.vol for b in req.bars]
     ups = [b.close >= b.open for b in req.bars]
-    option = build_kline_option(
+    option = await asyncio.to_thread(
+        build_kline_option,
         dates,
         ohlc,
         vols,

@@ -88,10 +88,18 @@ hi_byte 与 active2(成交笔数) 中等相关，但不足以确认映射。
 **推测**：通达信内部计算的日级分类/热度指标。lo_byte 编码股票分类属性，hi_byte 编码具体指标值。
 所有已知 TDX 实现（gotdx、pytdx、injoyai/tdx）均标记为"保留/未知"，无权威解释。
 
-### 附：MAC 协议 build_bitmap() Bug
+### 附：MAC 协议 build_bitmap() Bug（已修复）
 
-`codec/bitmap.py` 中 `build_bitmap()` 无法处理 bit 值 >= 128 的字段（如 BID_ASK_DIFF=0x8C），
-会引发 OverflowError。这些字段应放入 4 字节控制区（位 128-159），但当前实现未处理这种分离。
+`codec/bitmap.py` 中 `build_bitmap()` 曾无法处理 bit 值 >= 128 的字段（如 BID_ASK_DIFF=0x8C），
+会引发 OverflowError。已修复：高位字段填入 4 字节控制区（位 128-159），见模块注释。
+
+但两条命令线格式不同，调用时注意：
+- `0x122B`（symbol_quotes）：请求/响应均为纯 20 字节位图，响应按整 20 字节解析
+ （`resolve_response_fields` 做长度精确拟合校验，不拟合回落低 16 字节）。
+- `0x122C`（board_members_quotes）：请求 = 16 字节位图 + `(盘口, 排除, 日内, 控制)`，
+  其中字节17 专属排除标志（FilterType 位掩码），0x88-0x8F 字段位无法表达
+  （构造时打警告，见 `split_control_bytes`）；响应只按低 16 字节解析，高字节
+  出现已知字段位时由 `check_board_response_control` 打警告。
 
 ## 二、证券列表 unknown 字段（security_list）
 

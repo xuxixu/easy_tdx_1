@@ -149,9 +149,9 @@ class OptimizeBacktestRequest(BaseModel):
     workers: int = Field(
         default=1,
         ge=0,
-        le=32,
+        le=8,
         description="并行工作进程数：0/1=串行+指标缓存（默认）；2+=进程级并行（实测 36 点网格 "
-        "800 根 K 线约 2 倍，网格越大收益越高）",
+        "800 根 K 线约 2 倍，网格越大收益越高；上限 8 防 32 进程打爆服务器）",
     )
     param_grid: dict[str, list[int | float | str]] = Field(
         ...,
@@ -195,9 +195,9 @@ class OptimizeAllBacktestRequest(BaseModel):
     workers: int = Field(
         default=1,
         ge=0,
-        le=32,
+        le=8,
         description="一键寻优并发工作进程数：0 或 1=串行（默认）；2+=ProcessPoolExecutor "
-        "并行（CPU-bound，线程无加速）。推荐 min(cpu_count, 8)。",
+        "并行（CPU-bound，线程无加速）。推荐 min(cpu_count, 8)，上限 8。",
     )
 
     # 数据来源 A：内联 OHLCV

@@ -123,7 +123,7 @@ class FactorWeightedOptimizer(WeightOptimizer):
         n_stocks: int = 50,
         **kwargs: object,
     ) -> dict[str, float]:
-        top = factor_scores.nlargest(n_stocks, "score")
+        top = factor_scores.dropna(subset=["score"]).nlargest(n_stocks, "score")
         if len(top) == 0:
             return {}
         scores: npt.NDArray[np.float64] = top["score"].to_numpy(dtype=np.float64)
@@ -148,7 +148,7 @@ class FactorWeightedOptimizer(WeightOptimizer):
 
 @register_optimizer("risk_parity")
 class RiskParityOptimizer(WeightOptimizer):
-    """风险平价 — 每只股票贡献相等风险。"""
+    """风险平价 — 每只股票贡献相等风险（需 volatility 列；缺失时退化为等权）。"""
 
     def optimize(
         self,
@@ -156,14 +156,17 @@ class RiskParityOptimizer(WeightOptimizer):
         n_stocks: int = 50,
         **kwargs: object,
     ) -> dict[str, float]:
-        top = factor_scores.nlargest(n_stocks, "score")
+        top = factor_scores.dropna(subset=["score"]).nlargest(n_stocks, "score")
         if len(top) == 0:
             return {}
-        if "volatility" in top.columns:
-            vol: npt.NDArray[np.float64] = top["volatility"].to_numpy(dtype=np.float64)
+        if "volatility" in top.columns and top["volatility"].notna().any():
+            vol: npt.NDArray[np.float64] = (
+                top["volatility"].fillna(top["volatility"].median()).to_numpy(dtype=np.float64)
+            )
         else:
-            scores: npt.NDArray[np.float64] = top["score"].abs().to_numpy(dtype=np.float64)
-            vol = (1.0 / (scores + 1e-8)).astype(np.float64)
+            # 无波动率输入时无法做风险平价：退化为等权（原按 |score| 加权名实不符）
+            w = 1.0 / len(top)
+            return {row["code"]: w for _, row in top.iterrows()}
         vol = np.maximum(vol, 1e-8)
         inv_vol = 1.0 / vol
         total = inv_vol.sum()
@@ -173,7 +176,10 @@ class RiskParityOptimizer(WeightOptimizer):
 
 @register_optimizer("mean_variance")
 class MeanVarianceOptimizer(WeightOptimizer):
-    """均值方差优化 — Markowitz 模型（可选 scipy）。"""
+    """对角最小方差（名义均值方差，实际 min w'Diag(var)w，无收益项与相关性）。
+
+    variances 由 |score| 倒数构造；scipy 缺失时退化为等权。
+    """
 
     def optimize(
         self,
@@ -197,7 +203,7 @@ class MeanVarianceOptimizer(WeightOptimizer):
     ) -> dict[str, float]:
         from scipy.optimize import minimize as _minimize
 
-        top = factor_scores.nlargest(n_stocks, "score")
+        top = factor_scores.dropna(subset=["score"]).nlargest(n_stocks, "score")
         if len(top) == 0:
             return {}
         n = len(top)
@@ -209,7 +215,9 @@ class MeanVarianceOptimizer(WeightOptimizer):
             return float(w @ cov @ w)
 
         constraints = {"type": "eq", "fun": lambda w: float(np.sum(w) - 1.0)}
-        bounds = [(0.0, 0.1)] * n
+        # n<10 时 (0,0.1) 无可行解：上限取 max(0.1, 2/n)，保证可行且仍分散
+        upper = min(1.0, max(0.1, 2.0 / max(n, 1)))
+        bounds = [(0.0, upper)] * n
         x0 = np.ones(n) / n
         result = _minimize(objective, x0, method="SLSQP", bounds=bounds, constraints=constraints)
         weights = result.x if result.success else np.ones(n) / n

@@ -7,7 +7,14 @@
 import struct
 
 from ..._binary import unpack_from
-from ...codec.bitmap import Fields, PresetField, build_bitmap, get_active_fields
+from ...codec.bitmap import (
+    Fields,
+    PresetField,
+    build_bitmap,
+    check_board_response_control,
+    get_active_fields,
+    split_control_bytes,
+)
 from ...codec.mac_frame import build_mac_request
 from ...commands.base import BaseCommand
 from ..enums import FilterType, SortOrder, SortType
@@ -70,17 +77,22 @@ class BoardMembersQuotesCmd(BaseCommand[list[MacQuoteField]]):
         body += bytes(bitmap[:16])
 
         # 4 字节控制区: byte0=盘口, byte1=排除位, byte2=日内, byte3=控制(CTRL_EXTENDED=1)
+        # 高位字段位按线格式填入 byte0/byte2（byte1 专属排除标志不可混入，冲突位
+        # 0x88-0x8F 由 split_control_bytes 打警告）。无高位字段时与旧行为逐字节一致。
+        control, _ = split_control_bytes(self._fields)
         b1 = sum(f.value for f in self._exclude_flags)
-        body += struct.pack("<BBBB", 0, b1, 0, 1)
+        body += struct.pack("<BBBB", control[0], b1, control[2], control[3] | 1)
 
         return build_mac_request(0x122C, body)
 
     def parse_response(self, body: bytes) -> list[MacQuoteField]:
-        # 响应位图（20 字节）
+        # 响应位图（20 字节）。注意：字节17 为排除标志回显，只能按低 16 字节
+        # 解析（见模块注释）；高字节若出现已知字段位，由守卫打警告。
         resp_bitmap = body[:20]
 
         total, row_count = unpack_from("<IH", body, 20, "board_members header")
 
+        check_board_response_control(resp_bitmap)
         active_fields = get_active_fields(resp_bitmap[:16])
         field_count = len(active_fields)
 

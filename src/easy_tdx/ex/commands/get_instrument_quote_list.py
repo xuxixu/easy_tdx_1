@@ -4,7 +4,6 @@ import struct
 from collections import OrderedDict
 
 from ...commands.base import BaseCommand
-from ...exceptions import TdxCommandError
 
 
 class GetExInstrumentQuoteListCmd(BaseCommand[list[OrderedDict[str, object]]]):
@@ -34,23 +33,45 @@ class GetExInstrumentQuoteListCmd(BaseCommand[list[OrderedDict[str, object]]]):
         )
 
     def parse_response(self, body: bytes) -> list[OrderedDict[str, object]]:
+        import logging
+
+        from ..._binary import unpack_from
+
         if len(body) < 2:
             return []
-        (num,) = struct.unpack("<H", body[0:2])
+        try:
+            (num,) = unpack_from("<H", body, 0, "ex quote list count")
+        except Exception:
+            return []
         pos = 2
         results: list[OrderedDict[str, object]] = []
         for _ in range(num):
             if pos + 10 > len(body):
                 break
-            (market, raw_code) = struct.unpack("<B9s", body[pos : pos + 10])
+            try:
+                (market, raw_code) = unpack_from("<B9s", body, pos, "ex quote list head")
+            except Exception:
+                break
             code = raw_code.strip(b"\x00").decode("gbk", errors="replace")
             pos += 10
             if self.category == 3:
-                pos = self._parse_futures(market, code, body, pos, results)
+                try:
+                    pos = self._parse_futures(market, code, body, pos, results)
+                except Exception:
+                    break
             elif self.category == 2:
-                pos = self._parse_hk_stocks(market, code, body, pos, results)
+                try:
+                    pos = self._parse_hk_stocks(market, code, body, pos, results)
+                except Exception:
+                    break
             else:
-                raise TdxCommandError(f"不支持的扩展行情类别: {self.category}")
+                # 未知类别：保留已解析前缀并停止，而非抛弃整包
+                logging.getLogger(__name__).warning(
+                    "ex 行情列表未知类别 %s，已保留 %d 条前缀并停止",
+                    self.category,
+                    len(results),
+                )
+                break
         return results
 
     @staticmethod
@@ -61,8 +82,11 @@ class GetExInstrumentQuoteListCmd(BaseCommand[list[OrderedDict[str, object]]]):
         pos: int,
         results: list[OrderedDict[str, object]],
     ) -> int:
-        if pos + 140 > len(body):
-            return pos + 290
+        from ...exceptions import TdxDecodeError
+
+        # 每条记录 290 字节：前 140 字节已解析，后 150 字节未知填充
+        if pos + 290 > len(body):
+            raise TdxDecodeError(f"ex 期货记录截断: pos={pos}, len={len(body)}")
         (
             bi_shu,
             zuo_jie,
@@ -135,8 +159,10 @@ class GetExInstrumentQuoteListCmd(BaseCommand[list[OrderedDict[str, object]]]):
         pos: int,
         results: list[OrderedDict[str, object]],
     ) -> int:
-        if pos + 140 > len(body):
-            return pos + 290
+        from ...exceptions import TdxDecodeError
+
+        if pos + 290 > len(body):
+            raise TdxDecodeError(f"ex 港股记录截断: pos={pos}, len={len(body)}")
         (
             huo_yue_du,
             zuo_shou,

@@ -143,6 +143,8 @@ class RealtimeStreamHub:
         key = symbol.strip().upper()
         async with self._lock:
             with self._state_lock:
+                if cid not in self._subs:
+                    raise ValueError(f"未知连接 {cid}")
                 if key in self._subs[cid]:
                     return  # 幂等：同连接重复订阅同一标的
                 if (
@@ -161,7 +163,7 @@ class RealtimeStreamHub:
         key = symbol.strip().upper()
         async with self._lock:
             with self._state_lock:
-                if key not in self._subs[cid]:
+                if cid not in self._subs or key not in self._subs[cid]:
                     return
                 self._subs[cid].discard(key)
                 self._dec_ref(key)

@@ -70,7 +70,7 @@ class WarehouseSyncer:
         warehouse: KlineWarehouse,
         max_bars: int = 8000,
         tail_bars: int = 15,
-        adjust: str = "QFQ",
+        adjust: Any = "QFQ",
     ) -> None:
         """Initialize.
 
@@ -80,14 +80,38 @@ class WarehouseSyncer:
             max_bars: 首同步（仓库为空时）的最大拉取根数。
             tail_bars: 增量同步拉取的尾部根数（覆盖近几日的修正）。
             adjust: 复权方式（默认 ``"QFQ"`` 前复权——回测/筛选口径；
-                注意仓库按 period+adjust 隐含统一，混存不同复权口径需
-                分开仓库文件）。
+                接受 ``"NONE"/"QFQ"/"HFQ"`` 字符串或 ``Adjust`` 枚举，
+                落盘按同名口径隔离存储，QFQ/NONE 互不覆盖）。
         """
         self._client = client
         self._wh = warehouse
         self._max_bars = max(int(max_bars), 800)
         self._tail_bars = max(int(tail_bars), 5)
-        self._adjust = adjust
+        self._adjust = self._normalize_adjust(adjust)
+
+    @staticmethod
+    def _normalize_adjust(adjust: Any) -> Any:
+        """把 str/Adjust 归一为客户端可比的 Adjust 枚举（QFQ 兜底可触发）。"""
+        try:
+            from easy_tdx.mac.enums import Adjust
+        except Exception:
+            return str(adjust).upper() if adjust else "QFQ"
+        if isinstance(adjust, Adjust):
+            return adjust
+        name = str(adjust).upper() if adjust else "QFQ"
+        try:
+            return Adjust[name]
+        except KeyError:
+            raise ValueError(f"adjust 须为 NONE/QFQ/HFQ 之一，收到 {adjust!r}") from None
+
+    def _adjust_name(self) -> str:
+        try:
+            name = getattr(self._adjust, "name", None)
+            if isinstance(name, str):
+                return name.upper()
+        except Exception:
+            pass
+        return str(self._adjust).upper()
 
     def _fetch(
         self,
@@ -144,20 +168,23 @@ class WarehouseSyncer:
     ) -> dict[str, Any]:
         """同步单个标的，返回 ``{symbol, added, updated, skipped, error}``。"""
         symbol = f"{market}:{code}"
+        adj_name = self._adjust_name()
         try:
-            existing_last = self._wh.last_datetime(market, code, period)
+            existing_last = self._wh.last_datetime(market, code, period, adjust=adj_name)
             count = self._tail_bars if existing_last is not None else self._max_bars
             df = self._fetch(market, code, period, count)
             df = self._refetch_full_on_gap(df, existing_last, market, code, period, symbol)
             if df is None or len(df) == 0:
                 return {"symbol": symbol, "added": 0, "updated": 0, "skipped": 1, "error": None}
-            added, updated = self._wh.upsert_bars(market, code, df, period=period)
+            added, updated = self._wh.upsert_bars(market, code, df, period=period, adjust=adj_name)
             # provisional 转正：只在拉取成功后进行，且只转正本次数据已覆盖
             # （datetime <= 拉取最大时间）的行——拉取失败/为空时盘中临时值
             # 不会被洗成 completed。
             max_dt = _df_max_datetime(df)
             if max_dt is not None:
-                self._wh.promote_provisional(market=market, code=code, before=max_dt)
+                self._wh.promote_provisional(
+                    market=market, code=code, before=max_dt, adjust=adj_name
+                )
             return {
                 "symbol": symbol,
                 "added": added,

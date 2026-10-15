@@ -65,6 +65,55 @@
 - 单测重写：`test_mytt.py` → [test_ta.py](tests/unit/test_ta.py)，并按 TA-Lib 语义更新 `SAR`（首根 `NaN`、反转当根 `NaN`）、`AROON`（预热 `N` 根）、`SUPERTREND`（方向含 0）、`CHOP`（`TR[0]` 取 `H-L`，`N` 根窗口自第 `N-1` 根有效）等断言。
 - 向量化/逐 bar 对拍：移除 `wr_reversal` 的例外白名单后，**全部内置策略默认参数均可产生交易**，两条信号路径仍逐位一致。
 
+### 港美股个股免费快照源 + 扩展时段展示
+
+- 新增 [us_hk_snapshot.py](src/easy_tdx/sources/us_hk_snapshot.py)（纯标准库、无需 Key，`EASY_TDX_US_HK_SNAPSHOT=0` 可关）：新浪 `hq.sinajs`（`gb_*`/`rt_hk*`）主 + 东财 push2（`105/106/107`、`116`）备；美股昨收由现价-涨跌额推导；美股新浪行另带扩展时段五元组（`ext_price`/`ext_change`/`ext_pct` 取自 36 字段串 `[21]/[22]/[23]`，`ext_vol`/`ext_amount` 取自 `[27]/[33]`，均经盘前双样本×双标的交叉验证；`[31]/[32]/[34]` 语义未定暂不映射）。
+- 网关 [market_gateway.py](src/easy_tdx/web/market_gateway.py) `/overseas/quotes` 扩展分支：7727 栈失败/未连接/**全空价格**（盘前/收盘后 TDX 只回 pre_close）时回落免费快照；部分空不断整批。行级 `source` 标记（sina/em）不再整列覆盖。
+- 前端：个股弹窗头部展示扩展时段价（`StockDialog.vue`，按北京时间粗分盘前/盘后标签）；`SourceBadge` 新增 `em` 快照徽标；`SecurityQuote` 补 `source`/`ext_*` 类型（此前运行时有、类型缺失，`vue-tsc -b` 已收紧）。
+- 锁定测试 [test_us_hk_snapshot.py](tests/unit/test_us_hk_snapshot.py)（真实报文回归）+ [test_gateway_snapshot_fallback.py](tests/unit/test_gateway_snapshot_fallback.py)（主链优先/全空回落/部分保留/全失败 503）。
+
+### 代码审查遗留项修复（第二轮）
+
+**K 线仓库复权口径分离**——旧主键 `(market,code,period,datetime)` 不含口径，QFQ/NONE 互相覆盖后只剩一份数据：
+
+- [store.py](src/easy_tdx/warehouse/store.py)：`klines` 增 `adjust` 列（默认 QFQ）并纳入主键与索引；`query`/`upsert`/`health_check` 全部按口径隔离，`_normalize_adjust` 统一校验（非法口径直接报错，不静默回落）。
+- **老库迁移**：无 `adjust` 列时改名为 `klines_legacy` → 按标的分块拷贝（500/块，每块独立事务，anti-join 幂等可续拷）→ **行数校验通过才 DROP**，中断则保留残留表、下次打开自动续拷，绝不静默 serving 半截数据。回填统一按 QFQ（与历史同步器默认一致），若老库实为 NONE 口径，日志提示用 `--adjust NONE` 重拉。迁移必须在建表索引**之前**执行，否则含 `adjust` 的索引会在 legacy 表上直接 Binder 失败。
+- DuckDB 单写者：`KlineWarehouse` 加 `RLock` 串行化；新增 `_affected_rows` 兼容各版本 `rowcount`/`description` 语义差异。
+- CLI：`warehouse query` / `warehouse check` 新增 `--adjust`（默认全口径 / 按口径分别自检）。
+
+**协议层解码安全**——脏包不再产出「看起来合法」的脏数据：
+
+- [bitmap.py](src/easy_tdx/codec/bitmap.py)：补全 `build_bitmap` 对 ≥128 字段位的处理（旧实现 `to_bytes(16)` 直接 `OverflowError`）；明确 `0x122B`（个股批量报价，整 20 字节位图）与 `0x122C`（板块成分报价，字节 17 专属排除标志、0x88-0x8F 字段位无法表达）线格式差异，新增 `split_control_bytes` / `resolve_response_fields` / `check_board_response_control`——响应按「长度精确拟合」选口径，不拟合回落低 16 字节并告警（行错位比丢字段更危险）。
+- [datetime_.py](src/easy_tdx/codec/datetime_.py)：非法日期/时间抛 `TdxDecodeError`（不再静默返回 1970 年）；[price.py](src/easy_tdx/codec/price.py)：0x80 变长链限 10 字节，超出即判脏包（防 CPU DoS）；[financial.py](src/easy_tdx/codec/financial.py)：文件清单体积字段解析失败改为跳过该行而非整份失败。
+
+**同步客户端锁纪律**——四个同步客户端（`TdxClient`/`MacClient`/`ExTdxClient`/`MacExClient`）统一：
+
+- `_execute_lock` 为 `threading.RLock`（`_reconnect` 内部自加锁 + `_execute` 嵌套调用，普通 `Lock` 即死锁，有类型断言守护）；`_reconnect` 收敛为唯一重建入口且无需调用方持锁。
+- 跨主机测速**在锁外**执行（`_try` 嵌套 `_reconnect` + `_execute`），重入锁后二次确认 `self._host` 是否已被同伴切换，复用新连接避免惊群测速互相覆盖。
+- `ensure_connected` 改走 `_execute`（自带同主机重试与跨主机故障转移），修不好才向上抛——此前「只捕 `TdxConnectionError` 就直接重连」会绕过全部故障转移逻辑。
+- [transport/sync.py](src/easy_tdx/transport/sync.py)：`start_heartbeat` 先停旧线程（重复 start 不再泄漏）；`stop_heartbeat` 先置空再 set/join，消除 `_stop_event` 的 assert/`None.wait` 竞态。
+
+**Web 层加固**：
+
+- `serve --host` 默认由 `0.0.0.0` 改为 `127.0.0.1`（服务无内置鉴权），显式传非回环地址时打印安全提醒。
+- [errors.py](src/easy_tdx/web/errors.py)：500/503 响应 detail 擦除本地绝对路径（Windows 盘符 + Unix 常见根）并截断，保留业务关键词供定位；补 `TdxDecodeError`→502、`TdxCommandError`→422 处理器，统一附 `code` + `request_id`，服务端日志同步记录。
+- [routers/finance.py](src/easy_tdx/web/routers/finance.py)：财报文件名字段加白名单正则校验（阻断 `..`/分隔符穿越），offset/length 加上限；`/backtest` limit 加 `ge/le` 约束；worker 数上限 32→8（超出即打爆服务器）。
+- CPU 密集计算（指标/公式/图表叠加）改 `asyncio.to_thread`，不再阻塞事件循环；`realtime_hub` 退订补 `cid` 存在性判断（未知连接不再 `KeyError` 500）。
+
+**业务正确性**：
+
+- 缠论因子（[factor/builtin/chanlun.py](src/easy_tdx/factor/builtin/chanlun.py)）：BI/MMD 定位此前用 `getattr(bi, "start_index", 0)` 回退，字段名与 [chanlun/types.py](src/easy_tdx/factor/chanlun/types.py) 不符恒取默认值 → 整段序列被末笔覆盖；改为经分型 `k.k_index` 映射回原 bar 序号。
+- `ZhuyaoStrategy` BIAS 已为百分比口径却再乘 100，阈值被放大 100 倍。
+- 组合优化器：`nlargest` 前先 `dropna(score)`；风险平价在无 `volatility` 列时退化为等权（此前以 `1/|score|` 冒充风险平价）；均值-方差在 n<10 时 `(0,0.1)` 无可行解，上限改 `max(0.1, 2/n)`。
+- 再平衡卖出补印花税（此前成本只算佣金+滑点）。
+- [sina/client.py](src/easy_tdx/sina/client.py)：paperCode 前缀按 6/9→sh、0/3→sz、4/8→bj 判定（北交所此前一律落 sz），非 6 位数字代码直接报错而非猜前缀。
+- 美股时段（[us_session.py](src/easy_tdx/us_session.py)）：夏令改为按 UTC 瞬时精确到分钟（切换日整日判定会错 1h），周末夜盘按**美东**星期判定（此前用 UTC 日期，周日晚间美东仍是工作日盘后）。
+- 巨潮 `announcementTime` 时间戳转换显式上海时区（此前跟随主机时区）；orgId 缓存写入持锁；`best_ex_host` 时间戳同理。
+- vipdoc 路径支持北交所（`Market.BJ`→`bj`，此前直接抛错）；证券列表缓存改临时文件 + `replace` 原子写；主源 K 线失败转备源时记日志（此前 `except: pass` 完全静默）。
+- `unified.py`：`query_date` 收窄为 `int | date`（去掉 3 处 `type: ignore`），`aclose` 两个客户端关闭失败互不阻断。
+
+**测试**：新增 6 个锁定测试——[test_bitmap_control.py](tests/unit/test_bitmap_control.py)（控制区构造/口径选择）、[test_transport_decode_safety.py](tests/unit/test_transport_decode_safety.py)（解码脏包契约）、[test_client_lock_discipline.py](tests/unit/test_client_lock_discipline.py)（RLock/嵌套重连/锁外测速）、[test_warehouse_migration.py](tests/unit/test_warehouse_migration.py)（迁移分块/续拷/校验）、[test_warehouse_adjust_fixes.py](tests/unit/test_warehouse_adjust_fixes.py)（口径隔离）、[test_web_errors_scrub.py](tests/unit/test_web_errors_scrub.py)（detail 脱敏保留业务文本）。
+
 ## [未发布] — 2026-10-12
 
 **全量代码审查（前后端）后的修复**——对 `src/easy_tdx`（280 个模块）与 `web-ui/src`（44 组件 / 22 视图 / 3 store）做前后端并行深审，本轮落地全部确认缺陷：协议层连接作废、组合回测交易成本被抹除、实时轮询时区错位、sqlite 短连接 fd 泄漏、推送地址 SSRF、前端长轮询无中止与图表叠加失效等。基线静态检查（ruff / mypy --strict / vue-tsc）与测试套件（~1800 项）在改动前后均全绿。

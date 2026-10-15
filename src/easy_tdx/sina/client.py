@@ -79,9 +79,19 @@ class SinaClient:
         self.timeout = timeout
 
     def _build_paper_code(self, code: str) -> str:
-        """6 位代码 → 新浪 paperCode（sh/sz 前缀）。"""
-        prefix = "sh" if code.startswith("6") else "sz"
-        return f"{prefix}{code}"
+        """6 位代码 → 新浪 paperCode（sh/sz/bj 前缀；指数/非6位抛错避免错前缀）。"""
+        c = code.strip()
+        if len(c) != 6 or not c.isdigit():
+            raise SinaError(f"新浪财报仅支持 6 位数字 A 股代码，收到 {code!r}")
+        if c.startswith("6") or c.startswith("9"):
+            prefix = "sh"
+        elif c.startswith(("0", "3")):
+            prefix = "sz"
+        elif c.startswith(("4", "8")):
+            prefix = "bj"
+        else:
+            raise SinaError(f"无法判定市场的新浪代码前缀：{code!r}")
+        return f"{prefix}{c}"
 
     def get_financial_report(
         self,

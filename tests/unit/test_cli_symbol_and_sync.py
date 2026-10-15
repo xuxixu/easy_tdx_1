@@ -58,7 +58,9 @@ class _FakeWarehouse:
     def __exit__(self, *exc: object) -> bool:
         return False
 
-    def health_check(self, market: str | None = None, code: str | None = None) -> dict[str, Any]:
+    def health_check(
+        self, market: str | None = None, code: str | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         return {"issues": [], "market": market, "code": code}
 
 
@@ -225,7 +227,7 @@ class TestWarehouseCheck:
         import easy_tdx.cli.cmd_warehouse as cw
 
         class _Wh(_FakeWarehouse):
-            def health_check(self, market=None, code=None):
+            def health_check(self, market=None, code=None, **kwargs):
                 return {"issues": ["gap"]}
 
         monkeypatch.setattr(cw, "_require_warehouse", lambda db_path: _Wh())

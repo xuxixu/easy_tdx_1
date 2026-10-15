@@ -55,7 +55,7 @@ from .config import (
     get_timeout,
     save_best_host,
 )
-from .exceptions import TdxConnectionError
+from .exceptions import TdxConnectionError, TdxError
 from .models.bar import SecurityBar
 from .models.enums import KlineCategory, Market
 from .models.finance import (
@@ -222,9 +222,9 @@ def _save_cache(stocks: list[SecurityInfo]) -> None:
         "count": len(stocks),
         "data": _serialize_stocks(stocks),
     }
-    (_CACHE_DIR / "security_list_all.json").write_text(
-        json.dumps(data, ensure_ascii=False), "utf-8"
-    )
+    tmp = _CACHE_DIR / "security_list_all.json.tmp"
+    tmp.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    tmp.replace(_CACHE_DIR / "security_list_all.json")
 
 
 class TdxClient:
@@ -249,12 +249,17 @@ class TdxClient:
         auto_reconnect: bool = True,
         heartbeat_interval: float = 15.0,
     ) -> None:
+        import threading
+
         self._host = host if host is not None else get_best_host()
         self._port = port if port is not None else get_port()
         self._timeout = timeout if timeout is not None else get_timeout()
         self._auto_reconnect = auto_reconnect
         self._heartbeat_interval = heartbeat_interval
-        self._conn = TdxConnection(host, port, timeout)
+        self._conn = TdxConnection(self._host, self._port, self._timeout)
+        # 必须是 RLock：_reconnect 内部自加锁，_execute 嵌套调用（见 _reconnect
+        # docstring）；换成普通 Lock 即死锁。tests 有类型断言守护。
+        self._execute_lock = threading.RLock()
 
     # ------------------------------------------------------------------ #
     # 工厂方法：自动优选最低延迟服务器
@@ -317,11 +322,13 @@ class TdxClient:
         self.close()
 
     def ensure_connected(self) -> None:
-        """验证连接存活，断线则自动重建。"""
-        try:
-            self._execute(GetSecurityCountCmd(Market.SH))
-        except TdxConnectionError:
-            self._reconnect()
+        """验证连接存活，断线则自动重建。
+
+        经 :meth:`_execute` 探活（自带同主机重试与跨主机故障转移）；仅当完全
+        不可恢复时抛 ``TdxConnectionError``（与旧语义一致：修不好就向上抛，
+        不静默吞掉）。
+        """
+        self._execute(GetSecurityCountCmd(Market.SH))
 
     def _reconnect(self, host: str | None = None) -> None:
         """关闭当前连接并重建（默认连 self._host；传入 host 则切换主机）。
@@ -329,16 +336,22 @@ class TdxClient:
         统一收敛所有"重建 TdxConnection + 起心跳"的副本：``_execute`` 同主机
         重试、``_execute`` 跨主机故障转移、``ensure_connected``、
         ``get_market_stat`` 空数据重试都走这里，保证 4 处重建逻辑一致。
+
+        锁纪律：本方法内部自持 ``self._execute_lock``，调用方无需持锁；
+        ``_execute`` 的嵌套调用依赖该锁是 ``threading.RLock``（可重入）。
+        若把锁换成普通 ``Lock``，嵌套即死锁——见
+        ``tests/unit/test_client_reconnect.py::TestSyncLockDiscipline``。
         """
-        target = host if host is not None else self._host
-        if host is not None:
-            self._host = host
-        self._conn.stop_heartbeat()
-        self._conn.close()
-        self._conn = TdxConnection(target, self._port, self._timeout)
-        self._conn.connect()
-        if self._heartbeat_interval > 0:
-            self._conn.start_heartbeat(self._heartbeat_interval)
+        with self._execute_lock:
+            target = host if host is not None else self._host
+            if host is not None:
+                self._host = host
+            self._conn.stop_heartbeat()
+            self._conn.close()
+            self._conn = TdxConnection(target, self._port, self._timeout)
+            self._conn.connect()
+            if self._heartbeat_interval > 0:
+                self._conn.start_heartbeat(self._heartbeat_interval)
 
     def __enter__(self) -> "TdxClient":
         self.connect()
@@ -368,18 +381,50 @@ class TdxClient:
         健康分联动：成功路径记 ``record_success``（恢复 score），连接失败
         记 ``record_failure``（降权），让频繁断连的服务器在后续故障转移中
         自动靠后。
+
+        线程安全：快路径与同主机重试持 ``self._execute_lock``（RLock，
+        ``_reconnect`` 嵌套自加锁）；跨主机全量测速（秒级）在锁外执行，
+        重入锁后若已有同伴完成切换（``self._host`` 已变）则直接复用新连接
+        重试一次，避免惊群测速与互相覆盖。``_find_host_returning_data``
+        必须在锁外调用（其 ``_try`` 嵌套 ``_reconnect`` + ``_execute``，
+        RLock 可重入才安全）。
         """
-        try:
-            result = self._conn.execute(cmd)
-        except TdxConnectionError:
-            if not self._auto_reconnect:
-                raise
-            # 连接失败：当前主机降权
-            record_failure(self._host)
-            last_exc: TdxConnectionError | None = None
-            for delay in _RETRY_DELAYS:
-                time.sleep(delay)
-                self._reconnect()
+        with self._execute_lock:
+            try:
+                result = self._conn.execute(cmd)
+            except TdxConnectionError:
+                if not self._auto_reconnect:
+                    raise
+                # 连接失败：当前主机降权（每 _execute 最多记 1 次，避免重试 4 次罚 5 次）
+                record_failure(self._host)
+                last_exc: TdxConnectionError | None = None
+                for delay in _RETRY_DELAYS:
+                    time.sleep(delay)
+                    try:
+                        self._reconnect()
+                        result = self._conn.execute(cmd)
+                        record_success(self._host)
+                        return result
+                    except TdxConnectionError as e:
+                        last_exc = e
+                        record_failure(self._host)
+                failed_host = self._host
+            else:
+                record_success(self._host)
+                return result
+        # 第二阶段：跨主机故障转移——锁外测速（见上），重入锁后二次确认。
+        new_host = select_best_host_sync(
+            get_known_hosts(),
+            ping_all,
+            save_best_host,
+            self._port,
+            self._timeout,
+            failed_host,
+        )
+        with self._execute_lock:
+            assert last_exc is not None  # 同主机重试至少失败一次才会走到这里
+            if self._host != failed_host:
+                # 测速期间已有同伴完成切换：复用新连接重试一次
                 try:
                     result = self._conn.execute(cmd)
                     record_success(self._host)
@@ -387,28 +432,16 @@ class TdxClient:
                 except TdxConnectionError as e:
                     last_exc = e
                     record_failure(self._host)
-            # 第二阶段：跨主机故障转移——重新测速切到另一台服务器再试一次
-            new_host = select_best_host_sync(
-                get_known_hosts(),
-                ping_all,
-                save_best_host,
-                self._port,
-                5.0,
-                self._host,
-            )
-            if new_host is not None:
-                self._reconnect(new_host)
+            elif new_host is not None:
                 try:
+                    self._reconnect(new_host)
                     result = self._conn.execute(cmd)
                     record_success(self._host)
                     return result
                 except TdxConnectionError as e:
                     last_exc = e
                     record_failure(self._host)
-            raise last_exc  # type: ignore[misc]
-        else:
-            record_success(self._host)
-            return result
+            raise last_exc
 
     # ------------------------------------------------------------------ #
     # 市场信息
@@ -802,7 +835,10 @@ class TdxClient:
         raw_records = parse_financial_dat(dat_data, report_date)
         records: list[FinancialRecord] = []
         for code, market_byte, rdate, fields in raw_records:
-            market = Market.SH if market_byte == 1 else Market.SZ
+            _mkt_no = (
+                market_byte[0] if isinstance(market_byte, (bytes, bytearray)) else int(market_byte)
+            )
+            market = Market.SH if _mkt_no == 1 else Market.SZ
             records.append(
                 FinancialRecord(code=code, market=market, report_date=rdate, fields=fields)
             )
@@ -827,7 +863,7 @@ class TdxClient:
         if not quotes and self._auto_reconnect:
             quotes = self._find_host_returning_quotes(_cmd)
         if not quotes:
-            raise RuntimeError("无法获取市场统计数据")
+            raise TdxError("无法获取市场统计数据（全部候选服务器均返回空统计指数）")
         q = quotes[0]
         # 计数字段协议返回值为真实家数 / 10，这里 ×10 还原（见 docstring）
         up = round(q.price * 10)
@@ -863,9 +899,14 @@ class TdxClient:
 
         Note:
             命令返回值必须可被 ``bool()`` 判空（list / DataFrame 均满足）。
+
+        锁纪律：必须在 ``_execute_lock`` 之外调用（通常由 ``get_*`` 在
+        ``_execute`` 返回后调用）。内部 ``_try`` 嵌套 ``_reconnect`` +
+        ``_execute``（两者自加锁，依赖 ``RLock`` 可重入）；若在锁内调用，
+        全量 ``ping_all`` 会长时间阻塞其他线程。
         """
         bad_host = self._host
-        ranked = ping_all(get_known_hosts(), self._port, 5.0)
+        ranked = ping_all(get_known_hosts(), self._port, self._timeout)
 
         def _try(host: str) -> bool:
             # 切换到候选 host 并实测；非空即视为该 host 可用
@@ -1030,7 +1071,7 @@ class TdxClient:
         整 ``_fetch_fund_flow_records``，返回首台非空结果。全失败返回空列表。
         """
         bad_host = self._host
-        ranked = ping_all(get_known_hosts(), self._port, 5.0)
+        ranked = ping_all(get_known_hosts(), self._port, self._timeout)
 
         def _try(host: str) -> bool:
             self._reconnect(host)
@@ -1180,6 +1221,11 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
         故障转移（重新测速切到另一台服务器）。整个流程在 ``_execute_lock`` 内
         串行，避免并发请求触发多次故障转移抖动。``auto_reconnect=False`` 时
         两阶段都不触发。
+
+        锁纪律：``asyncio.Lock`` 不可重入——``_areconnect`` 内部不加锁，只能
+        在已持锁的 ``_execute`` 内调用；``_find_host_returning_data`` 必须在
+        锁外调用。跨主机测速经 ``asyncio.to_thread`` 不阻塞事件循环，持锁仅
+        起串行化作用。
         """
         async with self._execute_lock:
             try:
@@ -1192,8 +1238,8 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
                 last_exc: TdxConnectionError | None = None
                 for delay in _RETRY_DELAYS:
                     await asyncio.sleep(delay)
-                    await self._areconnect()
                     try:
+                        await self._areconnect()
                         result = await self._conn.execute(cmd)
                         record_success(self._host)
                         return result
@@ -1206,19 +1252,21 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
                     ping_all,
                     save_best_host,
                     self._port,
-                    5.0,
+                    self._timeout,
                     self._host,
                 )
                 if new_host is not None:
-                    await self._areconnect(new_host)
                     try:
+                        await self._areconnect(new_host)
                         result = await self._conn.execute(cmd)
                         record_success(self._host)
                         return result
                     except TdxConnectionError as e:
                         last_exc = e
                         record_failure(self._host)
-                raise last_exc  # type: ignore[misc]
+                if last_exc is not None:
+                    raise last_exc
+                raise TdxConnectionError(f"连接 {self._host} 失败且无可用备用主机")
             else:
                 record_success(self._host)
                 return result
@@ -1527,7 +1575,10 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
         raw_records = parse_financial_dat(dat_data, report_date)
         records: list[FinancialRecord] = []
         for code, market_byte, rdate, fields in raw_records:
-            market = Market.SH if market_byte == 1 else Market.SZ
+            _mkt_no = (
+                market_byte[0] if isinstance(market_byte, (bytes, bytearray)) else int(market_byte)
+            )
+            market = Market.SH if _mkt_no == 1 else Market.SZ
             records.append(
                 FinancialRecord(code=code, market=market, report_date=rdate, fields=fields)
             )

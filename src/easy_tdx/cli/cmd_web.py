@@ -9,7 +9,9 @@ import click
 
 
 @click.command("serve")
-@click.option("--host", default="0.0.0.0", help="监听地址")
+@click.option(
+    "--host", default="127.0.0.1", help="监听地址（默认仅回环；局域网访问显式传 --host 0.0.0.0）"
+)
 @click.option("--port", default=8000, type=int, help="监听端口")
 @click.option("--tdx-host", default=None, help="TDX 服务器地址（默认自动选择最优）")
 @click.option("--tdx-port", default=None, type=int, help="TDX 服务器端口")
@@ -46,6 +48,12 @@ def serve(
 
     # 启动后延迟打开浏览器：uvicorn 需要约 1-2 秒绑定端口，过早打开会
     # 命中 connection refused。用后台 Timer 而非阻塞主线程。
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        click.echo(
+            f"安全提醒：serve 正监听非回环地址 {host}，Web API 无内置鉴权，"
+            "请勿暴露到公网/不可信内网；仅本机使用请改 --host 127.0.0.1。",
+            err=True,
+        )
     if open_browser and not reload and not no_ui:
         # 0.0.0.0 / 127.0.0.1 在浏览器里用 localhost 打开（更友好）。
         display_host = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host

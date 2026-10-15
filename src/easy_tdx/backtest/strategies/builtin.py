@@ -516,7 +516,7 @@ class BiasReversalStrategy(ParametrizedStrategy):
 
     def next(self) -> None:
         i = self._bar_index
-        bias_pct = self.bias[i] * 100
+        bias_pct = self.bias[i]
         threshold = self.p["threshold"]
         if bias_pct <= -threshold and self.position["size"] == 0:
             self.buy()
@@ -524,8 +524,8 @@ class BiasReversalStrategy(ParametrizedStrategy):
             self.sell()
 
     def entry_exit_masks(self) -> tuple[Any, Any]:
-        """负乖离超跌进 / 正乖离超涨出（与 next() 同一比较，阈值放大 100 倍口径）。"""
-        bias_pct = np.asarray(self.bias, dtype=np.float64) * 100
+        """负乖离超跌进 / 正乖离超涨出（与 next() 同一比较，BIAS 本体已为百分比口径）。"""
+        bias_pct = np.asarray(self.bias, dtype=np.float64)
         threshold = self.p["threshold"]
         return bias_pct <= -threshold, bias_pct >= threshold
 

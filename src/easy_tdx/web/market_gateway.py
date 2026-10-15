@@ -255,6 +255,9 @@ class MarketGateway:
                 frames.append(await self._ex_quotes_with_fallback(token, tdx_codes))
             if not frames:
                 return pd.DataFrame()
+            frames = [f for f in frames if f is not None and len(f)]
+            if not frames:
+                return pd.DataFrame()
             return frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
 
         if self.tdx_client is None:
@@ -267,7 +270,7 @@ class MarketGateway:
         )
 
     async def _ex_quotes_with_fallback(self, token: str, codes: list[str]) -> pd.DataFrame:
-        """扩展市场报价：7727 栈优先，失败/未连接时回落免费快照源。
+        """扩展市场报价：7727 栈优先，失败/未连接/全空价格时回落免费快照源.
 
         免费快照（us_hk_snapshot，新浪主 + 东财 push2 备）是秒级快照，
         列契约与扩展栈不完全一致（新浪行无量/额与五档深度），但核心
@@ -280,8 +283,10 @@ class MarketGateway:
                 client = self.mac_ex_client
                 stocks = [(_resolve_ex_or_board(token, c), c) for c in codes]
                 df = await client.goods_quotes(stocks)
-                if df is not None and not df.empty:
+                if self._tdx_usable(df):
                     return _with_source(df, "tdx")
+                if df is not None and not df.empty:
+                    logger.info("扩展栈 %s 返回全空价格（盘前/收盘后常见），回落免费快照源", token)
             except Exception as exc:  # noqa: BLE001 — 扩展栈失败走免费兜底
                 logger.warning("扩展栈报价失败 %s，回落免费快照源: %s", token, exc)
         try:
@@ -300,6 +305,16 @@ class MarketGateway:
             f"{market_label(token)}报价不可用：扩展市场协议栈（端口 7727）"
             "未连接或取数失败，且免费快照源兜底失败。"
         )
+
+    @staticmethod
+    def _tdx_usable(df: Any) -> bool:
+        """TDX 行可用性：非空且至少一只有价格。
+
+        盘前/收盘后扩展栈常返回全空价格行（仅 pre_close），此时视同失败、
+        走免费快照（其实测价即昨日收盘，ext 列另给实时扩展价）。
+        部分空（个别标的缺价）不断整批——保留其余 TDX 行的深度数据。
+        """
+        return df is not None and not df.empty and not _all_prices_null(df)
 
     async def transactions(self, market: str, code: str, start: int = 0, count: int = 800) -> Any:
         """取当日逐笔成交，按市场自动分流。"""
@@ -520,6 +535,22 @@ def _merge_index_bars(ak_df: Any, qq_df: Any) -> Any:
         return merged
     except Exception:  # noqa: BLE001 — 合并失败返回 ak 全量
         return ak_df
+
+
+def _all_prices_null(df: Any) -> bool:
+    """报价帧是否全空价格（无 price 列也算）。
+
+    扩展栈在盘前/收盘后常返回仅 pre_close 的行；pandas 里 None 进
+    float 列变 NaN，这里两种都判空。
+    """
+    try:
+        import pandas as pd
+
+        if not isinstance(df, pd.DataFrame) or "price" not in df.columns:
+            return True
+        return bool(df["price"].isna().all())
+    except Exception:  # noqa: BLE001 — 判空失败按"不可用"处理，走兜底
+        return True
 
 
 def _with_source(df: Any, source: str) -> Any:

@@ -38,7 +38,7 @@ def ping_ex_host(
         if hdr.zipsize > 0:
             _recv_exact_sock(sock, hdr.zipsize)
         return time.monotonic() - t0
-    except OSError:
+    except (OSError, TdxConnectionError):
         return None
     finally:
         try:
@@ -57,12 +57,17 @@ def ping_ex_all(
 
     if hosts is None:
         hosts = get_ex_hosts()
+    if not hosts:
+        return []
     results: list[tuple[str, float]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(hosts)) as pool:
         futures = {pool.submit(ping_ex_host, h, port, timeout): h for h in hosts}
         for fut in concurrent.futures.as_completed(futures):
             host = futures[fut]
-            latency = fut.result()
+            try:
+                latency = fut.result()
+            except Exception:
+                continue
             if latency is not None:
                 results.append((host, latency))
     results.sort(key=lambda t: t[1])
@@ -145,7 +150,7 @@ class ExTdxConnection:
                 header_buf = self._recv_exact(HEADER_SIZE)
                 header = parse_header(header_buf)
                 raw_body = self._recv_exact(header.zipsize)
-            except OSError as e:
+            except (OSError, TdxConnectionError) as e:
                 # 同 transport/sync.py：通信失败后必须作废连接，否则残留字节会被
                 # 下一条请求当成帧头解析，产出日期/价格错误的"合法"数据。
                 self._discard_socket_unlocked()

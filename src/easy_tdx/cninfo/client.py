@@ -16,16 +16,20 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import Any
 from urllib import parse
 from urllib import request as urlrequest
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from .models import Announcement, CninfoError, build_detail_url, build_pdf_url
 
 logger = logging.getLogger(__name__)
+
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 # 巨潮公告检索请求固定头（Referer/Origin 必填，否则被反爬拦截）
 _UA = (
@@ -35,15 +39,15 @@ _UA = (
 _STOCK_MAP_URL = "http://www.cninfo.com.cn/new/data/szse_stock.json"
 _QUERY_URL = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
 
-# 模块级 orgId 映射缓存：首次拉取后全程复用（Cpython dict 读写原子，
-# 并发下最坏多发一次请求，可接受）
+# 模块级 orgId 映射缓存：首次拉取后全程复用（写时持锁，避免并发丢键）
 _ORGID_MAP: dict[str, str] = {}
+_ORGID_LOCK = threading.Lock()
 
 
 def _ts_to_date(ts: Any) -> str:
-    """巨潮 ``announcementTime`` 返回 Unix 毫秒整数，转 ``YYYY-MM-DD``。"""
+    """巨潮 ``announcementTime`` 返回 Unix 毫秒整数，转 ``YYYY-MM-DD``（上海时区）。"""
     if isinstance(ts, int | float):
-        return datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+        return datetime.fromtimestamp(ts / 1000, tz=_SHANGHAI_TZ).strftime("%Y-%m-%d")
     return str(ts)[:10] if ts else ""
 
 
@@ -105,9 +109,10 @@ class CninfoClient:
         global _ORGID_MAP
         if not _ORGID_MAP:
             fetched = self._fetch_stock_map()
-            # 只在确实取到数据时写入缓存；空结果保留以便下次重试
+            # 只在确实取到数据时写入缓存；空结果不缓存以便下次重试
             if fetched:
-                _ORGID_MAP.update(fetched)
+                with _ORGID_LOCK:
+                    _ORGID_MAP.update(fetched)
         org = _ORGID_MAP.get(code)
         if org:
             return org
@@ -200,9 +205,11 @@ class CninfoClient:
         dest_dir = os.fspath(dest_dir)
         os.makedirs(dest_dir, exist_ok=True)
         if filename is None:
-            # announcement_time 为毫秒时间戳，转 YYYYMMDD 更可读
+            # announcement_time 为毫秒时间戳，转 YYYYMMDD 更可读（上海时区）
             try:
-                date_str = datetime.fromtimestamp(anno_time / 1000).strftime("%Y%m%d")
+                date_str = datetime.fromtimestamp(anno_time / 1000, tz=_SHANGHAI_TZ).strftime(
+                    "%Y%m%d"
+                )
             except (OSError, ValueError, OverflowError):
                 date_str = "unknown"
             filename = f"{date_str}_{anno_id}.PDF"

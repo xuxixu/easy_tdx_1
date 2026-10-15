@@ -141,12 +141,52 @@ def _validate_url(url: str) -> str:
     会被 urllib 的 FileHandler 直接打开并读取本地文件（FileHandler 不检查
     HTTP method）——构成"盲 SSRF + 本地文件存在性 oracle"。
     """
-    parsed = urllib.parse.urlparse((url or "").strip())
+    import ipaddress
+
+    raw = (url or "").strip()
+    parsed = urllib.parse.urlparse(raw)
     if parsed.scheme.lower() not in ("http", "https"):
         raise ValueError(f"推送地址只支持 http/https：{url!r}")
     if not parsed.netloc:
         raise ValueError(f"推送地址缺少主机名：{url!r}")
+    host = (parsed.hostname or "").lower()
+    # 云元数据/回环硬拦截（内网业务网关仍放行，但元数据/回环绝不放行；
+    # 私有网段 10/172.16/192.168 刻意不禁：用户自配内网推送网关仍需可用，
+    # 见 review 备注。此处只拦确定危险的本地/元数据/未指定地址。）
+    if host in (
+        "169.254.169.254",
+        "metadata.google.internal",
+        "metadata.google",
+        "localhost",
+    ):
+        raise ValueError(f"推送地址禁止访问云元数据：{url!r}")
+    try:
+        ip = ipaddress.ip_address(host)
+        if (
+            ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            # 169.254/16（含元数据）/127/8/::1/0.0.0.0/组播/保留段一律拒绝；
+            # 私有网段刻意放行（内网网关场景）
+            raise ValueError(f"推送地址禁止访问本地/链路地址：{url!r}")
+    except ValueError as e:
+        # ip_address 抛错 = 非 IP 主机名（域名），仅拦截元数据域名后放行
+        if "禁止访问" in str(e):
+            raise
     return url
+
+
+def _validate_serverchan_key(key: str) -> str:
+    """Server酱 SendKey 白名单：字母数字/_/-，4-128 字符，防路径注入（../ 破出 .send）。"""
+    import re
+
+    k = (key or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{4,128}", k):
+        raise ValueError("Server酱 SendKey 非法（须为 4-128 位字母/数字/_/-）")
+    return k
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -199,7 +239,7 @@ def send_one(channel: PushChannel, title: str, content: str) -> dict[str, Any]:
             if not channel.key:
                 raise ValueError("Server酱缺少 SendKey")
             _post_form(
-                f"https://sctapi.ftqq.com/{channel.key}.send",
+                f"https://sctapi.ftqq.com/{_validate_serverchan_key(channel.key)}.send",
                 {"title": title, "desp": content},
             )
         elif provider == "wxpush":

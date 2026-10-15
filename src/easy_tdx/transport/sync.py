@@ -228,6 +228,11 @@ class TdxConnection:
 
     def start_heartbeat(self, interval: float = _DEFAULT_HEARTBEAT_INTERVAL) -> None:
         """启动心跳守护线程，定期发送 setup 包保活。"""
+        # 避免重复 start 泄漏旧线程：先停旧心跳再起新线程
+        try:
+            self.stop_heartbeat()
+        except Exception:
+            pass
         self._heartbeat_interval = interval
         self._last_active = time.monotonic()
         self._stop_event = threading.Event()
@@ -242,19 +247,32 @@ class TdxConnection:
         """停止心跳线程。"""
         stop_event = self._stop_event
         thread = self._heartbeat_thread
-        if stop_event is not None:
-            stop_event.set()
-        if thread is not None:
-            thread.join(timeout=2.0)
+        # 先置空再 set/join，避免 _heartbeat_loop 的 assert/None.wait 竞态
         self._stop_event = None
         self._heartbeat_thread = None
         self._heartbeat_interval = 0
+        if stop_event is not None:
+            try:
+                stop_event.set()
+            except Exception:
+                pass
+        if thread is not None and thread.is_alive():
+            # 心跳 IO 最长 ~timeout 秒；join 上限取 max(2s, timeout)，避免 15s 超时卡关闭
+            try:
+                thread.join(timeout=max(2.0, float(getattr(self, "timeout", 2.0) or 2.0)))
+            except Exception:
+                pass
 
     def _heartbeat_loop(self) -> None:
         """心跳循环：在后台线程中运行。"""
-        assert self._stop_event is not None
+        stop_event = self._stop_event
+        if stop_event is None:
+            return
         interval = self._heartbeat_interval
-        while not self._stop_event.wait(timeout=interval):
+        while not stop_event.wait(timeout=interval):
+            # stop 后置空：本轮即退出，避免 None.wait 杀线程
+            if self._stop_event is None or self._stop_event is not stop_event:
+                return
             if time.monotonic() - self._last_active <= interval:
                 continue
             with self._lock:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from types import TracebackType
 from typing import Any
 
@@ -310,9 +311,10 @@ class UnifiedTdxClient:
         self,
         market: int,
         code: str,
-        query_date: object = None,
+        query_date: int | date | None = None,
     ) -> pd.DataFrame:
-        return self._ensure_mac_ex().goods_tick_chart(market, code, query_date)  # type: ignore[arg-type]
+
+        return self._ensure_mac_ex().goods_tick_chart(market, code, query_date)
 
     def goods_chart_sampling(self, market: int, code: str) -> pd.DataFrame:
         return self._ensure_mac_ex().goods_chart_sampling(market, code)
@@ -321,11 +323,12 @@ class UnifiedTdxClient:
         self,
         market: int,
         code: str,
-        query_date: object = None,
+        query_date: int | date | None = None,
         start: int = 0,
         count: int = 2000,
     ) -> pd.DataFrame:
-        return self._ensure_mac_ex().goods_transaction(market, code, query_date, start, count)  # type: ignore[arg-type]
+
+        return self._ensure_mac_ex().goods_transaction(market, code, query_date, start, count)
 
 
 class AsyncUnifiedTdxClient:
@@ -352,12 +355,14 @@ class AsyncUnifiedTdxClient:
         await self._ensure_mac()
 
     async def close(self) -> None:
-        if self._mac is not None:
-            await self._mac.close()
-            self._mac = None
-        if self._mac_ex is not None:
-            await self._mac_ex.close()
-            self._mac_ex = None
+        for attr in ("_mac", "_mac_ex"):
+            cli = getattr(self, attr)
+            if cli is not None:
+                try:
+                    await cli.close()
+                except Exception:  # noqa: BLE001 — 关闭失败不应阻断另一个客户端的释放
+                    logger.warning("%s close failed", attr, exc_info=True)
+                setattr(self, attr, None)
 
     async def disconnect(self) -> None:
         await self.close()
@@ -634,10 +639,11 @@ class AsyncUnifiedTdxClient:
         self,
         market: int,
         code: str,
-        query_date: object = None,
+        query_date: int | date | None = None,
     ) -> pd.DataFrame:
+
         ex = await self._ensure_mac_ex()
-        return await ex.goods_tick_chart(market, code, query_date)  # type: ignore[arg-type]
+        return await ex.goods_tick_chart(market, code, query_date)
 
     async def goods_chart_sampling(self, market: int, code: str) -> pd.DataFrame:
         ex = await self._ensure_mac_ex()
@@ -647,9 +653,10 @@ class AsyncUnifiedTdxClient:
         self,
         market: int,
         code: str,
-        query_date: object = None,
+        query_date: int | date | None = None,
         start: int = 0,
         count: int = 2000,
     ) -> pd.DataFrame:
+
         ex = await self._ensure_mac_ex()
-        return await ex.goods_transaction(market, code, query_date, start, count)  # type: ignore[arg-type]
+        return await ex.goods_transaction(market, code, query_date, start, count)

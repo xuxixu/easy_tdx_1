@@ -33,10 +33,14 @@ class AutoKlineClient:
         self._fallback = fallback
 
     def get_stock_kline(self, market: int, code: str, **kwargs: Any) -> pd.DataFrame:
+        import logging
+
         try:
             df = self._primary.get_stock_kline(market, code, **kwargs)
             if df is not None and len(df) > 0:
                 return df
-        except Exception:  # noqa: BLE001 — 主源失败是兜底触发的正常路径
-            pass
+        except Exception as exc:  # noqa: BLE001 — 主源失败是兜底触发的正常路径
+            logging.getLogger(__name__).warning(
+                "主源 K 线失败，转备选源（%s %s）: %s", market, code, exc
+            )
         return self._fallback.get_stock_kline(market, code, **kwargs)

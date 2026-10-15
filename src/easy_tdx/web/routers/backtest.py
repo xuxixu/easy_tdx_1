@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from easy_tdx.web.backtest_schemas import (
     BacktestRequest,
@@ -115,7 +115,7 @@ async def run_backtest_async(
 
 
 @router.get("/backtest/tasks", response_model=TaskListResponse)
-async def list_tasks(limit: int = 20) -> TaskListResponse:
+async def list_tasks(limit: int = Query(20, ge=1, le=100)) -> TaskListResponse:
     """列出最近 N 个任务摘要（按最近使用倒序，不含完整 result）。
 
     供对比页选择要对比的 task；选中后再逐个调 /tasks/{task_id} 拉详情。

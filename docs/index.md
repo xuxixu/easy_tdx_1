@@ -11,7 +11,7 @@
 - [cli.md](./cli.md) — 全部命令速查表 + 按域导航
 - [cli-market.md](./cli-market.md) — 行情数据：报价 / K线 / 分时 / 板块 / 资金 / 中金所 / 扩展市场
 - [cli-finance.md](./cli-finance.md) — 财务与公告：巨潮公告检索 / 财报三表 / 通达信 F10
-- [cli-indicators.md](./cli-indicators.md) — 技术指标与公式：34 指标 / 通达信公式 / 捉妖 / 乖离率
+- [cli-indicators.md](./cli-indicators.md) — 技术指标与公式：50 指标 / 通达信公式 / 捉妖 / 乖离率
 - [cli-backtest.md](./cli-backtest.md) — 回测与寻优：backtest / optimize / portfolio / run-all（含参数表）
 - [cli-screen.md](./cli-screen.md) — 选股扫描：全市场信号扫描 / 强势股排名
 - [chanlun.md](./chanlun.md) — 缠论分析（CLI + Python，含完整输出示例）

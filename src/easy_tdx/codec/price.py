@@ -25,8 +25,13 @@ def get_price(data: bytes | bytearray, pos: int) -> tuple[int, int]:
         negative = bool(b & 0x40)
 
         if b & 0x80:
+            # 畸形 0x80 链上限：正常价格差分 ≤5 字节，超 10 字节即判脏包防 CPU DoS
+            steps = 0
             while True:
                 pos += 1
+                steps += 1
+                if steps > 10:
+                    raise TdxDecodeError(f"price varint 过长（>10字节）: offset={start}")
                 b = data[pos]
                 value |= (b & 0x7F) << bit_shift
                 bit_shift += 7

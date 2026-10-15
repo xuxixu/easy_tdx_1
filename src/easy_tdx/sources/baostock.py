@@ -25,6 +25,7 @@ import logging
 import os
 import threading
 from datetime import datetime, timedelta
+from typing import Any
 
 import pandas as pd
 
@@ -90,13 +91,29 @@ def _query_rows(bs: object, **kwargs: str) -> list[list[str]]:
     return rows
 
 
+def _adjust_name(adjust: Any) -> str:
+    """归一化复权口径为 ``"NONE"/"QFQ"/"HFQ"`` 字符串。
+
+    接受 ``str`` 或 ``Adjust`` 枚举（``WarehouseSyncer`` 内部持枚举，
+    直接透传到本模块时此前 ``adjust.upper()`` 抛 ``AttributeError``，
+    导致 ``warehouse sync --source baostock`` 逐标失败）。
+    """
+    try:
+        name = getattr(adjust, "name", None)
+        if isinstance(name, str) and name:
+            return name.upper()
+    except Exception:
+        pass
+    return str(adjust).upper() if adjust else "QFQ"
+
+
 def fetch_bars(
     market: str,
     code: str,
     category: str,
     start: int,
     count: int,
-    adjust: str,
+    adjust: Any,
     is_index: bool = False,
 ) -> pd.DataFrame | None:
     """拉取日线及以上 K 线，输出对齐 /bars 契约的 DataFrame。
@@ -127,7 +144,7 @@ def fetch_bars(
         return None
     prefix = _MARKET_PREFIX.get(market.upper())
     frequency = _FREQ_BY_CATEGORY.get(category.upper())
-    adjustflag = _ADJUST_FLAG.get(adjust.upper())
+    adjustflag = _ADJUST_FLAG.get(_adjust_name(adjust))
     if prefix is None or frequency is None or adjustflag is None:
         return None
 
@@ -220,7 +237,7 @@ class BaostockClient:
         period: str = "DAILY",
         start: int = 0,
         count: int = 8000,
-        adjust: str = "QFQ",
+        adjust: Any = "QFQ",
     ) -> pd.DataFrame:
         market_str = _TDX_TO_MARKET_STR.get(int(market))
         category = _PERIOD_TO_CATEGORY.get(str(period).upper())

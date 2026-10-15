@@ -182,17 +182,17 @@
       "win_rate": 0.35714285714285715
     },
     "bias_reversal": {
-      "cvar_95": 0.031800618199536355,
-      "max_consecutive_losses": 4,
-      "max_consecutive_wins": 6,
-      "max_drawdown": 0.28538313496863427,
-      "sharpe": -0.8098413586757496,
-      "sqn": -0.6927111806707453,
-      "total_return": -0.22014868093324402,
-      "total_trades": 45,
-      "ulcer_index": 0.1949515199887598,
-      "var_95": 0.02439437484336824,
-      "win_rate": 0.5111111111111111
+      "cvar_95": 0.026686626095532066,
+      "max_consecutive_losses": 1,
+      "max_consecutive_wins": 1,
+      "max_drawdown": 0.1689727818403369,
+      "sharpe": 0.03906017100647499,
+      "sqn": 0.1796137197198548,
+      "total_return": 0.034353197855875095,
+      "total_trades": 3,
+      "ulcer_index": 0.06457765641973512,
+      "var_95": 0.019041632194208874,
+      "win_rate": 0.3333333333333333
     },
     "bias_signal_cross": {
       "cvar_95": 0.02748879702227868,

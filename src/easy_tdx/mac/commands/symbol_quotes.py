@@ -13,7 +13,7 @@ from ...codec.bitmap import (
     FIELD_POSTPROCESS,
     Fields,
     build_bitmap,
-    get_active_fields,
+    resolve_response_fields,
 )
 from ...codec.mac_frame import build_mac_request
 from ...commands.base import BaseCommand
@@ -58,7 +58,15 @@ class SymbolQuotesCmd(BaseCommand[list[MacQuoteField]]):
         (total_stocks, row_count) = unpack_from("<IH", body, pos, "symbol_quotes header")
         pos += 6
 
-        active = get_active_fields(field_bitmap[:16])
+        # 0x122B 请求为纯 20 字节位图：响应高字节即字段回显（HANDICAP 等高位
+        # 字段在此），必须按精确拟合选择全/低口径，否则行宽算错整表错位。
+        active = resolve_response_fields(
+            field_bitmap,
+            body_len=len(body),
+            header_len=pos,
+            row_count=row_count,
+            command="0x122B",
+        )
         field_count = len(active)
         row_len = 68 + 4 * field_count
 

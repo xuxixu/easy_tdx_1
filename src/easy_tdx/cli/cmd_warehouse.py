@@ -173,6 +173,12 @@ def warehouse_sync(
 @click.option("--start", default=None, help="开始日期 YYYY-MM-DD")
 @click.option("--end", default=None, help="结束日期 YYYY-MM-DD")
 @click.option("--include-provisional", is_flag=True, help="包含未收盘的临时 bar（默认忽略）")
+@click.option(
+    "--adjust",
+    default=None,
+    type=click.Choice(["NONE", "QFQ", "HFQ"]),
+    help="复权口径过滤（默认全部口径；同步时 --adjust 决定落盘口径）",
+)
 @click.option("--db", "db_path", default=None, help="仓库文件路径")
 def warehouse_query(
     market: str,
@@ -182,6 +188,7 @@ def warehouse_query(
     start: str | None,
     end: str | None,
     include_provisional: bool,
+    adjust: str | None,
     db_path: str | None,
 ) -> None:
     """查询仓库中的 K 线（JSON 输出，datetime/OHLCV/status）。"""
@@ -194,6 +201,7 @@ def warehouse_query(
             end=end,
             count=count,
             include_provisional=include_provisional,
+            adjust=adjust,
         )
     if len(df) == 0:
         click.echo("[]")
@@ -224,8 +232,14 @@ def warehouse_stats(period: str, db_path: str | None) -> None:
 
 @warehouse.command("check")
 @click.option("--symbols", default=None, help="只检查指定标的（逗号分隔），默认全仓库")
+@click.option(
+    "--adjust",
+    default=None,
+    type=click.Choice(["NONE", "QFQ", "HFQ"]),
+    help="限定复权口径（默认按口径分别检查）",
+)
 @click.option("--db", "db_path", default=None, help="仓库文件路径")
-def warehouse_check(symbols: str | None, db_path: str | None) -> None:
+def warehouse_check(symbols: str | None, adjust: str | None, db_path: str | None) -> None:
     """仓库健康自检：缺口 / 异常跳变 / 最新度 / 临时行。"""
     with _require_warehouse(db_path) as wh:
         market = code = None
@@ -237,7 +251,7 @@ def warehouse_check(symbols: str | None, db_path: str | None) -> None:
                 click.echo("错误: --symbols 自检模式一次只支持一个标的", err=True)
                 raise SystemExit(1)
             market, code = _parse_symbol(sym_list[0])
-        report = wh.health_check(market=market, code=code)
+        report = wh.health_check(market=market, code=code, adjust=adjust)
     click.echo(json.dumps(report, ensure_ascii=False, default=str))
     if report["issues"]:
         sys.exit(0)  # 有问题不报错退出——自检结果本身是正常输出

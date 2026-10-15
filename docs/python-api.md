@@ -88,7 +88,7 @@ with MacClient.from_best_host() as c:
         print(info["name"], info["description"], info["outputs"])
 ```
 
-支持 34 个技术指标：
+支持 50 个技术指标：
 
 | 指标 | 输入 | 输出列 |
 |------|------|--------|
