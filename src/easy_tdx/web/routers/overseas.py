@@ -68,7 +68,9 @@ def _require_ex_market(market: str) -> str:
 @router.get("/us/symbols")
 async def overseas_symbols(
     market: str = Query(MARKET_US, description=_MARKET_DESC),
-    keyword: str | None = Query(None, description="按代码或名称模糊搜索；留空返回全部"),
+    keyword: str | None = Query(
+        None, description="按代码或名称模糊搜索；留空返回空列表（空关键词无意义）"
+    ),
     limit: int = Query(50, ge=1, le=500, description="最多返回条数"),
     refresh: bool = Query(False, description="跳过缓存强制回源刷新"),
 ) -> dict[str, Any]:

@@ -593,6 +593,10 @@ export interface MinutePoint {
   datetime: string
   price: number
   vol: number
+  /** 官方均价（VWAP）。仅美股/港股个股的 tdx 分时有；A 股与指数/快照路径无此列 */
+  avg_price?: number
+  /** 昨收。含义同上，只在外盘 tdx 分时里带；用于 y 轴对称基准 */
+  pre_close?: number
 }
 
 // ── 行情终端：自选（GET/POST/DELETE /api/v1/watchlist） ──────────────────────

@@ -730,12 +730,7 @@ export async function fetchMinute(market: string, code: string): Promise<MinuteP
   const params = new URLSearchParams({ market, code })
   const resp = await fetch(`${BASE}/minute?${params}`)
   if (!resp.ok) await throwError(resp)
-  const body = (await resp.json()) as DataFrameResponse
-  return body.data.map((row) => ({
-    datetime: String(row.datetime ?? ''),
-    price: Number(row.price ?? 0),
-    vol: Number(row.vol ?? 0),
-  }))
+  return toMinutePoints((await resp.json()) as DataFrameResponse)
 }
 
 /** 历史某日分时（date: YYYYMMDD 整数，如 20260829）。 */
@@ -747,12 +742,43 @@ export async function fetchHistoryMinute(
   const params = new URLSearchParams({ market, code, date: String(date) })
   const resp = await fetch(`${BASE}/minute/history?${params}`)
   if (!resp.ok) await throwError(resp)
-  const body = (await resp.json()) as DataFrameResponse
+  return toMinutePoints((await resp.json()) as DataFrameResponse)
+}
+
+/**
+ * 可选数值列：缺列/空串/NaN 一律返回 undefined。
+ *
+ * 不补 0——均价、昨收补成 0 会被下游当成"真实值 0"（均价线贴地、y 轴基准塌到 0），
+ * 比缺值更误导；缺值让调用方走自己的兜底（本地算均价 / 取首价当基准）。
+ */
+function optNum(v: unknown): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+/** /minute 与 /minute/history 的 data[] 同形，统一归一（少一处映射就少一处漂移）。 */
+function toMinutePoints(body: DataFrameResponse): MinutePoint[] {
   return body.data.map((row) => ({
     datetime: String(row.datetime ?? ''),
     price: Number(row.price ?? 0),
     vol: Number(row.vol ?? 0),
+    avg_price: optNum(row.avg_price),
+    pre_close: optNum(row.pre_close),
   }))
+}
+
+/**
+ * 分时序列自带的昨收（取屏幕上第一个有效值）。
+ *
+ * 美股/港股 /minute 的行内已含 pre_close，且与分时点**同量级**——用它当 y 轴对称
+ * 基准，就不必再为这一件事多打一次 /quotes（尤其是 ETF 代理渲染指数分时的场景）。
+ */
+export function firstPreClose(points: MinutePoint[]): number | null {
+  for (const p of points) {
+    if (p.pre_close !== undefined && p.pre_close > 0) return p.pre_close
+  }
+  return null
 }
 
 /** 指数日 K（/bars/index；指数代码在个股接口可能返回空，用它兜底）。 */

@@ -12,7 +12,7 @@
 // 快照给收盘技术指标（均线/RSI），这里给当日分时形态。休市时显示最近一根分时。
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { fetchMinute, fetchQuotes, formatError } from '../../api'
+import { fetchMinute, fetchQuotes, firstPreClose, formatError } from '../../api'
 import { dirCls, fmtNum, fmtPct } from '../../data/usRadar'
 import { INDEX_ETF_PROXY } from '../../market'
 import type { MinutePoint, SecurityQuote } from '../../types'
@@ -90,7 +90,8 @@ async function load() {
         ])
         if (!alive) return
         const q = quotes[0]
-        card.preClose = q?.pre_close ?? null
+        // 报价拿不到时回落到分时行自带的昨收（同量级），免得单日图基准丢失塌到首价
+        card.preClose = q?.pre_close ?? firstPreClose(pts)
         card.price = q?.price ?? null
         card.pct = pctOf(q)
         card.points = pts

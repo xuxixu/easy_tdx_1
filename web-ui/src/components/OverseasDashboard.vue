@@ -15,6 +15,7 @@ import {
   fetchMinute,
   fetchOverseasRank,
   fetchQuotes,
+  firstPreClose,
   formatError,
   searchOverseasSymbols,
   type OverseasRank,
@@ -297,15 +298,21 @@ async function loadSessionMinute() {
     if (barsGuard.stale(my)) return
     // 代理分时的昨收基准必须取代理 ETF 的 pre_close（与分时点同量级），
     // 不能拿指数 quote 的昨收——否则 y 轴对称的基准错位，见 sessionPreClose 注释。
+    // 分时行自带 pre_close（外盘 tdx 分时）时直接用，省掉一次 /quotes；无该列再回落到报价。
+    const fromMinute = firstPreClose(pts)
     if (proxy) {
-      try {
-        const q = await fetchQuotes([{ market: target.market, code: target.code }])
-        sessionPreClose.value = q[0]?.pre_close ?? null
-      } catch {
-        sessionPreClose.value = null
+      if (fromMinute !== null) {
+        sessionPreClose.value = fromMinute
+      } else {
+        try {
+          const q = await fetchQuotes([{ market: target.market, code: target.code }])
+          sessionPreClose.value = q[0]?.pre_close ?? null
+        } catch {
+          sessionPreClose.value = null
+        }
       }
     } else {
-      sessionPreClose.value = focalQuote.value?.pre_close ?? null
+      sessionPreClose.value = fromMinute ?? focalQuote.value?.pre_close ?? null
     }
     if (pts.length === 0) throw new Error('无分时数据')
     const dst = isUsDst()

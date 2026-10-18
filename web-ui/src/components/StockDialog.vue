@@ -15,6 +15,7 @@ import {
   fetchMinute,
   fetchQuotes,
   fetchWatchlist,
+  firstPreClose,
   formatError,
   removeWatchItem,
 } from '../api'
@@ -167,12 +168,17 @@ async function loadMinute(my?: number) {
       minuteProxy.value = proxy?.label ?? ''
       // 代理分时的昨收基准要取代理 ETF 的 pre_close（与分时点同量级），否则
       // y 轴对称基准用指数昨收会把曲线压到图底（见 preClose 注释）。
+      // 优先读分时行自带的 pre_close——它与点同源同量级，还省一次 /quotes；
+      // 分时无该列（快照/指数路径）时才回落去查报价。
       if (proxy) {
-        try {
-          const q = await fetchQuotes([{ market: target.market, code: target.code }])
-          proxyPreClose.value = q[0]?.pre_close ?? null
-        } catch {
-          proxyPreClose.value = null
+        proxyPreClose.value = firstPreClose(pts)
+        if (proxyPreClose.value === null) {
+          try {
+            const q = await fetchQuotes([{ market: target.market, code: target.code }])
+            proxyPreClose.value = q[0]?.pre_close ?? null
+          } catch {
+            proxyPreClose.value = null
+          }
         }
       }
       minutePoints.value = pts

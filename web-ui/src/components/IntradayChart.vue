@@ -36,19 +36,26 @@ function render() {
 function buildOption(): echarts.EChartsCoreOption {
   const pts = props.points
   const multi = isMultiDay()
-  // 基准（量柱首色与 tooltip 涨跌幅）：单日用昨收，多日用全段首价
-  const base = !multi && props.preClose && props.preClose > 0 ? props.preClose : pts[0]?.price ?? 0
+  // 基准（量柱首色与 tooltip 涨跌幅）：单日用昨收，多日用全段首价。
+  // 昨收优先取 prop（调用方从 /quotes 拿的实时昨收），prop 缺失时回落到分时行
+  // 自带的 pre_close（美股/港股 /minute 已含）——这样调用方即便拿不到报价，
+  // 单日图也仍是围绕昨收对称，而不是退化成"以首价为基准"（那会让整条曲线偏色）。
+  const embeddedPre = pts.find((p) => p.pre_close !== undefined && p.pre_close > 0)?.pre_close
+  const baseRef = props.preClose && props.preClose > 0 ? props.preClose : embeddedPre
+  const base = !multi && baseRef ? baseRef : pts[0]?.price ?? 0
 
   const times = pts.map((p) => p.datetime.slice(11, 16))
   const prices = pts.map((p) => p.price)
 
-  // 均价线：累计成交额近似 = Σ(price×vol)，均价 = cumAmount / cumVol
+  // 均价线：行情源直接给了均价（美股/港股 /minute 的 avg_price = 官方 VWAP）就以它
+  // 为准；否则用累计成交额近似 Σ(price×vol)/Σvol 兜底（A 股与指数/快照路径无该列）。
   let cumAmt = 0
   let cumVol = 0
   const avgPrices = pts.map((p) => {
     cumAmt += p.price * Math.max(p.vol, 0)
     cumVol += Math.max(p.vol, 0)
-    return cumVol > 0 ? cumAmt / cumVol : p.price
+    const computed = cumVol > 0 ? cumAmt / cumVol : p.price
+    return p.avg_price !== undefined && p.avg_price > 0 ? p.avg_price : computed
   })
 
   // y 轴范围
