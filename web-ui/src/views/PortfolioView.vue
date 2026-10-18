@@ -3,7 +3,7 @@
 // （组合净值 + 完整绩效指标 + 各标的对比 + 附加分析 WF/一条龙 + 成交明细 + AI 解读）。
 // 附加分析与单标的回测页（BacktestView）同构：勾选后随「开始组合回测」并行运行。
 
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import AiInterpretModal from '../components/AiInterpretModal.vue'
@@ -24,6 +24,9 @@ import type { Category, ExecutionMode, PortfolioTrade } from '../types'
 import { useBacktestStore } from '../stores/backtest'
 
 const store = useBacktestStore()
+
+// 页面切走即取消在飞的组合回测 / WF / 一条龙评估轮询（最慢 600s）。
+onBeforeUnmount(() => store.cancelAll())
 const route = useRoute()
 
 const stocks = ref<string[]>(['SZ:000001', 'SH:600519'])
@@ -561,7 +564,7 @@ const portfolioTrades = computed<PortfolioTrade[]>(() => {
   width: auto;
   flex-shrink: 0;
   margin: 0;
-  accent-color: var(--accent, #4a9eff);
+  accent-color: var(--accent, var(--accent));
 }
 .wf-windows {
   display: inline-flex;
@@ -593,7 +596,7 @@ const portfolioTrades = computed<PortfolioTrade[]>(() => {
 .report-panel {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: var(--sp-4);
 }
 .placeholder {
   display: flex;
@@ -603,7 +606,7 @@ const portfolioTrades = computed<PortfolioTrade[]>(() => {
   color: var(--text-dim);
 }
 .error-banner {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   border: 1px solid var(--up);
   color: var(--up);
   padding: 10px 14px;

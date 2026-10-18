@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from easy_tdx._reconnect import _RETRY_DELAYS
+from easy_tdx._reconnect import _RETRY_DELAYS, AsyncHeartbeatMixin
 from easy_tdx.ex.client import AsyncExTdxClient, ExTdxClient
 from easy_tdx.ex.commands.get_markets import GetExMarketsCmd
 from easy_tdx.ex.mac_client import AsyncMacExClient, MacExClient
@@ -348,3 +348,47 @@ class TestExClientHealthTracking:
             assert get_score("aex-bad") < 1.0
         finally:
             reset_health()
+
+
+class TestHeartbeatCancellation:
+    """心跳任务必须响应取消。
+
+    回归：旧实现 ``except asyncio.CancelledError: break`` 让协程**正常返回**，
+    ``task.cancelled()`` 为 False —— ``_stop_heartbeat`` 拿到的是「已完成」而非
+    「已取消」，取消语义被静默吞掉；若取消发生在 ``_heartbeat_cmd()``（一次
+    最长 timeout 秒的网络调用）期间，请求也被一并吸收。与本项目
+    sentiment_sampler / quote_streamer 的 ``raise`` 口径相反。
+    """
+
+    class _Fake(AsyncHeartbeatMixin):
+        def __init__(self, interval: float = 0.01) -> None:
+            self._heartbeat_interval = interval
+            self._heartbeat_task: asyncio.Task[None] | None = None
+            self.calls = 0
+
+        async def _heartbeat_cmd(self) -> None:
+            self.calls += 1
+
+    async def test_cancel_propagates_to_task(self) -> None:
+        hb = self._Fake()
+        hb._start_heartbeat()
+        task = hb._heartbeat_task
+        assert task is not None
+
+        await asyncio.sleep(0.03)  # 让心跳跑几轮
+        assert hb.calls > 0
+
+        task.cancel()
+        # 关键断言：取消必须向上传播（旧实现此处会正常返回而不抛）
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert task.cancelled()
+
+    async def test_stop_heartbeat_is_clean(self) -> None:
+        hb = self._Fake()
+        hb._start_heartbeat()
+        await asyncio.sleep(0.02)
+
+        await hb._stop_heartbeat()  # 不应抛异常
+
+        assert hb._heartbeat_task is None

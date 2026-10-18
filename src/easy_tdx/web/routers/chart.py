@@ -47,7 +47,9 @@ class ChartItem(BaseModel):
 class KlineOptionRequest(BaseModel):
     """K 线图 option 构建请求。"""
 
-    bars: list[ChartBar] = Field(..., min_length=1, max_length=2000)
+    # 上限 10000：覆盖上证指数全部历史（1990-12 上市至今约 9600 根日线）。
+    # 原为 2000，fetchBars 全量传入时会被 422 拒掉且前端只显示 [object Object]。
+    bars: list[ChartBar] = Field(..., min_length=1, max_length=10000)
     items: list[ChartItem] = Field(default_factory=list, max_length=12)
     axis_color: str = Field(
         default="#2a2e3a", pattern=_HEX_COLOR, description="Y 轴分割线色（前端当前主题 --border）"

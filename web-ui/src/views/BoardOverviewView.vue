@@ -367,10 +367,10 @@ function openBoard(r: BoardOverviewRow) {
 .board-view {
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 /* flex 列内子项按内容占位，禁止被压缩（容器超高时靠 overflow-y 滚动） */
 .view-head,
@@ -401,7 +401,7 @@ function openBoard(r: BoardOverviewRow) {
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .toolbar {
   display: flex;
@@ -427,7 +427,7 @@ function openBoard(r: BoardOverviewRow) {
 .seg button.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   position: relative;
   z-index: 1;
 }

@@ -2,8 +2,9 @@
 // 中金所成交持仓排名页（ccpm）：官网每日收盘后约 16:15 发布的
 // 「成交量 / 持买单量 / 持卖单量」前 20 名会员数据。
 // 下拉选品种 + 日期选择器 + 一键采集；附新手科普（品种含义 + 多空/加减仓解读）。
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { fetchCcpmProducts, fetchCcpmRank, formatError } from '../api'
+import { createSeqGuard } from '../utils/asyncGuard'
 import type { CcpmProductMeta, CcpmRankResponse, CcpmRankRow } from '../types'
 import HelpCollapse from '../components/HelpCollapse.vue'
 import RiskDisclaimer from '../components/RiskDisclaimer.vue'
@@ -34,20 +35,37 @@ function todayIso(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+// 序号守卫 + 卸载标志：切品种/改日期均可连点，中金所官网采集较慢（多页抓取），
+// 慢的旧品种会覆盖新品种。旧实现也没有 onBeforeUnmount，卸载后仍写 resp/error。
+const loadGuard = createSeqGuard()
+let alive = true
+
 async function load() {
+  const my = loadGuard.next()
   loading.value = true
   error.value = ''
   try {
-    resp.value = await fetchCcpmRank(product.value, autoDate.value ? undefined : tradeDate.value)
+    const data = await fetchCcpmRank(
+      product.value,
+      autoDate.value ? undefined : tradeDate.value,
+    )
+    if (loadGuard.stale(my) || !alive) return
+    resp.value = data
     const insts = instruments.value
     activeInstrument.value = domInstruments.value[0] ?? insts[0] ?? ''
   } catch (e) {
+    if (loadGuard.stale(my) || !alive) return
     resp.value = null
     error.value = formatError(e)
   } finally {
-    loading.value = false
+    if (!loadGuard.stale(my) && alive) loading.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  alive = false
+  loadGuard.next() // 作废在飞请求
+})
 
 const productMeta = computed(
   () => products.value.find((p) => p.code === product.value) ?? null,
@@ -123,7 +141,7 @@ const dayLabel = computed(() => {
 
 <template>
   <div class="ccpm-view">
-    <div class="toolbar">
+    <div class="view-head">
       <h2>中金所成交持仓排名</h2>
       <div class="controls">
         <select v-model="product" :disabled="loading" title="选择品种">
@@ -367,13 +385,17 @@ const dayLabel = computed(() => {
 .ccpm-view {
   height: 100%;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
-.toolbar {
+/* 与其它展示页统一的页头：标题居左、控件居右 */
+.view-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 .toolbar h2 {
@@ -382,8 +404,23 @@ const dayLabel = computed(() => {
 .controls {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: var(--sp-2);
+  /* 内部不换行、整体不收缩：宽度不够时由 .view-head 整块折到第二行，
+     否则每个控件会被挤成竖排（一列下拉 + 一列复选框）。 */
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+/* 中文可逐字断行，min-content 会缩到一个字宽——必须显式禁止内部换行，
+   否则「自动取最近交易日」「采集」会被压成竖排。 */
+.controls > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* 全局给 input/select 设了 width:100%，在 flex 行内会撑满整行、
+   把同排其它控件挤出可视区（表现为「只剩一个下拉框」）。 */
+.controls select,
+.controls input:not([type='checkbox']) {
+  width: auto;
 }
 .controls select,
 .controls input[type='date'] {
@@ -463,10 +500,10 @@ const dayLabel = computed(() => {
 
 .error-banner {
   padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.1);
+  background: color-mix(in srgb, var(--up) 10%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--red, #f44336);
+  color: var(--red, var(--up));
 }
 .err-tip {
   color: var(--text-dim);
@@ -510,7 +547,7 @@ const dayLabel = computed(() => {
 .inst-tab.active {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.1);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .dom-badge {
   margin-left: 4px;
@@ -536,7 +573,7 @@ const dayLabel = computed(() => {
   font-size: 12px;
 }
 .chip-net {
-  border-color: rgba(240, 160, 32, 0.45);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 .chip-k {
   color: var(--text-dim);
@@ -580,13 +617,13 @@ const dayLabel = computed(() => {
   color: var(--text-muted);
 }
 .rank-table .g-vol {
-  background: rgba(74, 158, 255, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .rank-table .g-long {
-  background: rgba(239, 65, 70, 0.06);
+  background: color-mix(in srgb, var(--up) 6%, transparent);
 }
 .rank-table .g-short {
-  background: rgba(24, 160, 88, 0.06);
+  background: color-mix(in srgb, var(--down) 6%, transparent);
 }
 .rank-col {
   width: 40px;

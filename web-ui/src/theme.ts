@@ -50,6 +50,11 @@ const DARK_VARS: Record<string, string> = {
   '--warn-soft': 'rgba(240, 160, 32, 0.08)',
   '--warn-line': 'rgba(240, 160, 32, 0.35)',
   '--scheme': 'dark',
+      // accent 底上的文字色：深色主题的蓝底吃白字，暮色的金棕底吃深字（白字对比度仅 ~2.2:1）
+      '--on-accent': '#ffffff',
+      // 「自定义/用户产」标记用的紫系（与涨跌/警告语义区分开）
+      '--tag-purple': '#b39ddb',
+      '--tag-purple-soft': 'rgba(140, 110, 220, 0.18)',
 }
 
 export const THEMES: ThemeDef[] = [
@@ -85,6 +90,9 @@ export const THEMES: ThemeDef[] = [
       '--warn-soft': 'rgba(217, 130, 10, 0.09)',
       '--warn-line': 'rgba(217, 130, 10, 0.38)',
       '--scheme': 'light',
+      '--on-accent': '#ffffff',
+      '--tag-purple': '#6b46c1',
+      '--tag-purple-soft': 'rgba(107, 70, 193, 0.12)',
     },
   },
   {
@@ -112,6 +120,9 @@ export const THEMES: ThemeDef[] = [
       '--warn-soft': 'rgba(217, 160, 91, 0.1)',
       '--warn-line': 'rgba(217, 160, 91, 0.38)',
       '--scheme': 'dark',
+      '--on-accent': '#221d16',
+      '--tag-purple': '#c4a7e7',
+      '--tag-purple-soft': 'rgba(196, 167, 231, 0.16)',
     },
   },
   {
@@ -139,6 +150,9 @@ export const THEMES: ThemeDef[] = [
       '--warn-soft': 'rgba(180, 118, 26, 0.1)',
       '--warn-line': 'rgba(180, 118, 26, 0.4)',
       '--scheme': 'light',
+      '--on-accent': '#ffffff',
+      '--tag-purple': '#6b46c1',
+      '--tag-purple-soft': 'rgba(107, 70, 193, 0.12)',
     },
   },
 ]

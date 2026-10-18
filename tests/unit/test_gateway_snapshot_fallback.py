@@ -30,7 +30,7 @@ async def test_ex_quotes_prefers_tdx_client(monkeypatch):
     tdx_df = pd.DataFrame([{"market": "US", "code": "AAPL", "price": 2.0}])
 
     class _Client:
-        async def goods_quotes(self, stocks):
+        async def goods_quotes(self, stocks, fields=None):
             return tdx_df
 
     def _boom(codes):
@@ -48,7 +48,7 @@ async def test_ex_quotes_tdx_failure_falls_back(monkeypatch):
     from easy_tdx.web.market_gateway import MarketGateway
 
     class _Client:
-        async def goods_quotes(self, stocks):
+        async def goods_quotes(self, stocks, fields=None):
             raise ConnectionError("7727 抖动")
 
     snap = pd.DataFrame([{"market": "US", "code": "AAPL", "price": 3.0, "source": "em"}])
@@ -74,7 +74,7 @@ async def test_ex_quotes_all_null_prices_falls_back(monkeypatch):
     from easy_tdx.web.market_gateway import MarketGateway
 
     class _Client:
-        async def goods_quotes(self, stocks):
+        async def goods_quotes(self, stocks, fields=None):
             return pd.DataFrame(
                 [{"market": 74, "code": "AAPL", "price": None, "pre_close": 341.27}]
             )
@@ -93,7 +93,7 @@ async def test_ex_quotes_partial_null_keeps_tdx(monkeypatch):
     from easy_tdx.web.market_gateway import MarketGateway
 
     class _Client:
-        async def goods_quotes(self, stocks):
+        async def goods_quotes(self, stocks, fields=None):
             return pd.DataFrame(
                 [
                     {"market": 74, "code": "AAPL", "price": 341.27},

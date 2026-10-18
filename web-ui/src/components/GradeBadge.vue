@@ -76,8 +76,8 @@ const badgeClass = computed(() => [
   font-size: 11px;
   padding: 2px 8px;
   border-radius: var(--radius);
-  background: rgba(240, 160, 32, 0.12);
-  border: 1px solid rgba(240, 160, 32, 0.45);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
   color: var(--warn);
   font-weight: 500;
   white-space: nowrap;

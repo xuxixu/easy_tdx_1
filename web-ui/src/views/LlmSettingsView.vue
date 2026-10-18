@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageShell from '../components/PageShell.vue'
 // AI 设置页：LLM Provider 配置（WebUI 表单 ⇆ ~/.easy_tdx/llm.json 同一份文件）。
 // 选 Provider 自动填充预设 base_url / 默认模型，均可手工覆盖；API Key 脱敏
 // 回显，留空或原样回传不覆盖已存 key。支持「测试连接」即时验证。
@@ -118,9 +119,9 @@ async function test() {
 </script>
 
 <template>
-  <div class="llm-settings">
+  <PageShell title="AI 设置" desc="配置大模型，供回测报告的「AI 解读」直接调用">
+    <div class="layout">
     <aside class="config-panel">
-      <h2>AI 设置</h2>
       <p class="hint">
         配置 LLM 后，回测页的「AI 解读」可直接把报告发给模型解读，无需复制粘贴。
         配置同时落盘到 <code>{{ configPath || '~/.easy_tdx/llm.json' }}</code>
@@ -232,13 +233,15 @@ async function test() {
         缺字段时兜底生效。
       </p>
     </main>
-  </div>
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.llm-settings {
+.layout {
   display: flex;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 .config-panel {
@@ -304,7 +307,7 @@ async function test() {
   flex: 1;
   padding: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
@@ -325,7 +328,7 @@ async function test() {
 }
 .btn-ghost:hover:not(:disabled) {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn-primary:disabled,
 .btn-ghost:disabled {
@@ -335,7 +338,7 @@ async function test() {
 .message {
   margin-top: 12px;
   padding: 8px 12px;
-  background: var(--accent-bg, rgba(0, 120, 212, 0.1));
+  background: var(--accent-bg, color-mix(in srgb, var(--accent) 10%, transparent));
   border-radius: var(--radius);
   font-size: 12px;
   color: var(--accent);
@@ -344,31 +347,31 @@ async function test() {
 .test-result {
   margin-top: 10px;
   padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.08);
+  background: color-mix(in srgb, var(--up) 8%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--red, #f44336);
+  color: var(--red, var(--up));
   word-break: break-all;
 }
 .test-result.ok {
-  background: rgba(76, 175, 80, 0.12);
-  color: var(--green, #4caf50);
+  background: color-mix(in srgb, var(--down) 12%, transparent);
+  color: var(--green, var(--down));
 }
 .error-banner {
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.1);
+  background: color-mix(in srgb, var(--up) 10%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--red, #f44336);
+  color: var(--red, var(--up));
 }
 .warn-banner {
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(255, 193, 7, 0.1);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--warn, #ffc107);
+  color: var(--warn, var(--warn));
 }
 .info-panel {
   flex: 1;
@@ -397,7 +400,7 @@ async function test() {
   border-bottom: 1px solid var(--border);
 }
 .provider-table tr.current {
-  background: var(--accent-bg, rgba(0, 120, 212, 0.06));
+  background: var(--accent-bg, color-mix(in srgb, var(--accent) 6%, transparent));
 }
 .mono {
   font-family: var(--font-mono);

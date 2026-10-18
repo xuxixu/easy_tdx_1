@@ -8,6 +8,7 @@ import echarts, { chartAxisColor, initChart, useChartRedraw } from '../echarts-s
 import { fetchBars, fetchKlineOption, formatError, validateFormula } from '../api'
 import { detectAShareMarket } from '../market'
 import { currentTheme } from '../theme'
+import { createSeqGuard, isAbortError } from '../utils/asyncGuard'
 import {
   loadCustoms,
   loadIndicatorParams,
@@ -138,6 +139,11 @@ function parsePreviewSymbol(): { market: string; code: string } {
   return { market: detectAShareMarket(s), code: s }
 }
 
+// 序号守卫 + 可取消的预览计算：改标的/改公式/连点「验证语法」（通过后会自动
+// 触发预览）都会重入，旧请求晚返回会画出与当前公式不符的图。
+const previewGuard = createSeqGuard()
+let previewAbort: AbortController | null = null
+
 async function onPreview() {
   if (validation.value?.ok !== true) {
     previewError.value = '请先点“验证语法”，通过后才能预览'
@@ -147,12 +153,18 @@ async function onPreview() {
     previewError.value = '公式为空，无法预览'
     return
   }
+  const my = previewGuard.next()
+  // /chart/kline-option 是重请求（服务端跑一遍公式），取消上一轮别白算
+  previewAbort?.abort()
+  const ctrl = new AbortController()
+  previewAbort = ctrl
   previewLoading.value = true
   previewError.value = ''
   try {
     const { market, code } = parsePreviewSymbol()
     const n = Math.min(Math.max(previewCount.value || 150, 30), 800)
     const bars = await fetchBars(market, code, 'DAY')
+    if (previewGuard.stale(my)) return
     if (bars.length < 5) throw new Error(`标的 ${market}:${code} 仅取到 ${bars.length} 根 K 线，不足以预览`)
     const sliced = bars.slice(-n)
     const candleCols =
@@ -181,17 +193,20 @@ async function onPreview() {
         },
       ],
       axis_color: chartAxisColor() ?? currentTheme.value.vars['--border'] ?? '#2a2e3a',
-    })
+    }, ctrl.signal)
+    if (previewGuard.stale(my)) return
     previewOption = resp.option
     previewKey.value = `${formKind.value}@@${formText.value}@@${formCandleOn.value ? formCandle.value.join(',') : ''}`
     previewInfo.value = `${market}:${code} 日K近 ${sliced.length} 根（${sliced[0].datetime.slice(0, 10)} ~ ${sliced[sliced.length - 1].datetime.slice(0, 10)}）`
     renderPreview()
   } catch (e) {
+    // 过期结果 / 主动取消（用户改了公式后重新预览）都不该弹红条
+    if (previewGuard.stale(my) || isAbortError(e)) return
     previewOption = null
     previewInfo.value = ''
     previewError.value = formatError(e)
   } finally {
-    previewLoading.value = false
+    if (!previewGuard.stale(my)) previewLoading.value = false
   }
 }
 
@@ -212,6 +227,11 @@ function clearPreview() {
 }
 
 function disposePreview() {
+  // 取消在飞的预览计算（/chart/kline-option 是重请求）+ 作废其结果，
+  // 否则关闭表单/切 tab 后旧响应仍会写 previewOption 并触发渲染。
+  previewAbort?.abort()
+  previewAbort = null
+  previewGuard.next()
   previewChart?.dispose()
   previewChart = null
   previewOption = null
@@ -653,7 +673,7 @@ async function onImportFile(ev: Event) {
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .candle-grid {
   display: grid;
@@ -699,7 +719,7 @@ async function onImportFile(ev: Event) {
   flex: 1;
   padding: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
@@ -765,7 +785,7 @@ async function onImportFile(ev: Event) {
 }
 .preview-stale {
   font-size: 11px;
-  color: var(--warn, #e0a020);
+  color: var(--warn, var(--warn));
 }
 .preview-chart {
   width: 100%;

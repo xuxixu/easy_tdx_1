@@ -190,8 +190,14 @@ class OptimizeAllBacktestRequest(BaseModel):
 
     cash: float = Field(default=1_000_000.0, gt=0)
     commission: float = Field(default=0.0003, ge=0, le=0.01)
+    min_commission: float = Field(default=5.0, ge=0)
+    stamp_tax: float = Field(default=0.001, ge=0, le=0.01)
     slippage: float = Field(default=0.0, ge=0, le=0.05)
     execution: Literal["next_open", "next_close"] = Field(default="next_open")
+    auto_fees: bool = Field(
+        default=False,
+        description="按标的品种自动解析费率（ETF/可转债免印花税等）；显式非默认费率优先",
+    )
     workers: int = Field(
         default=1,
         ge=0,

@@ -46,6 +46,9 @@ E2E_MOCK_ENV = "EASY_TDX_E2E_MOCK"
 # 翻页上限 10×800；2600 根既覆盖默认区间，又让第 3 页就翻到数据起点。
 _HISTORY_BARS = 2600
 
+#: 各市场证券总数（GET /security/count 用；取值量级对齐真实 A 股市场）。
+_MARKET_SECURITY_COUNTS = {"SH": 2275, "SZ": 2911, "BJ": 263}
+
 # 已知代码 → 中文名（提升 E2E 可读性；未命中用「股票XXXXXX」兜底）。
 _KNOWN_NAMES: dict[str, str] = {
     "600519": "贵州茅台",
@@ -260,6 +263,15 @@ class MockTdxClient:
         分时图这条链路在 E2E 里完全没被覆盖到。
         """
         return _synth_minute_df(market_enum_key(market), code, date)
+
+    async def get_security_count(self, market: Any) -> int:
+        """市场证券总数（GET /security/count）。
+
+        真实 :meth:`AsyncTdxClient.get_security_count` 返回 int；此前 mock 缺
+        此方法，mock 模式下该端点直接 500（AttributeError）——契约由
+        ``tests/unit/test_e2e_mock.py`` 守护。
+        """
+        return _MARKET_SECURITY_COUNTS.get(market_enum_key(market), 5000)
 
     async def get_security_quotes(self, stocks: list[tuple[Any, str]]) -> pd.DataFrame:
         """批量五档快照（POST /quotes + QuoteStreamer SSE 共用）。"""

@@ -346,7 +346,12 @@ class AsyncHeartbeatMixin:
                 await asyncio.sleep(self._heartbeat_interval)
                 await self._heartbeat_cmd()
             except asyncio.CancelledError:
-                break
+                # 必须向上传播取消。旧写法用 break 让协程"正常返回"，
+                # _stop_heartbeat 拿到的 task 不满足 .cancelled()，取消语义被
+                # 静默吞掉；若取消发生在 _heartbeat_cmd()（最长 timeout 秒的
+                # 网络调用）期间，请求也被一并吸收。与本项目 sentiment_sampler
+                # / quote_streamer 的 `raise` 口径保持一致。
+                raise
             except _HEARTBEAT_RETRYABLE:
                 logging.getLogger(__name__).debug(
                     "心跳失败，等待下次业务请求触发重连", exc_info=True

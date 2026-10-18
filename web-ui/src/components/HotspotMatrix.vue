@@ -232,7 +232,7 @@ function rowTitle(row: HotspotRow): string {
   margin-left: 2px;
   font-size: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-radius: 2px;
   padding: 0 2px;
 }

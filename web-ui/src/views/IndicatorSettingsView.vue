@@ -8,6 +8,7 @@
 // 预置与自定义同走后端公式引擎计算；主图叠加/副图的切换在各 K 线图标题栏。
 import { onUnmounted, ref } from 'vue'
 
+import PageShell from '../components/PageShell.vue'
 import PresetList from '../components/PresetList.vue'
 import {
   DEFAULT_INDICATOR_PARAMS,
@@ -27,15 +28,11 @@ onUnmounted(unsubscribe)
 </script>
 
 <template>
-  <div class="indicator-settings">
+  <PageShell
+    title="技术指标"
+    desc="预置指标由后端公式引擎统一计算（与自定义公式同路径），修改即时生效、全局共用。所有 K 线（个股/板块弹窗、市场看板、港美股面板）共用同一套配置，保存在浏览器本地。主图叠加与副图的切换在各 K 线图标题栏。「恢复默认」只重置参数与选择，自定义指标保留。"
+  >
     <section class="card manage-card">
-      <h2>技术指标 · 管理</h2>
-      <p class="hint">
-        预置指标由后端公式引擎统一计算（与自定义公式同路径），修改即时生效 ·
-        全局共用。所有 K 线（个股/板块弹窗、市场看板、港美股面板）共用同一套配置，
-        保存在浏览器本地。主图叠加与副图的切换在各 K 线图标题栏。
-        「恢复默认」只重置参数与选择，自定义指标保留。
-      </p>
       <PresetList v-model="params" />
       <div v-if="savedAt" class="message">✓ 已自动保存 {{ savedAt }}</div>
     </section>
@@ -82,29 +79,16 @@ onUnmounted(unsubscribe)
       </table>
     </section>
 
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.indicator-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px;
-  overflow-y: auto;
-}
 .card {
   padding: 16px;
 }
 .manage-card h2 {
   margin: 0 0 8px;
   font-size: 15px;
-}
-.hint {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin: 0 0 14px;
-  line-height: 1.6;
 }
 .message {
   margin-top: 12px;

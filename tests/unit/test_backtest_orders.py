@@ -421,3 +421,105 @@ class TestNonContinuousIndex:
         # position 1 的 open = 101.0；旧代码会用 label 10 当位置 → iloc[10] 越界
         assert trades[0].price == 101.0
         assert trades[0].rejected is False
+
+
+class TestReducePolicyCashSafety:
+    """reject_policy="reduce" 降仓买入不得超支（现金不得为负）。
+
+    回归：旧实现用 ``available_cash / price`` 算可买手数，只预留了最低佣金，
+    未预留按比例佣金。整手取整后「成交额 + 实际佣金」会超出可用现金，
+    回测结算出现负现金（cash=350000 / price=1 / size=500000 时超出 4.97 元）。
+    """
+
+    def test_reduced_buy_never_exceeds_cash(self) -> None:
+        """降仓买入后，成交额 + 佣金 + 滑点 <= 初始现金。"""
+        df = _make_df(20)
+        sim = OrderSimulator(
+            df,
+            position_mode="fixed",
+            reject_policy="reduce",
+            commission=0.0003,
+            min_commission=5.0,
+            stamp_tax=0.001,
+            slippage=0.0,
+        )
+        # 单股 1 元、信号远超资金 → 必然走 reduce 分支
+        signals = [Signal(datetime=20240110, direction="BUY", size=500_000, price=1.0)]
+        trades = sim.simulate(signals, cash=350_000.0, position=0)
+
+        filled = [t for t in trades if t.direction == "BUY" and not t.rejected]
+        assert len(filled) == 1
+        t = filled[0]
+        total = t.size * t.price + t.commission + t.slippage
+        assert total <= 350_000.0, f"超支：支出 {total} > 现金 350000"
+
+    def test_reduced_buy_leaves_non_negative_cash(self) -> None:
+        """按引擎结算口径回放后现金仍为正。"""
+        df = _make_df(20)
+        sim = OrderSimulator(
+            df,
+            position_mode="fixed",
+            reject_policy="reduce",
+            commission=0.0003,
+            min_commission=5.0,
+            stamp_tax=0.001,
+            slippage=0.0,
+        )
+        signals = [Signal(datetime=20240110, direction="BUY", size=500_000, price=1.0)]
+        trades = sim.simulate(signals, cash=350_000.0, position=0)
+
+        cash = 350_000.0
+        for t in trades:
+            if t.rejected:
+                continue
+            if t.direction == "BUY":
+                cash -= t.size * t.price + t.commission + t.slippage
+            else:
+                cash += t.size * t.price - t.commission - t.slippage
+        assert cash >= 0.0, f"结算后现金为负：{cash}"
+
+    def test_reduced_size_reserves_commission(self) -> None:
+        """可买手数应按 price*(1+commission) 折算，与 _calculate_buy_size 同口径。"""
+        df = _make_df(20)
+        commission = 0.003  # 放大佣金，让差异显著
+        sim = OrderSimulator(
+            df,
+            position_mode="fixed",
+            reject_policy="reduce",
+            commission=commission,
+            min_commission=5.0,
+            stamp_tax=0.001,
+            slippage=0.0,
+        )
+        price = 1.0
+        cash = 100_000.0
+        signals = [Signal(datetime=20240110, direction="BUY", size=1_000_000, price=price)]
+        trades = sim.simulate(signals, cash=cash, position=0)
+
+        t = next(t for t in trades if t.direction == "BUY" and not t.rejected)
+        # 理论上限：预留最低佣金与比例佣金后可买的整手数
+        budget = cash - sim.min_commission
+        expected = int(budget / (price * (1 + commission)) / 100) * 100
+        assert t.size == expected
+        assert t.size * price + t.commission + t.slippage <= cash
+
+
+class TestRejectPolicyValidation:
+    """非法 reject_policy 必须快失败。
+
+    回归：`engine.py` 的 docstring 曾把取值写成 ``('reduce', 'reject')``，
+    但实现只认 ``reduce`` / ``skip``。传 ``'reject'`` 时两个分支都不命中，
+    直接落到末尾产生一笔**超额买入**（total_cost > cash 时没有 else 拦截）。
+    """
+
+    def test_invalid_value_raises(self) -> None:
+        with pytest.raises(ValueError, match="reject_policy"):
+            OrderSimulator(_make_df(5), reject_policy="reject")
+
+    def test_valid_values_accepted(self) -> None:
+        for value in ("reduce", "skip"):
+            sim = OrderSimulator(_make_df(5), reject_policy=value)
+            assert sim.reject_policy == value
+
+    def test_default_is_reduce(self) -> None:
+        assert OrderSimulator(_make_df(5)).reject_policy == "reduce"

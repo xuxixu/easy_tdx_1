@@ -4,7 +4,7 @@
 // 报价来自全局 SSE store；图表按需拉取，分时/日K 独立容错，
 // 指数代码在个股 /bars 拿不到时自动回退 /bars/index。
 
-import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
@@ -20,7 +20,7 @@ import {
 } from '../api'
 import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol, fmtVolShares } from '../format'
 import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
-import { US_SESSION_FILTERS, inUsSessionFilter, isExMarket, isUsDst, type USSessionFilter } from '../market'
+import { US_SESSION_FILTERS, inUsSessionFilter, isExMarket, isUsDst, type USSessionFilter , INDEX_ETF_PROXY} from '../market'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, Category, MinutePoint, SecurityQuote } from '../types'
 import IndicatorChips from './IndicatorChips.vue'
@@ -139,6 +139,9 @@ if (isEx) minuteDays.value = 1
 // ── 图表数据（独立容错） ────────────────────────────────────────────────────
 
 const minutePoints = ref<MinutePoint[]>([])
+/** 分时/分钟K 以 ETF 代理时的标注（指数在 MAC 数据源无原生分钟级数据）。 */
+const minuteProxy = ref('')
+const intraProxy = ref('')
 /** 多日分时的天分隔标记（每天起始索引 + 日期）。 */
 const minuteDayMarks = ref<Array<{ start: number; date: string }>>([])
 const dailyBars = ref<Bar[]>([])
@@ -149,16 +152,32 @@ const dailyError = ref('')
 const intraError = ref('')
 const loading = ref(false)
 
-async function loadMinute() {
+async function loadMinute(my?: number) {
+  const seq = my ?? ++chartSeq
   minuteError.value = ''
+  proxyPreClose.value = null
   try {
     // 外盘只有当日分时（/minute/history 是 A 股标准协议接口），直接拉当日
     if (isEx) {
-      minutePoints.value = await fetchMinute(props.market, props.code)
+      // 指数（US/HK）无原生分时 → 以对应 ETF 代理，UI 上必须明示
+      const proxy = INDEX_ETF_PROXY[props.code]
+      const target = proxy ?? { market: props.market, code: props.code }
+      const pts = await fetchMinute(target.market, target.code)
+      if (seq !== chartSeq) return
+      minuteProxy.value = proxy?.label ?? ''
+      // 代理分时的昨收基准要取代理 ETF 的 pre_close（与分时点同量级），否则
+      // y 轴对称基准用指数昨收会把曲线压到图底（见 preClose 注释）。
+      if (proxy) {
+        try {
+          const q = await fetchQuotes([{ market: target.market, code: target.code }])
+          proxyPreClose.value = q[0]?.pre_close ?? null
+        } catch {
+          proxyPreClose.value = null
+        }
+      }
+      minutePoints.value = pts
       minuteDayMarks.value =
-        minutePoints.value.length > 0
-          ? [{ start: 0, date: new Date().toISOString().slice(0, 10) }]
-          : []
+        pts.length > 0 ? [{ start: 0, date: new Date().toISOString().slice(0, 10) }] : []
       return
     }
     // 交易日从日K尾部取（末日=今天），今天走 /minute，历史日走 /minute/history
@@ -171,34 +190,46 @@ async function loadMinute() {
         d === new Date().toISOString().slice(0, 10)
           ? await fetchMinute(props.market, props.code)
           : await fetchHistoryMinute(props.market, props.code, dateInt)
+      // 已被更新的请求取代：停止后续串行请求，且不得写入本轮结果
+      if (seq !== chartSeq) return
       if (pts.length === 0) continue
       marks.push({ start: all.length, date: d })
       all.push(...pts)
     }
+    if (seq !== chartSeq) return
     minutePoints.value = all
     minuteDayMarks.value = marks
   } catch (e) {
+    if (seq !== chartSeq) return
     minutePoints.value = []
     minuteDayMarks.value = []
     minuteError.value = formatError(e)
   }
 }
 
-watch(minuteDays, loadMinute)
+// 注意：不能直接 `watch(minuteDays, loadMinute)` —— watch 回调会把
+// (newVal, oldVal) 作为前两个实参传入，恰好落进 loadMinute 的 seq 形参，
+// 导致守卫序号被日期值污染。这里显式包一层。
+watch(minuteDays, () => void loadMinute())
 
-async function loadDaily() {
+async function loadDaily(my?: number) {
+  const seq = my ?? ++chartSeq
   dailyError.value = ''
   try {
     // 日K只展示最近 250 根：取近 2 年（/bars 单页 800 根即可覆盖，避免全历史
     // 分页 5+ 页 + 深层 QFQ 负价重算）；长期停牌取不到再退回全历史。
     const since = new Date(Date.now() - 2 * 365 * 86400_000).toISOString().slice(0, 10)
     let bars = await fetchBars(props.market, props.code, 'DAY', since, undefined)
+    if (seq !== chartSeq) return
     if (bars.length === 0) bars = await fetchBars(props.market, props.code, 'DAY', undefined, undefined)
+    if (seq !== chartSeq) return
     // 指数（或 /bars 空数据的服务器）回退指数接口
     if (bars.length === 0) bars = await fetchIndexBars(props.market, props.code, 250)
+    if (seq !== chartSeq) return
     if (bars.length === 0) throw new Error('无日K数据（可能为新股或代码有误）')
-    dailyBars.value = bars.slice(-250)
+    dailyBars.value = bars
   } catch (e) {
+    if (seq !== chartSeq) return
     dailyBars.value = []
     dailyError.value = formatError(e)
   }
@@ -214,10 +245,13 @@ async function loadCharts() {
   const my = ++chartSeq
   loading.value = true
   sessionFilter.value = 'all' // 换标的重回全时段，避免旧过滤造成新标的空白
-  // 先日K后分时：多日分时的交易日列表取自 dailyBars 尾部
-  await loadDaily()
+  // 先日K后分时：多日分时的交易日列表取自 dailyBars 尾部。
+  // 关键：序号必须**下传**给 loadDaily/loadMinute。它们内部各自直接写响应式
+  // 状态，若只在 await 之后比对（本函数旧写法），慢返回的旧请求早已把数据
+  // 写进 dailyBars/minutePoints，守卫形同虚设 —— 日K与分时可能分属两只票。
+  await loadDaily(my)
   if (my !== chartSeq) return // 已被更新的标的取代
-  await loadMinute()
+  await loadMinute(my)
   if (my !== chartSeq) return
   // 分钟 K 页签打开时一并刷新（日K tab 下跳过，不浪费请求）
   if (isMinuteK.value) await loadIntra(my)
@@ -234,10 +268,14 @@ async function loadIntra(my?: number) {
   intraError.value = ''
   intraBars.value = []
   try {
-    let bars = await fetchBars(props.market, props.code, t.category, undefined, undefined, t.want)
+    // 指数（US/HK）无原生分钟 K → 以对应 ETF 代理；1 根的 qq 快照不算有效数据
+    const proxy = INDEX_ETF_PROXY[props.code]
+    const target = proxy ?? { market: props.market, code: props.code }
+    let bars = await fetchBars(target.market, target.code, t.category, undefined, undefined, t.want)
     if (bars.length === 0) bars = await fetchIndexBars(props.market, props.code, t.want, t.category)
     if (bars.length === 0) throw new Error(`无${t.label}数据（该市场/指数可能不支持此周期）`)
     if (seq !== chartSeq) return
+    intraProxy.value = proxy?.label ?? ''
     intraBars.value = bars.slice(-t.want)
   } catch (e) {
     if (seq !== chartSeq) return
@@ -297,9 +335,25 @@ async function toggleWatch() {
 const quoteLoading = ref(false)
 const quoteError = ref('')
 
+/** 报价是否带有效档位（任一买卖档有正价格）。0 价不可能是真实挂单。 */
+function depthOk(q: unknown): boolean {
+  if (!q) return false
+  const rec = q as Record<string, number | null>
+  for (let i = 1; i <= 5; i++) {
+    const b = rec[`bid${i}`]
+    const a = rec[`ask${i}`]
+    if ((typeof b === 'number' && b > 0) || (typeof a === 'number' && a > 0)) return true
+  }
+  return false
+}
+
 async function ensureQuote() {
   const symbol = `${props.market}${props.code}`
-  if (quoteStore.getQuote(symbol)) {
+  // 注意判据是「有没有档位」而不是「store 里有没有这条」：SSE 推的是精简
+  // 报价（字段白名单不含 bid/ask），自选股在 store 里天然有一份**没有五档**
+  // 的快照。只看存在性就 return 的话，自选股的盘口会永远停在「实时快照」降级态，
+  // 而 REST 明明能给出完整五档。
+  if (depthOk(quoteStore.getQuote(symbol))) {
     quoteError.value = ''
     return
   }
@@ -323,19 +377,8 @@ async function ensureQuote() {
 onMounted(ensureQuote)
 watch([() => props.market, () => props.code], ensureQuote)
 
-/** 是否有五档数据（任一买卖档有正价格）。扩展市场报价无五档字段、或补 0
- * 填充时为 false，走快照降级（0 价不可能是真实挂单）。 */
-const hasDepth = computed(() => {
-  const q = quote.value
-  if (!q) return false
-  const rec = q as unknown as Record<string, number | null>
-  for (let i = 1; i <= 5; i++) {
-    const b = rec[`bid${i}`]
-    const a = rec[`ask${i}`]
-    if ((typeof b === 'number' && b > 0) || (typeof a === 'number' && a > 0)) return true
-  }
-  return false
-})
+/** 是否有五档数据：无档位（或补 0 填充）时走快照降级。 */
+const hasDepth = computed(() => depthOk(quote.value))
 
 /** 港美股 vol 单位是股，A 股是手。 */
 function fmtDepthVol(v: number | null | undefined): string {
@@ -373,7 +416,16 @@ const maxDepthVol = computed(() => {
   return m
 })
 
-const preClose = toRef(() => quote.value?.pre_close ?? null)
+/**
+ * 分时/分钟代理（ETF）的昨收基准。走 ETF 代理渲染指数分时时，点的量级是 ETF
+ * （如 QQQ ~600），而标的 quote 的昨收是指数的（如 IXIC ~26700）——两者混用会让
+ * y 轴对称基准错位，整条曲线贴到图底。代理时必须改用代理 ETF 的昨收。
+ */
+const proxyPreClose = ref<number | null>(null)
+
+const preClose = computed(() =>
+  minuteProxy.value ? proxyPreClose.value : (quote.value?.pre_close ?? null),
+)
 
 // ── 一键寻优（跳 /optimize 并自动跑全策略预设网格） ─────────────────────────
 
@@ -526,32 +578,41 @@ function gotoOptimize() {
             <template v-else>
               <template v-if="tab === 'minute'">
                 <div v-if="minuteError" class="chart-msg error">分时：{{ minuteError }}</div>
-                <div v-else-if="isUS && sessionFilter !== 'all' && shownMinutePoints.length === 0" class="chart-msg">
-                  该时段暂无数据（TDX 夜盘无数据），可切「全部」查看
-                </div>
-                <IntradayChart
-                  v-else
-                  :points="shownMinutePoints"
-                  :pre-close="preClose"
-                  :day-marks="minuteDayMarks"
-                  :vol-unit-shares="isEx"
-                />
+                <template v-else>
+                  <!-- 代理标注是附加提示，不参与 v-else-if 渲染链（否则图会被吞掉） -->
+                  <div v-if="minuteProxy" class="chart-msg proxy">分时以 {{ minuteProxy }} 代理（指数无原生分时）</div>
+                  <div v-if="isUS && sessionFilter !== 'all' && shownMinutePoints.length === 0" class="chart-msg">
+                    该时段暂无数据（TDX 夜盘无数据），可切「全部」查看
+                  </div>
+                  <IntradayChart
+                    v-if="!(isUS && sessionFilter !== 'all' && shownMinutePoints.length === 0)"
+                    :points="shownMinutePoints"
+                    :pre-close="preClose"
+                    :day-marks="minuteDayMarks"
+                    :vol-unit-shares="isEx"
+                  />
+                </template>
               </template>
               <template v-else-if="isMinuteK">
                 <div v-if="intraError" class="chart-msg error">{{ intraTab?.label }}：{{ intraError }}</div>
-                <div v-else-if="isUS && sessionFilter !== 'all' && shownIntraBars.length === 0" class="chart-msg">
-                  该时段暂无数据（TDX 夜盘无数据），可切「全部」查看
-                </div>
-                <!-- 分钟线首根涨跌相对自身开盘（不拿日级昨收）；vol 单位为股（后端契约），指数分钟线 vol 为 null 显示 0 -->
-                <StockKline
-                  v-else
-                  :bars="shownIntraBars"
-                  :overlays="overlays"
-                  :sub-pane="subPane"
-                  :params="indParams"
-                  :pre-close="null"
-                  :vol-unit-shares="true"
-                />
+                <template v-else>
+                  <div v-if="intraProxy" class="chart-msg proxy">
+                    {{ intraTab?.label }}以 {{ intraProxy }} 代理（指数无原生分钟 K，走势形态一致、点位不同）
+                  </div>
+                  <div v-if="isUS && sessionFilter !== 'all' && shownIntraBars.length === 0" class="chart-msg">
+                    该时段暂无数据（TDX 夜盘无数据），可切「全部」查看
+                  </div>
+                  <!-- 分钟线首根涨跌相对自身开盘（不拿日级昨收）；vol 单位为股（后端契约），指数分钟线 vol 为 null 显示 0 -->
+                  <StockKline
+                    v-if="!(isUS && sessionFilter !== 'all' && shownIntraBars.length === 0)"
+                    :bars="shownIntraBars"
+                    :overlays="overlays"
+                    :sub-pane="subPane"
+                    :params="indParams"
+                    :pre-close="null"
+                    :vol-unit-shares="true"
+                  />
+                </template>
               </template>
               <template v-else>
                 <div v-if="dailyError" class="chart-msg error">日K：{{ dailyError }}</div>
@@ -768,7 +829,7 @@ function gotoOptimize() {
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .ov-multi {
   font-size: 11px;
@@ -781,5 +842,12 @@ function gotoOptimize() {
 }
 .chart-msg.error {
   color: var(--up);
+}
+/* 代理标注：不是错误，用警告色但保持紧凑（继承的 40px padding 太占地方） */
+.chart-msg.proxy {
+  color: var(--warn);
+  background: var(--warn-soft);
+  padding: 8px 12px;
+  border-radius: var(--radius);
 }
 </style>

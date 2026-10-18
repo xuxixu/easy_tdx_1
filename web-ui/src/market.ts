@@ -199,16 +199,27 @@ export function usSession(now = new Date()): USSession {
 }
 
 // ── 美股分钟时段过滤（北京时间口径，夏令；冬令整体 +1h）────────────────────
-// TDX 分钟线含盘前盘后，夜盘无数据。K线面板的时段切换按钮用它过滤分钟 bar。
+// K 线面板的时段切换按钮用它过滤分钟 bar。
+//
+// ⚠ 数据源限制（2026-10 实测，勿再按旧注释理解）：TDX 扩展行情栈的美股分钟线
+// **只覆盖盘中**——美东 09:30–16:00，即北京 21:30–04:00，5 分钟线 78 根/日，
+// 不含盘前/盘后/夜盘。东方财富 push2his 同样只有盘中，免费源普遍如此。
+// 因此切「盘前 / 盘后 / 夜盘」时过滤结果为空，属数据源不提供而非代码缺陷；
+// 界面按 `barsTooFew` 提示"K线不足"。
 
 export type USSessionFilter = 'all' | USSession
 
+/**
+ * 可选的时段档位。
+ *
+ * **只保留「全部」与「盘中」**：盘前 / 盘后 / 夜盘在 TDX 与东财免费接口下
+ * 均无数据（实测美股分钟线仅美东 09:30–16:00），摆出来只会让人点了看到空白。
+ * `USSessionFilter` 类型仍保留四态，`inUsSessionFilter` 也仍能按四态判窗口，
+ * 将来接入盘前盘后数据源时把档位加回来即可。
+ */
 export const US_SESSION_FILTERS: Array<{ value: USSessionFilter; label: string }> = [
   { value: 'all', label: '全部' },
-  { value: 'pre', label: '盘前' },
   { value: 'open', label: '盘中' },
-  { value: 'after', label: '盘后' },
-  { value: 'night', label: '夜盘' },
 ];
 
 /** 北京时间 HH:MM 是否落在指定美股时段（夏令；冬令调用方传 dst=false）。 */
@@ -232,6 +243,22 @@ export function inUsSessionFilter(hhmm: string, session: USSessionFilter, dst = 
     default:
       return true
   }
+}
+
+/**
+ * 分时点/成交时间归一化为 ``HH:MM``。
+ *
+ * :func:`inUsSessionFilter` 用 ``^(\\d{1,2}):(\\d{2})`` 锚定开头解析，所以
+ * 传进去的必须是纯时间。而不同数据源给的写法并不统一：扩展栈分时是
+ * ``"21:30:00"``、A 股路径可能带日期 ``"2024-01-01 21:30:00"``。直接
+ * ``slice(0, 5)`` 遇到带日期的串会得到 ``"2024-"``，时段过滤会**全部判 false**，
+ * 表现为「切到任何时段都是空图」——很难排查，故统一在这里抽时间部分。
+ *
+ * @returns 形如 ``"21:30"``；解析不出时返回空串（调用方应跳过该点）。
+ */
+export function toHhmm(dt: string): string {
+  const m = /(\d{1,2}):(\d{2})/.exec(dt)
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''
 }
 
 /**
@@ -293,3 +320,21 @@ export const A_SHARE_MARKETS: AShareMarket[] = ['SH', 'SZ', 'BJ']
 
 /** 扩展市场（港股/美股）切换选项。 */
 export const EX_MARKETS: ExMarketToken[] = ['HK', 'US']
+// ── 指数的分钟级数据代理 ─────────────────────────────────────────────────────
+// 美股**指数**（道指/纳指/标普）在 MAC/qq 扩展栈只回 1 根 qq 快照，没有完整分时，
+// 因此下表把美股指数映射到高度相关的 ETF（DIA/QQQ/SPY），前端用 ETF 数据代理
+// 渲染——走势形态一致，但点位不是指数本身，UI 必须明示。
+//
+// 港股**指数**（恒生 HSI / 国企 HSCEI / 恒科 HSTECH）实测 qq 源返回**完整分时**
+// （指数点位、datetime 带日期），与 IntradayChart 直接兼容，**不需要代理**。
+// 切勿把港股指数映射到港股 ETF（如 02800）：那是 tdx 源，datetime 是 HH:MM:SS
+// 无日期、且点位是 ETF 价格，代理会让分时图 x 轴错乱、y 轴量级失衡。
+export const INDEX_ETF_PROXY: Record<
+  string,
+  { market: Market; code: string; label: string }
+> = {
+  DJI: { market: 'US', code: 'DIA', label: 'DIA' },
+  IXIC: { market: 'US', code: 'QQQ', label: 'QQQ' },
+  NDX: { market: 'US', code: 'QQQ', label: 'QQQ' },
+  SPX: { market: 'US', code: 'SPY', label: 'SPY' },
+}

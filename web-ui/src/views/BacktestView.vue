@@ -3,7 +3,7 @@
 // 编排：点击「开始回测」→ 自动取行情 → 回测 → 展示 K线+净值+指标+成交。
 // 取行情已整合进「开始回测」（不再有单独的取行情按钮）。
 
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import AiInterpretModal from '../components/AiInterpretModal.vue'
@@ -24,6 +24,11 @@ import type { Category, ExecutionMode } from '../types'
 import { useBacktestStore } from '../stores/backtest'
 
 const store = useBacktestStore()
+
+// 页面切走即取消在飞的任务轮询：否则轮询会在后台以 400ms 间隔继续打 HTTP
+// 最长 10 分钟，结束时还会把 running/error 写回全局 store —— 其它共用该
+// store 的页面会看到一条不属于本页的报错横幅。
+onBeforeUnmount(() => store.cancelAll())
 const route = useRoute()
 
 // SymbolPicker 实例引用，用于触发取行情
@@ -369,7 +374,15 @@ const aiTip = computed(() =>
       <div v-if="store.error" class="error-banner">⚠ {{ store.error }}</div>
 
       <div v-if="!store.result && !store.running && !store.error" class="placeholder">
-        <p>输入代码、配置策略后点击「开始回测」（自动取行情）</p>
+        <div class="ph-card">
+          <div class="ph-title">还没有回测结果</div>
+          <ol class="ph-steps">
+            <li>左侧填入标的代码（A 股 6 位 / 港股 5 位 / 美股字母）</li>
+            <li>选择策略，按需调整参数与费率</li>
+            <li>点击「开始回测」</li>
+          </ol>
+          <div class="ph-note">行情会按代码自动拉取，无需另行导入数据。</div>
+        </div>
       </div>
 
       <div v-if="store.result" class="report-content">
@@ -532,7 +545,7 @@ const aiTip = computed(() =>
   width: auto; /* 覆盖全局 input{width:100%}——复选框被撑满整行才是折行根因 */
   flex-shrink: 0;
   margin: 0;
-  accent-color: var(--accent, #4a9eff);
+  accent-color: var(--accent, var(--accent));
 }
 .wf-windows {
   display: inline-flex;
@@ -567,7 +580,7 @@ const aiTip = computed(() =>
 .report-panel {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: var(--sp-4);
 }
 .placeholder {
   display: flex;
@@ -576,8 +589,41 @@ const aiTip = computed(() =>
   height: 100%;
   color: var(--text-dim);
 }
+/* 空态引导：右侧大片留白时，把「下一步做什么」讲清楚 */
+.ph-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 420px;
+  padding: 30px 34px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.ph-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.ph-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.ph-steps li::marker {
+  color: var(--text-dim);
+}
+.ph-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+}
 .error-banner {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   border: 1px solid var(--up);
   color: var(--up);
   padding: 10px 14px;

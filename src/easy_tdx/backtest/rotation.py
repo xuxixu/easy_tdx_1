@@ -19,10 +19,11 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,13 @@ import pandas as pd
 from easy_tdx.backtest.performance import PerformanceAnalyzer
 
 __all__ = ["RotationEngine", "RotationResult", "momentum_score", "formula_score"]
+
+logger = logging.getLogger(__name__)
+
+#: 单个挂单允许顺延的交易日上限。资金/整手不足与停牌同属"当日不可成交"，
+#: 真实挂单语义是次日继续排队；但若连续多日都买不起（例如股价长期高于单槽
+#: 预算），无限排队只会让回测尾部挂一串永不成交的单。超过上限则放弃并告警。
+_MAX_PENDING_RETRIES: Final = 5
 
 ScoreFn = Callable[[pd.DataFrame], float]
 
@@ -209,6 +217,8 @@ class RotationEngine:
         cash = self._cash
         positions: dict[str, _Position] = {}
         pending: list[tuple[str, str, str]] = []  # (symbol, direction, reason) 次开执行
+        # (symbol, direction) -> 已连续顺延的交易日数（防止无限排队）
+        pending_retries: dict[tuple[str, str], int] = {}
         equity_records: list[dict[str, Any]] = []
         trades: list[dict[str, Any]] = []
         rebalances: list[str] = []
@@ -255,15 +265,42 @@ class RotationEngine:
                     pnl = (price - pos.cost) * pos.shares - fee
                     trades.append(
                         self._trade_row(
-                            day_i, d_str, sym, "SELL", pos.shares, price, fee, pnl, reason=reason
+                            day_i,
+                            d_str,
+                            sym,
+                            "SELL",
+                            pos.shares,
+                            price,
+                            fee,
+                            pnl,
+                            # 与主引擎同口径：持仓成本基数（而非卖出金额）
+                            cost_basis=pos.cost * pos.shares,
+                            reason=reason,
                         )
                     )
+                    pending_retries.pop((sym, "SELL"), None)
                 elif direction == "BUY" and sym not in positions and cash > 0:
                     budget = self._slot_budget(cash, equity_total, len(positions))
                     if budget <= price * 100:
+                        self._defer_pending(
+                            still_pending,
+                            pending_retries,
+                            sym,
+                            direction,
+                            reason,
+                            f"单槽预算 {budget:.2f} 买不起一手（需 {price * 100:.2f}）",
+                        )
                         continue
                     shares = math.floor(budget / (price * (1 + self._commission)) / 100) * 100
                     if shares <= 0:
+                        self._defer_pending(
+                            still_pending,
+                            pending_retries,
+                            sym,
+                            direction,
+                            reason,
+                            f"整手取整后为 0 股（预算 {budget:.2f}，价 {price:.2f}）",
+                        )
                         continue
                     gross = shares * price
                     fee = self._fee(gross, is_sell=False)
@@ -276,6 +313,7 @@ class RotationEngine:
                             day_i, d_str, sym, "BUY", shares, price, fee, 0.0, reason=reason
                         )
                     )
+                    pending_retries.pop((sym, "BUY"), None)
             pending = still_pending
 
             # 3. 止盈止损检查（收盘口径，次日执行）
@@ -407,6 +445,7 @@ class RotationEngine:
         fee: float,
         pnl: float,
         reason: str,
+        cost_basis: float = 0.0,
     ) -> dict[str, Any]:
         return {
             "datetime": d_str,
@@ -417,10 +456,46 @@ class RotationEngine:
             "commission": fee,
             "slippage": 0.0,
             "pnl": pnl,
-            "cost_basis": 0.0 if direction == "BUY" else price * size,
+            # 与主引擎同口径：卖出时传**持仓成本**（avg_cost * size），而非卖出
+            # 金额。PerformanceAnalyzer 用 pnl / cost_basis 算单笔收益率，进而
+            # 决定 avg_win / avg_loss / max_win / max_loss / sqn；旧式拿卖出
+            # 金额当分母会让这五个指标与主引擎不可比。
+            "cost_basis": cost_basis,
             "rejected": False,
             "reason": reason,
         }
+
+    @staticmethod
+    def _defer_pending(
+        still_pending: list[tuple[str, str, str]],
+        retries: dict[tuple[str, str], int],
+        sym: str,
+        direction: str,
+        reason: str,
+        why: str,
+    ) -> None:
+        """把当日无法成交的挂单顺延到下一交易日；连续多日不成则放弃并告警。
+
+        资金/整手不足与停牌一样属于"当日不可成交"，真实挂单语义是次日继续
+        排队。旧实现直接 ``continue``：订单既不成交也不回队，从此消失。
+        轮动场景下卖出与买入在同一天排队，卖出尚未回款时买入必然预算不足
+        —— 新入选的标的会永远进不了组合，且无任何日志，回测收益被静默压低。
+        """
+        key = (sym, direction)
+        n = retries.get(key, 0) + 1
+        if n > _MAX_PENDING_RETRIES:
+            logger.warning(
+                "轮动挂单放弃：%s %s（%s）连续 %d 个交易日无法成交 — %s",
+                sym,
+                direction,
+                reason,
+                n,
+                why,
+            )
+            retries.pop(key, None)
+            return
+        retries[key] = n
+        still_pending.append((sym, direction, reason))
 
     @staticmethod
     def _analyze(

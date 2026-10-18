@@ -40,6 +40,12 @@ _SNAPSHOT_TTL: Final = 300
 #: 后台拉取的单页大小（协议上限 80）。
 _PAGE_SIZE: Final = 80
 
+#: 单市场翻页兜底上限。正常退出依赖「返回不满一页」或「offset 达到证券总数」，
+#: 但若服务端忽略 start 参数、每页都返回满页且总数查询失败，循环永不退出且
+#: frames 无界增长 —— 后台线程卡死 + OOM。这里给一个绝对上限兜底。
+#: 美股约 1 万只 / 80 ≈ 125 页，取 400 页留足余量，不会误伤正常拉取。
+_MAX_PAGES_PER_MARKET: Final = 400
+
 #: 榜单范围：港股只取主板 + 创业板（可交易股票）。
 _RANK_EX_MARKETS: Final[dict[str, tuple[int, ...]]] = {
     MARKET_HK: (31, 48),
@@ -151,7 +157,15 @@ def _build_with_client(token: str, client: Any) -> None:
     done = 0
     for ex_market in targets:
         offset = 0
+        pages = 0
+        # 总数已知时按总数定上限（+2 页余量），未知时用绝对兜底值
+        market_total = _safe_count(client, ex_market)
+        max_pages = market_total // _PAGE_SIZE + 2 if market_total else _MAX_PAGES_PER_MARKET
+        truncated = False
         while True:
+            if pages >= max_pages:
+                truncated = True
+                break
             try:
                 df = client.goods_quotes_list(ex_market, start=offset, count=_PAGE_SIZE)
             except Exception as exc:  # noqa: BLE001 — 单页失败记日志继续
@@ -162,6 +176,7 @@ def _build_with_client(token: str, client: Any) -> None:
             frames.append(df)
             offset += len(df)
             done += len(df)
+            pages += 1
             with _lock:
                 _snapshots[token] = {
                     "built_at": 0,  # 0 = 未完成，rank_snapshot 视为过期继续 building
@@ -170,6 +185,19 @@ def _build_with_client(token: str, client: Any) -> None:
                 }
             if len(df) < _PAGE_SIZE:
                 break
+            # 与 symbol_index._fetch_all 同口径：已拉够总数即停
+            if market_total and offset >= market_total:
+                break
+        if truncated:
+            logger.warning(
+                "榜单 %s/%s 翻页达到上限 %d 页（已取 %d 只，总数 %d），提前停止；"
+                "服务端可能忽略了 start 参数",
+                token,
+                ex_market,
+                max_pages,
+                offset,
+                market_total,
+            )
     payload = _to_payload(token, frames)
     with _lock:
         _snapshots[token] = {"built_at": time.time(), "payload": payload, "progress": ""}

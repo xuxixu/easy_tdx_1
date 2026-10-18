@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageShell from '../components/PageShell.vue'
 // 策略类型页：浏览全部策略类型（内置只读 + 自定义可增删改）。
 //
 // 内置类型是 Python 代码，只能查看（说明/参数 schema/预设网格）；
@@ -228,24 +229,17 @@ async function onDelete(s: StrategySchema) {
 </script>
 
 <template>
-  <div class="types-view">
-    <header class="page-header">
-      <div>
-        <h2>策略类型</h2>
-        <p class="subtitle">
-          共 {{ strategies.length }} 种（内置 {{ builtinTypes.length }} / 自定义 {{ customTypes.length }}）。
-          内置类型是代码实现，只能查看；自定义类型是"基于内置的命名预设包"，可新增/编辑/删除，
-          建好后在回测、寻优、信号扫描里与内置一样选用。
-        </p>
-      </div>
-      <div class="header-actions">
-        <input v-model="search" class="search mono" placeholder="搜索内置类型…" />
-        <button class="ghost" :disabled="loading" @click="load">
-          {{ loading ? '刷新中…' : '↻ 刷新' }}
-        </button>
-        <button class="primary" @click="openCreate">＋ 新增自定义类型</button>
-      </div>
-    </header>
+  <PageShell
+    title="策略类型"
+    :desc="`共 ${strategies.length} 种（内置 ${builtinTypes.length} / 自定义 ${customTypes.length}）。内置类型是代码实现，只能查看；自定义类型是“基于内置的命名预设包”，可新增/编辑/删除，建好后在回测、寻优、信号扫描里与内置一样选用。`"
+  >
+    <template #actions>
+      <input v-model="search" class="search mono" placeholder="搜索内置类型…" />
+      <button class="ghost" :disabled="loading" @click="load">
+        {{ loading ? '刷新中…' : '↻ 刷新' }}
+      </button>
+      <button class="primary" @click="openCreate">＋ 新增自定义类型</button>
+    </template>
 
     <div v-if="error" class="error-banner">⚠ {{ error }}</div>
 
@@ -391,15 +385,10 @@ async function onDelete(s: StrategySchema) {
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.types-view {
-  height: 100%;
-  overflow-y: auto;
-  padding: 16px 20px 32px;
-}
 .page-header {
   display: flex;
   align-items: center;
@@ -434,7 +423,7 @@ async function onDelete(s: StrategySchema) {
   padding: 7px 16px;
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
   border-radius: var(--radius);
   cursor: pointer;
@@ -466,7 +455,7 @@ async function onDelete(s: StrategySchema) {
   font-size: 12px;
 }
 .error-banner {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   border: 1px solid var(--up);
   color: var(--up);
   padding: 10px 14px;
@@ -489,13 +478,13 @@ async function onDelete(s: StrategySchema) {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 .card-custom {
-  border-color: rgba(245, 158, 11, 0.35);
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
 }
 .card-head {
   display: flex;
@@ -534,13 +523,13 @@ async function onDelete(s: StrategySchema) {
   font-size: 11px;
   padding: 2px 7px;
   border-radius: 4px;
-  background: rgba(74, 158, 255, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   white-space: nowrap;
 }
 .kind-badge.custom {
-  background: rgba(245, 158, 11, 0.18);
-  color: #f59e0b;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
 }
 .danger {
   border: 1px solid var(--border);

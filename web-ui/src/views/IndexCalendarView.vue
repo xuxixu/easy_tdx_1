@@ -9,6 +9,7 @@ import { fmt2, fmtAmount, fmtPctSigned, pctCellStyle } from '../format'
 import { enabledIndices } from '../indexIndicators'
 import { useMarketStore } from '../stores/market'
 import type { Bar } from '../types'
+import { createSeqGuard } from '../utils/asyncGuard'
 
 const marketStore = useMarketStore()
 
@@ -40,9 +41,17 @@ const error = ref('')
 const bars = ref<Bar[]>([])
 const lastUpdate = ref('')
 
+// 序号守卫：指数 chip 与「重试」按钮均可连点，A 股走 /bars/index、港美股走
+// /bars，两条路径耗时不同，慢的旧指数会覆盖新的（页头标签已切成新的，
+// 热力图却是别的指数）。
+const indexGuard = createSeqGuard()
+
 async function loadIndex(idx: number) {
   const meta = indices.value[idx]
   if (!meta) return
+  // 无论命中缓存还是回源，都要先领取新序号：让仍在飞的旧指数请求立即失效。
+  // 否则「切到已缓存指数（直接 return）→ 旧请求随后返回」会把旧数据盖上来。
+  const my = indexGuard.next()
   const key = `${meta.market}${meta.code}`
   const cached = barsByIndex.get(key)
   if (cached) {
@@ -58,6 +67,7 @@ async function loadIndex(idx: number) {
     const data = marketStore.isAShareMode
       ? await fetchIndexBars(meta.market, meta.code, 550) // ≈2.2 年
       : await fetchBars(meta.market, meta.code, 'DAY', undefined, undefined)
+    if (indexGuard.stale(my)) return
     if (data.length === 0) {
       // 空数据不入缓存：否则"重试"命中缓存直接 return，永远无法重新请求
       error.value = `${meta.name} 日K返回空`
@@ -67,9 +77,10 @@ async function loadIndex(idx: number) {
     bars.value = data
     lastUpdate.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (e) {
+    if (indexGuard.stale(my)) return
     error.value = formatError(e)
   } finally {
-    loading.value = false
+    if (!indexGuard.stale(my)) loading.value = false
   }
 }
 
@@ -232,6 +243,7 @@ onMounted(() => loadIndex(activeIdx.value))
           v-for="(m, i) in indices"
           :key="m.code"
           :class="{ on: activeIdx === i }"
+          :disabled="loading"
           @click="onIndexChange(i)"
         >
           {{ m.name }}
@@ -258,7 +270,7 @@ onMounted(() => loadIndex(activeIdx.value))
 
     <div v-if="error" class="err card">
       加载失败：{{ error }}
-      <button @click="onIndexChange(activeIdx)">重试</button>
+      <button :disabled="loading" @click="onIndexChange(activeIdx)">重试</button>
     </div>
     <div v-else-if="loading" class="loading">指数日K加载中…</div>
 
@@ -335,10 +347,10 @@ onMounted(() => loadIndex(activeIdx.value))
 .calendar-view {
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 .view-head,
 .toolbar,
@@ -383,7 +395,7 @@ onMounted(() => loadIndex(activeIdx.value))
 .seg button.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   position: relative;
   z-index: 1;
 }
@@ -408,22 +420,22 @@ onMounted(() => loadIndex(activeIdx.value))
   margin: 0 1px;
 }
 .sw.u1 {
-  background: rgba(239, 65, 70, 0.26);
+  background: color-mix(in srgb, var(--up) 26%, transparent);
 }
 .sw.u2 {
-  background: rgba(239, 65, 70, 0.5);
+  background: color-mix(in srgb, var(--up) 50%, transparent);
 }
 .sw.u3 {
-  background: rgba(239, 65, 70, 0.82);
+  background: color-mix(in srgb, var(--up) 82%, transparent);
 }
 .sw.d1 {
-  background: rgba(24, 160, 88, 0.26);
+  background: color-mix(in srgb, var(--down) 26%, transparent);
 }
 .sw.d2 {
-  background: rgba(24, 160, 88, 0.5);
+  background: color-mix(in srgb, var(--down) 50%, transparent);
 }
 .sw.d3 {
-  background: rgba(24, 160, 88, 0.82);
+  background: color-mix(in srgb, var(--down) 82%, transparent);
 }
 .err {
   color: var(--up);
@@ -505,7 +517,7 @@ onMounted(() => loadIndex(activeIdx.value))
   position: fixed;
   z-index: 1000;
   pointer-events: none;
-  background: rgba(26, 29, 38, 0.96);
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 7px 10px;

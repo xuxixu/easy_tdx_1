@@ -364,7 +364,8 @@ export interface OptimizeAllResult {
 
 export interface ApiError {
   error: string
-  detail: string
+  /** 422（Pydantic 校验失败）时是数组，其余是字符串。 */
+  detail: string | unknown[]
 }
 
 // ── 策略库（已保存策略，GET/POST/DELETE /api/v1/strategies） ─────────────────

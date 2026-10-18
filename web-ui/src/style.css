@@ -36,6 +36,32 @@
   --hairline: rgba(255, 255, 255, 0.05); /* 低对比分隔线/进度槽 */
   --warn-soft: rgba(240, 160, 32, 0.08);
   --warn-line: rgba(240, 160, 32, 0.35);
+  --on-accent: #ffffff; /* accent 底色上的文字 */
+  --tag-purple: #b39ddb; /* 「自定义/用户产」标记 */
+  --tag-purple-soft: rgba(140, 110, 220, 0.18);
+  --scheme: dark; /* 供 color-scheme 使用，JS 未执行时的原生控件配色 */
+
+  /* ── 排版刻度 ──────────────────────────────────────────────────────────
+     全站此前间距/字号散落成 2/5/6/7/8/10/12/14/16/18/20/24/28/32 等一堆值，
+     同一层级在不同页面视觉重量不同。这里收敛成 4 的倍数 + 有限字号档，
+     新样式一律引用这些 token；老样式的硬编码值逐步替换。 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-title: 17px; /* 页面标题：略大于正文标题，但不像 h2 默认值那么夸张 */
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
 }
 
 * {
@@ -55,6 +81,40 @@ body,
     Roboto, Helvetica, Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
+}
+
+/* 标题：全站此前没有任何 h1–h6 规则（22 个页面里也没有一处 scoped 定义），
+   标题吃的是浏览器默认样式——而默认值是相对父级 font-size 的 em。
+   父容器字号不同的页面，同一级标题就大小不一；这里统一成绝对字号 + 统一字重。 */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.2px;
+  color: var(--text);
+}
+h1 {
+  font-size: var(--fs-xl);
+}
+h2 {
+  font-size: var(--fs-title);
+}
+h3 {
+  font-size: var(--fs-base);
+}
+h4 {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+h5,
+h6 {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 button {
@@ -88,19 +148,36 @@ button.primary:disabled {
 input,
 select,
 textarea {
-  background: var(--bg);
+  /* 用面板色而非页面底色：深色主题下 --bg 与页面背景同色，
+     输入框只剩一圈极淡的描边，视觉上「看不出这里能填东西」。 */
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   color: var(--text);
   padding: 6px 10px;
   border-radius: var(--radius);
   font-size: 13px;
   width: 100%;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--text-dim);
 }
 input:focus,
 select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--accent);
+  /* 焦点光晕：只用 1px 描边变色的提示太弱，在密集表单里容易跟丢光标。
+     color-mix 让光晕自动跟随主题强调色；老浏览器不支持时只是没有光晕，不影响可用性。 */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-dim);
 }
 
 label {
@@ -166,16 +243,27 @@ a {
   text-align: right;
   color: var(--text-dim);
   font-weight: 500;
-  padding: 5px 8px;
+  /* 表头略小 + 字距：数据行是紧凑数字，表头比数据更「安静」才不抢视线 */
+  font-size: 11.5px;
+  letter-spacing: 0.3px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
 }
 .qtable td {
   text-align: right;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
+  /* 行分隔比表头分隔更淡：一眼能分出「表头区」与「数据区」 */
+  border-bottom: 1px solid var(--hairline);
   white-space: nowrap;
   font-family: var(--font-mono);
+}
+.qtable tbody tr {
+  transition: background 0.12s ease;
+}
+.qtable tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .qtable th:first-child,
 .qtable td:first-child {

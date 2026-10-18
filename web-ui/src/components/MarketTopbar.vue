@@ -216,7 +216,7 @@ const errOpen = ref(false)
   background: var(--bg-panel);
 }
 .seg-btn.active {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
   font-weight: 600;
 }
@@ -292,7 +292,7 @@ const errOpen = ref(false)
   line-height: 13px;
   font-family: var(--font-mono);
   text-align: center;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--up);
   border-radius: 7px;
   font-variant-numeric: tabular-nums;

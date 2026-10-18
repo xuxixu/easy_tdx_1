@@ -32,14 +32,14 @@ withDefaults(defineProps<{ prominent?: boolean }>(), { prominent: false })
   margin-top: 10px;
 }
 .risk.prominent {
-  background: rgba(255, 193, 7, 0.07);
-  border: 1px solid rgba(255, 193, 7, 0.35);
+  background: color-mix(in srgb, var(--warn) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
   border-radius: var(--radius);
   padding: 10px 12px;
   margin-top: 0;
 }
 .risk.prominent strong {
-  color: var(--warn, #ffc107);
+  color: var(--warn, var(--warn));
   display: block;
   margin-bottom: 4px;
   font-size: 12px;

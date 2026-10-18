@@ -20,6 +20,7 @@ import {
   submitEvaluateTask,
   fetchTask,
 } from '../api'
+import { abortError, isAbortError, sleep } from '../utils/asyncGuard'
 import type {
   BacktestRequest,
   BacktestResult,
@@ -37,18 +38,53 @@ import type {
   WalkForwardResult,
 } from '../types'
 
+/**
+ * 所有后台任务轮询共用的中止开关。
+ *
+ * 回测类任务最长要跑 10 分钟（600s 超时），轮询间隔 300~500ms。旧实现完全
+ * 不支持中止：用户切走页面后轮询仍在后台持续打 HTTP，结束时还会把
+ * running / error 写回 store —— 而 BacktestView 与其它页面共享同一个 store，
+ * 于是用户会在**无关的页面**上看到一条不属于本页的报错横幅。
+ *
+ * 用法：页面在 `onBeforeUnmount` 里调用 `cancelAll()`。
+ */
+let taskControllers: AbortController[] = []
+
+/** 领一个受 store 统一管理的中止信号（每发起一次任务轮询调用一次）。 */
+function newTaskSignal(): AbortSignal {
+  const ctrl = new AbortController()
+  taskControllers.push(ctrl)
+  return ctrl.signal
+}
+
+/** 中止全部在飞的轮询；已完成的会被忽略。 */
+function cancelAll(reason = '任务已取消') {
+  const pending = taskControllers
+  taskControllers = []
+  for (const ctrl of pending) ctrl.abort(abortError(reason))
+}
+
 /** 轮询后台任务直到终态（done 返回 result，failed/超时/结果缺失抛错）。 */
-async function pollTask<T>(taskId: string, timeoutMs: number, what: string): Promise<T> {
+async function pollTask<T>(
+  taskId: string,
+  timeoutMs: number,
+  what: string,
+  signal?: AbortSignal,
+  intervalMs = 400,
+): Promise<T> {
   const start = Date.now()
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const state = await fetchTask(taskId)
+    if (signal?.aborted) throw abortError(`${what}已取消`)
+    // 等待段也必须可中断：否则 abort 之后仍要等满一个 interval 才退出
+    const state = await fetchTask(taskId, signal)
+    if (signal?.aborted) throw abortError(`${what}已取消`)
     if (state.status === 'done' && state.result) return state.result as T
     // done 但 result 为空：不能继续等（会一直空转到超时），直接报错更易排查
     if (state.status === 'done') throw new Error(`${what}结果为空`)
     if (state.status === 'failed') throw new Error(state.error || `${what}失败`)
     if (Date.now() - start > timeoutMs) throw new Error(`${what}超时（${timeoutMs / 1000}s）`)
-    await new Promise((r) => setTimeout(r, 400))
+    if (await sleep(intervalMs, signal)) throw abortError(`${what}已取消`)
   }
 }
 
@@ -115,14 +151,21 @@ export const useBacktestStore = defineStore('backtest', () => {
   /** 提交 WF 样本外验证后台任务并轮询（与主回测共用同一份内联 OHLCV）。 */
   async function runWalkforward(req: Omit<BacktestRequest, 'ohlcv'>, nWindows = 7) {
     if (!hasBars.value) return
+    const signal = newTaskSignal()
     wfRunning.value = true
     wfError.value = ''
     wfResult.value = null
     try {
       const { task_id } = await submitWalkforwardTask({ ...req, ohlcv: ohlcv.value }, nWindows)
-      const body = await pollTask<{ walkforward: WalkForwardResult }>(task_id, 180_000, 'WF 验证')
+      const body = await pollTask<{ walkforward: WalkForwardResult }>(
+        task_id,
+        180_000,
+        'WF 验证',
+        signal,
+      )
       wfResult.value = body.walkforward
     } catch (e) {
+      if (isAbortError(e)) return // 页面切走导致的取消，不记错误
       wfError.value = formatError(e)
       wfResult.value = null
     } finally {
@@ -133,13 +176,20 @@ export const useBacktestStore = defineStore('backtest', () => {
   /** 提交一条龙评估后台任务并轮询（回测+WF+适配性+评分+基准对比）。 */
   async function runEvaluate(req: Omit<BacktestRequest, 'ohlcv'>) {
     if (!hasBars.value) return
+    const signal = newTaskSignal()
     evaluateRunning.value = true
     evaluateError.value = ''
     evaluateResult.value = null
     try {
       const { task_id } = await submitEvaluateTask({ ...req, ohlcv: ohlcv.value })
-      evaluateResult.value = await pollTask<EvaluateReport>(task_id, 300_000, '一条龙评估')
+      evaluateResult.value = await pollTask<EvaluateReport>(
+        task_id,
+        300_000,
+        '一条龙评估',
+        signal,
+      )
     } catch (e) {
+      if (isAbortError(e)) return
       evaluateError.value = formatError(e)
       evaluateResult.value = null
     } finally {
@@ -160,27 +210,21 @@ export const useBacktestStore = defineStore('backtest', () => {
 
   /** 提交组合回测后台任务并轮询直到完成。 */
   async function runPortfolio(req: PortfolioBacktestRequest) {
+    const signal = newTaskSignal()
     portfolioRunning.value = true
     error.value = ''
     portfolioResult.value = null
     try {
       const { task_id } = await submitPortfolioTask(req)
-      // 轮询
-      const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const state = await fetchTask(task_id)
-        if (state.status === 'done' && state.result) {
-          portfolioResult.value = state.result as PortfolioResult
-          break
-        }
-        if (state.status === 'failed') {
-          throw new Error(state.error || '组合回测失败')
-        }
-        if (Date.now() - start > 120_000) throw new Error('组合回测超时（120s）')
-        await new Promise((r) => setTimeout(r, 300))
-      }
+      portfolioResult.value = await pollTask<PortfolioResult>(
+        task_id,
+        120_000,
+        '组合回测',
+        signal,
+        300,
+      )
     } catch (e) {
+      if (isAbortError(e)) return
       error.value = formatError(e)
       portfolioResult.value = null
     } finally {
@@ -203,6 +247,7 @@ export const useBacktestStore = defineStore('backtest', () => {
 
   /** 提交组合级 WF 样本外验证后台任务并轮询（N 标的 × N 窗，比单标的慢）。 */
   async function runPortfolioWalkforward(req: PortfolioBacktestRequest, nWindows = 7) {
+    const signal = newTaskSignal()
     portfolioWfRunning.value = true
     portfolioWfError.value = ''
     portfolioWfResult.value = null
@@ -212,9 +257,11 @@ export const useBacktestStore = defineStore('backtest', () => {
         task_id,
         300_000,
         '组合 WF 验证',
+        signal,
       )
       portfolioWfResult.value = body.walkforward
     } catch (e) {
+      if (isAbortError(e)) return
       portfolioWfError.value = formatError(e)
       portfolioWfResult.value = null
     } finally {
@@ -224,6 +271,7 @@ export const useBacktestStore = defineStore('backtest', () => {
 
   /** 提交组合级一条龙评估后台任务并轮询（组合回测+WF+适配性+评分+基准对比）。 */
   async function runPortfolioEvaluate(req: PortfolioBacktestRequest) {
+    const signal = newTaskSignal()
     portfolioEvaluateRunning.value = true
     portfolioEvaluateError.value = ''
     portfolioEvaluateResult.value = null
@@ -233,8 +281,10 @@ export const useBacktestStore = defineStore('backtest', () => {
         task_id,
         600_000,
         '组合一条龙评估',
+        signal,
       )
     } catch (e) {
+      if (isAbortError(e)) return
       portfolioEvaluateError.value = formatError(e)
       portfolioEvaluateResult.value = null
     } finally {
@@ -256,6 +306,7 @@ export const useBacktestStore = defineStore('backtest', () => {
   /** 提交多策略组合回测后台任务并轮询直到完成。
    * 结果结构同 PortfolioResult（复用组合页图表组件）。 */
   async function runMultiStrategy(req: MultiStrategyBacktestRequest) {
+    const signal = newTaskSignal()
     multiStrategyRunning.value = true
     error.value = ''
     multiStrategyResult.value = null
@@ -263,21 +314,14 @@ export const useBacktestStore = defineStore('backtest', () => {
     clearMultiStrategyExtraAnalysis()
     try {
       const { task_id } = await submitMultiStrategyTask(req)
-      const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const state = await fetchTask(task_id)
-        if (state.status === 'done' && state.result) {
-          multiStrategyResult.value = state.result as PortfolioResult
-          break
-        }
-        if (state.status === 'failed') {
-          throw new Error(state.error || '多策略组合回测失败')
-        }
-        if (Date.now() - start > 180_000) throw new Error('多策略组合回测超时（180s）')
-        await new Promise((r) => setTimeout(r, 400))
-      }
+      multiStrategyResult.value = await pollTask<PortfolioResult>(
+        task_id,
+        180_000,
+        '多策略组合回测',
+        signal,
+      )
     } catch (e) {
+      if (isAbortError(e)) return
       error.value = formatError(e)
       multiStrategyResult.value = null
     } finally {
@@ -301,6 +345,7 @@ export const useBacktestStore = defineStore('backtest', () => {
 
   /** 提交多策略组合级 WF 样本外验证后台任务并轮询（N 槽位 × N 窗，较慢）。 */
   async function runMultiStrategyWalkforward(req: MultiStrategyBacktestRequest, nWindows = 7) {
+    const signal = newTaskSignal()
     multiWfRunning.value = true
     multiWfError.value = ''
     multiWfResult.value = null
@@ -310,9 +355,11 @@ export const useBacktestStore = defineStore('backtest', () => {
         task_id,
         300_000,
         '组合 WF 验证',
+        signal,
       )
       multiWfResult.value = body.walkforward
     } catch (e) {
+      if (isAbortError(e)) return
       multiWfError.value = formatError(e)
       multiWfResult.value = null
     } finally {
@@ -322,6 +369,7 @@ export const useBacktestStore = defineStore('backtest', () => {
 
   /** 提交多策略组合级一条龙评估后台任务并轮询（组合回测+WF+适配性+评分+基准对比）。 */
   async function runMultiStrategyEvaluate(req: MultiStrategyBacktestRequest) {
+    const signal = newTaskSignal()
     multiEvaluateRunning.value = true
     multiEvaluateError.value = ''
     multiEvaluateResult.value = null
@@ -331,8 +379,10 @@ export const useBacktestStore = defineStore('backtest', () => {
         task_id,
         600_000,
         '组合一条龙评估',
+        signal,
       )
     } catch (e) {
+      if (isAbortError(e)) return
       multiEvaluateError.value = formatError(e)
       multiEvaluateResult.value = null
     } finally {
@@ -376,26 +426,15 @@ export const useBacktestStore = defineStore('backtest', () => {
 
   /** 提交寻优后台任务并轮询直到完成。 */
   async function runOptimize(req: OptimizeBacktestRequest) {
+    const signal = newTaskSignal()
     optimizeRunning.value = true
     error.value = ''
     optimizeResult.value = null
     try {
       const { task_id } = await submitOptimizeTask(req)
-      const start = Date.now()
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const state = await fetchTask(task_id)
-        if (state.status === 'done' && state.result) {
-          optimizeResult.value = state.result as OptimizeResult
-          break
-        }
-        if (state.status === 'failed') {
-          throw new Error(state.error || '寻优失败')
-        }
-        if (Date.now() - start > 180_000) throw new Error('寻优超时（180s）')
-        await new Promise((r) => setTimeout(r, 400))
-      }
+      optimizeResult.value = await pollTask<OptimizeResult>(task_id, 180_000, '寻优', signal)
     } catch (e) {
+      if (isAbortError(e)) return
       error.value = formatError(e)
       optimizeResult.value = null
     } finally {
@@ -409,27 +448,22 @@ export const useBacktestStore = defineStore('backtest', () => {
 
   /** 提交「一键寻优所有策略」后台任务并轮询直到完成。 */
   async function runOptimizeAll(req: OptimizeAllBacktestRequest) {
+    const signal = newTaskSignal()
     optimizeAllRunning.value = true
     error.value = ''
     optimizeAllResult.value = null
     try {
       const { task_id } = await submitOptimizeAllTask(req)
-      const start = Date.now()
       // 一键寻优全策略网格点更多，放宽超时到 300s
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const state = await fetchTask(task_id)
-        if (state.status === 'done' && state.result) {
-          optimizeAllResult.value = state.result as OptimizeAllResult
-          break
-        }
-        if (state.status === 'failed') {
-          throw new Error(state.error || '一键寻优失败')
-        }
-        if (Date.now() - start > 300_000) throw new Error('一键寻优超时（300s）')
-        await new Promise((r) => setTimeout(r, 500))
-      }
+      optimizeAllResult.value = await pollTask<OptimizeAllResult>(
+        task_id,
+        300_000,
+        '一键寻优',
+        signal,
+        500,
+      )
     } catch (e) {
+      if (isAbortError(e)) return
       error.value = formatError(e)
       optimizeAllResult.value = null
     } finally {
@@ -496,5 +530,7 @@ export const useBacktestStore = defineStore('backtest', () => {
     runOptimize,
     runOptimizeAll,
     setOptimizeContext,
+    // 中止：页面 onBeforeUnmount 调用，取消全部在飞的任务轮询
+    cancelAll,
   }
 })

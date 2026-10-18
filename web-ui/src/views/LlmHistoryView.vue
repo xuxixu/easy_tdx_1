@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageShell from '../components/PageShell.vue'
 // AI 解读历史页：历次「直接解读」的提问 Prompt + 模型解读 + 策略上下文。
 // 每条可展开查看全文，「去回测」带策略/参数/标的/周期/日期一键跳回回测页，
 // 「重新解读」用原 Prompt 再发起一次（模型更新/换模型后对比）。
@@ -89,9 +90,9 @@ async function onClearAll() {
 </script>
 
 <template>
-  <div class="ai-history">
+  <PageShell title="AI 解读历史" desc="历史解读归档，可带参数跳回回测复现当时的场景">
+    <div class="layout">
     <aside class="side-panel">
-      <h2>AI 解读历史</h2>
       <p class="hint">
         每次「直接解读」成功后自动归档：提问 Prompt、模型解读、以及当时的策略配置。
         「去回测」可一键带参数跳回回测页复现当时的场景；「重新解读」适合换模型后对比结论。
@@ -149,13 +150,15 @@ async function onClearAll() {
         </div>
       </div>
     </main>
-  </div>
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.ai-history {
+.layout {
   display: flex;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 .side-panel {
@@ -179,10 +182,10 @@ async function onClearAll() {
 .error-banner {
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.1);
+  background: color-mix(in srgb, var(--up) 10%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--red, #f44336);
+  color: var(--red, var(--up));
 }
 .list-panel {
   flex: 1;
@@ -261,7 +264,7 @@ async function onClearAll() {
 .ai-note {
   margin-top: 6px;
   font-size: 11px;
-  color: var(--warn, #ffc107);
+  color: var(--warn, var(--warn));
 }
 .actions {
   display: flex;
@@ -271,7 +274,7 @@ async function onClearAll() {
 .btn-primary {
   padding: 5px 14px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
@@ -297,14 +300,14 @@ async function onClearAll() {
 .btn-danger {
   padding: 5px 14px;
   background: transparent;
-  border: 1px solid rgba(244, 67, 54, 0.5);
-  color: var(--red, #f44336);
+  border: 1px solid color-mix(in srgb, var(--up) 50%, transparent);
+  color: var(--red, var(--up));
   border-radius: var(--radius);
   cursor: pointer;
   font-size: 12px;
 }
 .btn-danger:hover {
-  background: rgba(244, 67, 54, 0.1);
+  background: color-mix(in srgb, var(--up) 10%, transparent);
 }
 .prompt {
   margin-top: 10px;

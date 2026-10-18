@@ -1,0 +1,167 @@
+/* 美股观测雷达 —— 整页共享样式与设计 token。
+ *
+ * 为什么要单独一层：原站是一套自带的深色调色板（--panel/--cyan/--text2/--text3…），
+ * 而本项目有 4 套可切换主题。若把原站的颜色值直接抄进来，这一页就会在
+ * 「晴昼/宣纸」两套浅色主题下变成一块深色补丁。
+ * 所以这里只做「语义映射」：把原站的角色名接到项目已有 token 上
+ * （--panel → --bg-panel、--cyan → --accent、--amber → --warn…），
+ * 页面因此天然跟随主题，同时保留原站的信息密度与配色语义
+ * （红涨绿跌两站一致，不需要翻译）。
+ *
+ * 类名统一 rd- 前缀，且全部限定在 .radar-page 之下——
+ * 这些页面级样式是全局导入的，不加前缀会污染其余 20 多个页面。
+ */
+
+.radar-page {
+  /* 语义映射：原站角色 → 本项目 token */
+  --rd-panel: var(--bg-panel);
+  --rd-panel2: var(--bg-elevated);
+  --rd-cyan: var(--accent);
+  --rd-amber: var(--warn);
+  --rd-violet: var(--tag-purple);
+  --rd-line: var(--hairline);
+  /* 半透明底色：原站用 rgba 字面量，这里用 color-mix 跟随主题色 */
+  --rd-up-dim: color-mix(in srgb, var(--up) 14%, transparent);
+  --rd-down-dim: color-mix(in srgb, var(--down) 14%, transparent);
+  --rd-cyan-dim: color-mix(in srgb, var(--accent) 9%, transparent);
+  --rd-amber-dim: color-mix(in srgb, var(--warn) 11%, transparent);
+
+  color: var(--text);
+  /* 原站用等宽数字做表格对齐；这里沿用项目全局的 mono 定义 */
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── 语义色 ────────────────────────────────────────────────────────── */
+.rd-up {
+  color: var(--up);
+}
+.rd-down {
+  color: var(--down);
+}
+.rd-flat {
+  color: var(--text-muted);
+}
+.rd-dim {
+  color: var(--text-dim);
+}
+/* 量比/RS 异常高亮：原站用 --amber，和风控信号同色，语义一致 */
+.rd-hi {
+  color: var(--warn);
+  font-weight: 600;
+}
+.rd-cyan {
+  color: var(--rd-cyan);
+}
+.rd-amber {
+  color: var(--rd-amber);
+}
+.rd-violet {
+  color: var(--rd-violet);
+}
+
+/* ── 小标签：全站大量使用的 9.5~11px 等宽字距标签 ──────────────────── */
+.rd-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+.rd-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+/* ── 面板 ──────────────────────────────────────────────────────────── */
+.rd-panel {
+  background: var(--rd-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  /* min-width:0 是必需的：面板常作为 grid/flex 的子项使用，而 grid 子项默认
+     min-width:auto —— 里面一段长文本会把所在轨道撑到内容宽度，
+     把同排的另一格挤成一条竖线。 */
+  min-width: 0;
+}
+/* 带左侧色条的判读块（结论 / 规则 / 提示） */
+.rd-callout {
+  border-left: 3px solid var(--rd-cyan);
+  border-radius: var(--radius-sm);
+  background: var(--rd-cyan-dim);
+  padding: 8px 12px;
+}
+.rd-callout.rd-callout-warn {
+  border-left-color: var(--rd-amber);
+  background: var(--rd-amber-dim);
+}
+
+/* ── 数据表：原站是宽表 + 悬停高亮，这里复用项目 qtable 的形制 ──────── */
+.rd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.rd-table th {
+  text-align: right;
+  font-weight: 500;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  padding: 5px 7px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--rd-panel2) 60%, transparent);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.rd-table td {
+  text-align: right;
+  padding: 3.5px 7px;
+  border-bottom: 1px solid var(--rd-line);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.rd-table tbody tr:hover {
+  background: var(--rd-cyan-dim);
+}
+.rd-table th:first-child,
+.rd-table td:first-child {
+  text-align: left;
+  font-family: inherit;
+}
+
+/* ── 进度条：成交量占比 / 拥挤度 / 区间位置共用 ─────────────────────── */
+.rd-track {
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--rd-line);
+}
+.rd-track > i {
+  display: block;
+  height: 100%;
+}
+
+/* ── 可点击下钻的行 ────────────────────────────────────────────────── */
+.rd-drill {
+  cursor: pointer;
+}
+.rd-drill:hover {
+  background: var(--rd-cyan-dim);
+}
+
+/* 质地/拥挤度的等级药丸 */
+.rd-pill {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}

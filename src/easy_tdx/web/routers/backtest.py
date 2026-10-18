@@ -1393,6 +1393,8 @@ def _optimize_one_strategy(
     commission: float,
     slippage: float,
     execution: str,
+    min_commission: float = 5.0,
+    stamp_tax: float = 0.001,
 ) -> dict[str, Any] | None:
     """跑单个策略的网格寻优，返回其最优点摘要（模块顶层，可被 ProcessPoolExecutor pickle）。
 
@@ -1412,6 +1414,8 @@ def _optimize_one_strategy(
             df=df,
             cash=cash,
             commission=commission,
+            min_commission=min_commission,
+            stamp_tax=stamp_tax,
             slippage=slippage,
             execution=execution,
         )
@@ -1453,6 +1457,12 @@ def _run_optimize_all(df: pd.DataFrame, req: OptimizeAllBacktestRequest) -> dict
     from easy_tdx.backtest.strategies.presets import STRATEGY_PRESETS
 
     registry = get_registry()
+    # 与 /optimize、/backtest 同口径：先按品种解析费率（ETF/可转债免印花税）。
+    # 此前一键寻优只传 commission/slippage，min_commission/stamp_tax 落默认值，
+    # 导致同一标的在「一键寻优」与「单策略寻优」下的收益对不上。
+    commission, min_commission, stamp_tax = _resolve_effective_fees(
+        req.auto_fees, req.symbol, req.commission, req.min_commission, req.stamp_tax
+    )
     # 过滤出已注册的策略 + 解析 label（label 必须在主进程取，避免子进程各自解析不一致）
     jobs: list[tuple[str, dict[str, list[Any]]]] = []
     labels: dict[str, str] = {}
@@ -1475,9 +1485,11 @@ def _run_optimize_all(df: pd.DataFrame, req: OptimizeAllBacktestRequest) -> dict
                     grid,
                     df,
                     req.cash,
-                    req.commission,
+                    commission,
                     req.slippage,
                     req.execution,
+                    min_commission,
+                    stamp_tax,
                 ): name
                 for name, grid in jobs
             }
@@ -1488,7 +1500,15 @@ def _run_optimize_all(df: pd.DataFrame, req: OptimizeAllBacktestRequest) -> dict
     else:
         for name, grid in jobs:
             res = _optimize_one_strategy(
-                name, grid, df, req.cash, req.commission, req.slippage, req.execution
+                name,
+                grid,
+                df,
+                req.cash,
+                commission,
+                req.slippage,
+                req.execution,
+                min_commission,
+                stamp_tax,
             )
             if res is not None:
                 raw_results.append(res)
@@ -1528,9 +1548,13 @@ def _run_optimize_all(df: pd.DataFrame, req: OptimizeAllBacktestRequest) -> dict
         buy_hold=run_buy_hold_benchmark(
             df,
             cash=req.cash,
-            commission=req.commission,
+            commission=commission,
+            min_commission=min_commission,
+            stamp_tax=stamp_tax,
             slippage=req.slippage,
             execution=req.execution,
+            symbol=req.symbol,
+            auto_fees=req.auto_fees,
         ),
     )
     return result_obj.model_dump()

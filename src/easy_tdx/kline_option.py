@@ -327,6 +327,9 @@ def build_kline_option(
             "gridIndex": 1,
             "data": dates,
             "boundaryGap": True,
+            # 日期标签只画一次，且画在最下方那个子图上：有副图时由 grid 2 承担，
+            # 否则同一排日期会在成交量图与副图下方各重复一遍（三行一样的日期）。
+            "axisLabel": {"show": not has_sub},
             "axisTick": {"show": False},
         },
     ]
@@ -366,7 +369,9 @@ def build_kline_option(
     if has_sub and sub_legend != "":
         legend_names.append(sub_legend)
 
-    start = max(0, 100 - (120 / n) * 100) if n > 0 else 0
+    # 初始视窗显示最近 250 根（约一年），其余靠底部滑块往左拖。
+    # 原为 120：数据量提到 800 根后仍只露 120 根，用户会以为「没有更早的数据」。
+    start = max(0, 100 - (250 / n) * 100) if n > 0 else 0
     return {
         "backgroundColor": "transparent",
         "legend": {"data": legend_names, "top": 0, "textStyle": {"fontSize": 11}},

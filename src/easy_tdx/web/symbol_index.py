@@ -139,8 +139,12 @@ def get_index(market: str, *, client: Any = None, refresh: bool = False) -> _Sym
             from easy_tdx import MacExClient
 
             client = MacExClient.from_best_host()
-            client.connect()
+            # 先登记待关闭对象、再 connect()。connect() 内部要建 socket + 登录，
+            # 两步都可能抛（扩展行情服务器不可达是常态）。旧写法在 connect()
+            # 之后才赋值，一旦抛错 client_to_close 仍是 None，finally 什么都
+            # 关不掉 —— 每次冷路径请求泄漏一条 socket。
             client_to_close = client
+            client.connect()
         rows = _fetch_all(client, token)
     except Exception as exc:  # noqa: BLE001 — 索引失败不应炸掉整个请求
         logger.warning("拉取 %s 符号索引失败: %s", token, exc)

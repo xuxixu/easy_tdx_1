@@ -30,6 +30,10 @@ CLAUDE.md
 .npm-cache/
 .uv-cache/
 
+# 美股观测雷达的日线缓存（build_us_radar.py 的本地 parquet，300 只标的，
+# 随时可由公开数据源重取；入库会让仓库平白多出几十 MB 二进制）
+.radar_cache/
+
 # 代码审计报告（本地产物，不入库）
 audit-report-*.html
 
@@ -41,11 +45,15 @@ web-ui/playwright-report/
 # ZCode agent 会话目录（本地，不入库）
 .zcode/
 
+# OpenChamber agent 本地会话目录（截图/缓存，仅本地，非库代码；与 .claude/ .omc/ 同一惯例）
+.openchamber/
+
 # WorkBuddy agent 工作目录（本地会话/记忆，不入库；与 .claude/ .omc/ 同一惯例）
 .workbuddy/
 
 # 本地 akshare 探测脚本（根目录临时试验用，非库代码）
 _ak*.py
+_probe.py
 
 # uv 锁定文件（本项目文档以 pip 为准，uv.lock 属本机工具链产物）
 uv.lock

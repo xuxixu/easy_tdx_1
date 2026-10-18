@@ -111,7 +111,10 @@ class BacktestEngine:
             slippage: Slippage rate
             execution: Execution mode ('next_open', 'next_close')
             position_mode: Position mode ('full', 'long_only', 'short_only')
-            reject_policy: Reject policy ('reduce', 'reject')
+            reject_policy: Reject policy ('reduce', 'skip')。资金不足时 'reduce'
+                按可用现金降仓买入、'skip' 记一笔 rejected 空单；非法取值会
+                ValueError 快失败（旧文档误写作 'reject'，传该值会被静默忽略
+                并产生超额买入）。
             benchmark: Benchmark data for performance comparison
             chanlun_level: Auto-compute chanlun analysis at this level
                 (e.g. 'DAILY', '30MIN'). Strategy accesses via self.chanlun.
@@ -300,19 +303,37 @@ class BacktestEngine:
 
     @staticmethod
     def _find_bar_index(df: pd.DataFrame, datetime_val: int) -> int | None:
-        """Find bar index by datetime value."""
+        """Find bar **position** index by datetime value.
+
+        返回的是**位置**索引（可直接喂给 ``.iloc``），而非 index 标签。
+        调用方 :meth:`_execute_with_model` 会把结果交给 ExecutionModel，后者
+        一律按位置取数（``df["open"].iloc[bar_idx]``）。当 df 的 index 不是
+        RangeIndex（调用方做过 dropna / 切片 / 拼接时很常见），``idxmax()``
+        返回的标签值与位置索引不一致，成交会整体落在错误的 K 线上。
+        这里统一换算成位置，与 PortfolioTracker 的 datetime→位置 映射同口径。
+        """
         dt_col = df["datetime"]
+
+        def _to_pos(label: Any) -> int | None:
+            """把 index 标签换算成位置索引；无法换算时返回 None。"""
+            try:
+                return int(df.index.get_loc(label))
+            except (KeyError, TypeError, ValueError):
+                return None
+
         try:
-            idx = (dt_col == datetime_val).idxmax() if (dt_col == datetime_val).any() else None
-            if idx is not None:
-                return int(idx)
+            mask = dt_col == datetime_val
+            if mask.any():
+                pos = _to_pos(mask.idxmax())
+                if pos is not None:
+                    return pos
         except (TypeError, ValueError):
             pass
         if hasattr(dt_col, "dt"):
             dt_ints = dt_col.dt.strftime("%Y%m%d").astype(int)
             mask = dt_ints == datetime_val
             if mask.any():
-                return int(mask.idxmax())
+                return _to_pos(mask.idxmax())
         return None
 
     def _generate_signals(self, df: pd.DataFrame, chanlun_result: Any | None) -> list[Signal]:
@@ -627,13 +648,20 @@ class BacktestEngine:
         for trade in trades:
             if not trade.rejected:
                 if trade.direction == "BUY":
-                    position_cost += trade.size * trade.price + trade.commission
+                    # 滑点是真实的成交成本，必须计入持仓成本基数；否则卖出时
+                    # 少扣这部分，成交明细 pnl 会系统性偏乐观，且 Σpnl 与
+                    # 净值变动对不上账（滑点只在现金/净值侧扣了一次）。
+                    position_cost += trade.size * trade.price + trade.commission + trade.slippage
                     position_size += trade.size
                     trade.pnl = 0.0
                 elif trade.direction == "SELL":
                     if position_size > 0:
                         avg_cost = position_cost / position_size
-                        trade.pnl = (trade.price - avg_cost) * trade.size - trade.commission
+                        trade.pnl = (
+                            (trade.price - avg_cost) * trade.size
+                            - trade.commission
+                            - trade.slippage
+                        )
                         # 记录本次卖出对应的持仓成本基数，用于派生单笔收益率
                         trade.cost_basis = avg_cost * trade.size
                         position_cost -= avg_cost * trade.size

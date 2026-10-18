@@ -506,6 +506,7 @@ function openBoard(code: string | undefined, name: string | undefined) {
   <div class="dash">
     <!-- 刷新状态条：会话状态 + 手动刷新 + 门控开关 -->
     <div class="session-bar">
+      <h2>市场看板</h2>
       <span class="dot" :class="{ live: !autoPaused }"></span>
       <span class="session-label" :class="{ paused: autoPaused }">{{ sessionLabel }}</span>
       <span class="dim session-hint">{{ sessionHint }}</span>
@@ -762,14 +763,33 @@ function openBoard(code: string | undefined, name: string | undefined) {
 .dash {
   height: 100%;
   overflow: auto;
-  padding: 14px 16px;
+  padding: var(--sp-4);
 }
 .session-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: var(--sp-3);
   font-size: 12px;
+}
+/* 看板此前没有页头标题，翻页时与其它页缺乏共同的视觉锚点 */
+.session-bar h2 {
+  margin-right: var(--sp-1);
+  flex-shrink: 0;
+}
+/* 加上标题后这一行变挤：让「时段说明」承担收缩（超长省略），
+   其余元素不压缩——否则「仅交易时段自动刷新」会被挤成三行。 */
+.session-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-toggle,
+.manual-refresh {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .session-bar .dot {
   width: 8px;
@@ -825,12 +845,20 @@ function openBoard(code: string | undefined, name: string | undefined) {
   border-radius: var(--radius);
   padding: 8px 12px 6px;
   cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 .idx-card:hover {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  transform: translateY(-1px);
 }
+/* 选中态用「淡底 + 实边框」双重信号：原先 hover 与 active 都是同一种边框色，
+   移开鼠标就看不出当前在看哪只指数 */
 .idx-card.active {
   border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-panel));
 }
 .idx-top {
   display: flex;
@@ -931,7 +959,7 @@ function openBoard(code: string | undefined, name: string | undefined) {
 .rank-tab.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* 涨停雷达 */
@@ -973,7 +1001,7 @@ function openBoard(code: string | undefined, name: string | undefined) {
 }
 .dist-pop {
   position: absolute;
-  background: rgba(26, 29, 38, 0.97);
+  background: color-mix(in srgb, var(--bg-elevated) 97%, transparent);
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 6px 10px;

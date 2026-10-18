@@ -82,7 +82,7 @@ function num(v: number | null, d = 2): string {
   width: 32px;
 }
 .best {
-  background: rgba(74, 158, 255, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .best .rank {
   color: var(--accent);

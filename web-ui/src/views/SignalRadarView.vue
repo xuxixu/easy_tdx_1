@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageShell from '../components/PageShell.vue'
 // 信号雷达页：一键扫描策略库全部已保存策略（单标的/多标的/多策略组合），
 // 把每种策略展开成"策略×标的"子任务，用最近 N 根 K 线（窗口可选，默认 5）
 // 判断买/卖信号并汇总列出——方便每天跟踪"今天哪些策略有信号"。
@@ -39,6 +40,13 @@ const error = ref('')
 const result = ref<SignalScanResult | null>(null)
 const scannedAt = ref('') // 本地时间戳（上次扫描完成时刻）
 const elapsedSec = ref('') // 上次扫描总耗时（提交+计算）
+
+/** 页头描述：基础说明 + 上次扫描时间（原先写在 header 的 subtitle 里）。 */
+const pageDesc = computed(() => {
+  const base = '一键扫描策略库全部已保存策略，列出最近 K 线内出现买入/卖出信号的策略。'
+  if (!scannedAt.value) return base
+  return `${base}上次扫描 ${scannedAt.value}${elapsedSec.value ? `（${elapsedSec.value}s）` : ''}。`
+})
 const pushing = ref(false)
 const pushMsg = ref('')
 
@@ -364,41 +372,31 @@ function onLoad(r: SignalScanRow) {
 </script>
 
 <template>
-  <div class="radar-view">
-    <header class="page-header">
-      <div>
-        <h2>信号雷达</h2>
-        <p class="subtitle">
-          一键扫描策略库全部已保存策略，列出最近 K 线内出现买入/卖出信号的策略。
-          <template v-if="scannedAt">
-            上次扫描 {{ scannedAt }}<template v-if="elapsedSec">（{{ elapsedSec }}s）</template>。
-          </template>
-        </p>
-      </div>
-      <div class="header-actions">
-        <label class="window-picker">
-          窗口
-          <select v-model="windowBars" :disabled="scanning">
-            <option v-for="w in WINDOW_OPTIONS" :key="w" :value="w">{{ w }} 根</option>
-          </select>
-        </label>
-        <button class="primary" :disabled="scanning" @click="onScan">
-          {{ scanning ? '扫描中…' : `⚡ 扫描（${scanModeLabel}）` }}
-        </button>
-        <button
-          v-if="result"
-          class="ghost"
-          :disabled="pushing || scanning"
-          title="经推送设置里启用的通道发出买入/卖出信号"
-          @click="onPush"
-        >
-          {{ pushing ? '推送中…' : '📣 推送信号' }}
-        </button>
-      </div>
-    </header>
+  <PageShell title="信号雷达" :desc="pageDesc">
+    <template #actions>
+      <label class="window-picker">
+        窗口
+        <select v-model="windowBars" :disabled="scanning">
+          <option v-for="w in WINDOW_OPTIONS" :key="w" :value="w">{{ w }} 根</option>
+        </select>
+      </label>
+      <button class="primary" :disabled="scanning" @click="onScan">
+        {{ scanning ? '扫描中…' : `⚡ 扫描（${scanModeLabel}）` }}
+      </button>
+      <button
+        v-if="result"
+        class="ghost"
+        :disabled="pushing || scanning"
+        title="经推送设置里启用的通道发出买入/卖出信号"
+        @click="onPush"
+      >
+        {{ pushing ? '推送中…' : '📣 推送信号' }}
+      </button>
+    </template>
 
     <!-- 定向扫描：股票 + 策略多选（都不选 = 全量） -->
-    <div class="target-bar">
+    <template #toolbar>
+      <div class="target-bar">
       <input
         v-model="symbolInput"
         class="symbol-input mono"
@@ -418,6 +416,7 @@ function onLoad(r: SignalScanRow) {
         <span v-if="strategyList.length === 0" class="dim">策略库为空，先去「策略库」新增或去回测页保存</span>
       </span>
     </div>
+    </template>
 
     <div v-if="error" class="error-banner">⚠ {{ error }}</div>
     <div v-if="pushMsg" class="push-msg" :class="{ ok: pushMsg.startsWith('✓') }">{{ pushMsg }}</div>
@@ -622,34 +621,13 @@ function onLoad(r: SignalScanRow) {
       @save="onEditorSave"
       @close="editorOpen = false; editingStrategy = null"
     />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.radar-view {
-  height: 100%;
-  overflow-y: auto;
-  padding: 16px 20px 32px;
-}
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
 .page-header h2 {
   font-size: 16px;
   font-weight: 600;
-}
-.subtitle {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 4px;
-}
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 .target-bar {
   display: flex;
@@ -675,7 +653,7 @@ function onLoad(r: SignalScanRow) {
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .window-picker {
   display: flex;
@@ -698,7 +676,7 @@ function onLoad(r: SignalScanRow) {
   padding: 7px 18px;
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
   border-radius: var(--radius);
   cursor: pointer;
@@ -711,7 +689,7 @@ function onLoad(r: SignalScanRow) {
   cursor: default;
 }
 .error-banner {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   border: 1px solid var(--up);
   color: var(--up);
   padding: 10px 14px;
@@ -724,12 +702,12 @@ function onLoad(r: SignalScanRow) {
   border-radius: var(--radius);
   margin-bottom: 12px;
   font-size: 12.5px;
-  background: rgba(244, 67, 54, 0.08);
-  color: var(--red, #f44336);
+  background: color-mix(in srgb, var(--up) 8%, transparent);
+  color: var(--red, var(--up));
 }
 .push-msg.ok {
-  background: rgba(76, 175, 80, 0.12);
-  color: var(--green, #4caf50);
+  background: color-mix(in srgb, var(--down) 12%, transparent);
+  color: var(--green, var(--down));
 }
 .scanning-box {
   display: flex;
@@ -845,7 +823,7 @@ function onLoad(r: SignalScanRow) {
   font-weight: 400;
 }
 .tab.active .tab-count {
-  background: rgba(74, 158, 255, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
 }
 
@@ -914,17 +892,17 @@ function onLoad(r: SignalScanRow) {
   font-size: 11px;
   padding: 2px 7px;
   border-radius: 4px;
-  background: rgba(74, 158, 255, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   white-space: nowrap;
 }
 .kind-badge.portfolio {
-  background: rgba(140, 110, 220, 0.18);
-  color: #b39ddb;
+  background: var(--tag-purple-soft);
+  color: var(--tag-purple);
 }
 .kind-badge.multi {
-  background: rgba(245, 158, 11, 0.18);
-  color: #f59e0b;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
 }
 .signal-tag {
   font-size: 12px;
@@ -935,11 +913,11 @@ function onLoad(r: SignalScanRow) {
 }
 /* A股习惯：买入红、卖出绿 */
 .signal-tag.BUY {
-  background: rgba(239, 65, 70, 0.14);
+  background: color-mix(in srgb, var(--up) 14%, transparent);
   color: var(--up);
 }
 .signal-tag.SELL {
-  background: rgba(24, 160, 88, 0.16);
+  background: color-mix(in srgb, var(--down) 16%, transparent);
   color: var(--down);
 }
 .none-tag {
@@ -952,7 +930,7 @@ function onLoad(r: SignalScanRow) {
   white-space: nowrap;
 }
 .pos-tag.holding {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   color: var(--up);
 }
 .pos-tag.flat {
@@ -981,7 +959,7 @@ function onLoad(r: SignalScanRow) {
   padding: 4px 12px;
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
   border-radius: var(--radius);
   cursor: pointer;
@@ -1073,7 +1051,7 @@ function onLoad(r: SignalScanRow) {
 }
 .strat-row.picked {
   border-color: var(--accent);
-  background: rgba(74, 158, 255, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .s-pick {
   color: var(--accent);

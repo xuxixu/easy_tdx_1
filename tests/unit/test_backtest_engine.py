@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from easy_tdx import ta
 from easy_tdx.backtest.engine import BacktestEngine
-from easy_tdx.backtest.execution import TWAPExecution, VWAPExecution
+from easy_tdx.backtest.execution import ExecutionModel, TWAPExecution, VWAPExecution
 from easy_tdx.backtest.slippage import FixedSlippage, SquareRootSlippage
 from easy_tdx.backtest.strategy import Strategy
 
@@ -726,3 +727,162 @@ class TestEngineExecutionModel:
         engine = BacktestEngine(SimpleBuy, cash=100000)
         result = engine.run(df)
         assert result.positions["size"].max() > 0
+
+
+def _int_df(n: int = 60) -> pd.DataFrame:
+    """确定性递增 K 线（datetime 为 int 的 YYYYMMDD，便于精确比对成交位置）。"""
+    close = [10.0 + i * 0.1 for i in range(n)]
+    return pd.DataFrame(
+        {
+            "datetime": [20240101 + i for i in range(n)],
+            "open": close,
+            "high": [c + 0.5 for c in close],
+            "low": [c - 0.5 for c in close],
+            "close": close,
+            "volume": [1_000_000] * n,
+        }
+    )
+
+
+class _Bar10Strategy(Strategy):
+    """在第 10 根 bar（位置索引）买入一次。"""
+
+    def init(self) -> None:
+        self._fired = False
+
+    def next(self) -> None:
+        if not self._fired and self._bar_index >= 10:
+            self.buy(size=100)
+            self._fired = True
+
+
+class _RoundTripStrategy(Strategy):
+    """第 10 根买入、第 40 根卖出，期末空仓（便于净值与 pnl 对账）。"""
+
+    def init(self) -> None:
+        self._holding = False
+
+    def next(self) -> None:
+        if not self._holding and self._bar_index >= 10:
+            self.buy(size=1000)
+            self._holding = True
+        elif self._holding and self._bar_index >= 40:
+            self.sell(size=1000)
+            self._holding = False
+
+
+class _RecordingExecution(ExecutionModel):
+    """记录 execution_model 实际收到的 bar_idx 与该位置对应的 datetime。"""
+
+    def __init__(self) -> None:
+        self.seen: list[tuple[int, int]] = []  # (bar_idx, 该 bar_idx 处的 datetime)
+
+    def execute(self, signal, df, bar_idx, cash, position, **kwargs):  # noqa: PLR0913
+        from easy_tdx.backtest.types import Trade
+
+        self.seen.append((int(bar_idx), int(df["datetime"].iloc[bar_idx])))
+        return [
+            Trade(
+                datetime=int(df["datetime"].iloc[bar_idx]),
+                direction=signal.direction,
+                size=100,
+                price=float(df["open"].iloc[bar_idx]),
+                commission=5.0,
+                slippage=0.0,
+                pnl=0.0,
+                rejected=False,
+            )
+        ]
+
+
+class TestFindBarIndexPositional:
+    """``_find_bar_index`` 必须返回**位置**索引，而非 index 标签。
+
+    回归：旧实现直接返回 ``idxmax()`` 的标签值，调用方 ``_execute_with_model``
+    把它交给 ExecutionModel，后者一律按位置取数（``df["open"].iloc[bar_idx]``）。
+    当 df 的 index 不是 RangeIndex（调用方做过 dropna / 切片 / 拼接），两者不
+    一致 → 成交整体落在错误的 K 线上（实测错位 5 根）。
+    """
+
+    def test_sliced_df_returns_positional_index(self) -> None:
+        """切片后 index 非连续时，返回值应等于重置索引后的位置。"""
+        df = _int_df(30).iloc[5:].copy()  # index 从 5 开始
+        target_dt = int(df["datetime"].iloc[10])  # 位置 10 的日期
+        pos = BacktestEngine._find_bar_index(df, target_dt)
+        assert pos is not None
+        expected = int(df.reset_index(drop=True)["datetime"].eq(target_dt).idxmax())
+        assert pos == expected == 10
+
+    def test_execution_model_fills_on_signal_bar(self) -> None:
+        """execution_model 必须在信号产生的那根 K 线上成交。"""
+        df = _int_df(30).iloc[5:].copy()
+        recorder = _RecordingExecution()
+        BacktestEngine(strategy=_Bar10Strategy, cash=100_000.0, execution_model=recorder).run(df)
+
+        assert recorder.seen, "execution_model 未被调用"
+        bar_idx, filled_dt = recorder.seen[0]
+        # 信号产生于位置 10 → 成交价应取位置 10 的 bar
+        expected_dt = int(df["datetime"].iloc[10])
+        assert filled_dt == expected_dt
+        assert bar_idx == 10
+
+    def test_continuous_index_unaffected(self) -> None:
+        """RangeIndex 下行为不变（标签 == 位置）。"""
+        df = _int_df(30)
+        pos = BacktestEngine._find_bar_index(df, int(df["datetime"].iloc[7]))
+        assert pos == 7
+
+
+class TestSlippageEntersPnl:
+    """滑点必须计入成交明细 pnl，保证「Σpnl == 净值变动」可对账。
+
+    回归：旧实现在 ``_compute_pnls`` 中只用 price/commission 计算持仓成本与
+    pnl，漏掉 slippage；而现金/净值侧是扣了滑点的。结果滑点设为 0.2% 时
+    Σpnl 比净值变动多 40 元，胜率/盈亏比/平均盈亏/SQN 系统性偏乐观。
+    """
+
+    def test_pnl_sum_matches_equity_change_with_slippage(self) -> None:
+        """设了滑点后，成交明细 pnl 求和必须等于净值变动。"""
+        for slippage in (0.0, 0.002, 0.005):
+            result = BacktestEngine(
+                strategy=_RoundTripStrategy,
+                cash=100_000.0,
+                slippage=slippage,
+                position_mode="fixed",
+            ).run(_int_df())
+            total = result.equity_curve["total"]
+            equity_change = float(total.iloc[-1]) - float(total.iloc[0])
+            pnl_sum = float(result.trades["pnl"].sum())
+            assert pnl_sum == pytest.approx(equity_change, abs=0.01), (
+                f"slippage={slippage}: Σpnl={pnl_sum} 与净值变动={equity_change} 对不上账"
+            )
+
+    def test_higher_slippage_lowers_trade_pnl(self) -> None:
+        """滑点越大，成交明细反映的盈亏应越低（而非恒定不变）。"""
+        pnls = []
+        for slippage in (0.0, 0.002, 0.005):
+            result = BacktestEngine(
+                strategy=_RoundTripStrategy,
+                cash=100_000.0,
+                slippage=slippage,
+                position_mode="fixed",
+            ).run(_int_df())
+            pnls.append(float(result.trades["pnl"].sum()))
+        assert pnls[0] > pnls[1] > pnls[2], f"滑点未反映到 pnl：{pnls}"
+
+    def test_slippage_cost_equals_pnl_gap(self) -> None:
+        """Σpnl 的下降幅度应正好等于成交明细的滑点合计。"""
+        result = BacktestEngine(
+            strategy=_RoundTripStrategy,
+            cash=100_000.0,
+            slippage=0.002,
+            position_mode="fixed",
+        ).run(_int_df())
+        base = BacktestEngine(
+            strategy=_RoundTripStrategy,
+            cash=100_000.0,
+            slippage=0.0,
+            position_mode="fixed",
+        ).run(_int_df())
+        gap = float(base.trades["pnl"].sum()) - float(result.trades["pnl"].sum())
+        assert gap == pytest.approx(float(result.trades["slippage"].sum()), abs=0.01)

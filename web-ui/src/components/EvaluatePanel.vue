@@ -192,12 +192,12 @@ function fmtCapm(v: number, fmt: string): string {
   font-weight: 600;
 }
 .badge-ok {
-  background: rgba(46, 189, 133, 0.15);
+  background: color-mix(in srgb, var(--good) 15%, transparent);
   color: var(--good);
   border: 1px solid var(--good);
 }
 .badge-warn {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   color: var(--up);
   border: 1px solid var(--up);
 }
@@ -230,7 +230,7 @@ function fmtCapm(v: number, fmt: string): string {
 }
 .comp-fill {
   height: 100%;
-  background: var(--accent, #4a9eff);
+  background: var(--accent, var(--accent));
   border-radius: 3px;
 }
 .comp-value {

@@ -14,6 +14,7 @@ import {
   type IndexIndicatorItem,
   type IndexIndicatorKind,
 } from '../indexIndicators'
+import PageShell from '../components/PageShell.vue'
 import { A_SHARE_MARKETS, EX_MARKETS, marketLabel, type Market } from '../market'
 
 const MARKETS: Array<{ value: Market; label: string }> = [
@@ -172,22 +173,17 @@ for (const k of Object.keys(defaultIndexIndicators())) {
 </script>
 
 <template>
-  <div class="idx-view">
-    <header class="page-header">
-      <div>
-        <h2>指数设置</h2>
-        <p class="subtitle">
-          配置各市场看板顶部的指数条与大盘日历的指数指标：新增 / 修改 / 删除 / 排序 / 启停，
-          并可为每条指数叠加技术指标（MA/EMA/BOLL）。默认取各市场主流指数。
-        </p>
-      </div>
-      <div class="header-actions">
-        <button class="ghost" @click="onReset">恢复默认</button>
-        <button class="primary" @click="openCreate">＋ 新增指数</button>
-      </div>
-    </header>
+  <PageShell
+    title="指数设置"
+    desc="配置各市场看板顶部的指数条与大盘日历的指数指标：新增 / 修改 / 删除 / 排序 / 启停，并可为每条指数叠加技术指标（MA/EMA/BOLL）。默认取各市场主流指数。"
+  >
+    <template #actions>
+      <button class="ghost" @click="onReset">恢复默认</button>
+      <button class="primary" @click="openCreate">＋ 新增指数</button>
+    </template>
 
-    <nav class="market-tabs">
+    <template #toolbar>
+      <nav class="market-tabs">
       <button
         v-for="m in MARKETS"
         :key="m.value"
@@ -195,8 +191,9 @@ for (const k of Object.keys(defaultIndexIndicators())) {
         @click="active = m.value"
       >
         {{ m.label }}<span class="cnt">{{ (cfg[m.value] ?? []).length }}</span>
-      </button>
-    </nav>
+        </button>
+      </nav>
+    </template>
 
     <p v-if="message" class="message">{{ message }}</p>
     <p class="hint">
@@ -285,15 +282,10 @@ for (const k of Object.keys(defaultIndexIndicators())) {
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.idx-view {
-  height: 100%;
-  overflow-y: auto;
-  padding: 16px 20px 32px;
-}
 .page-header {
   display: flex;
   align-items: center;
@@ -313,16 +305,12 @@ for (const k of Object.keys(defaultIndexIndicators())) {
   max-width: 720px;
   line-height: 1.6;
 }
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
 .primary {
   font-size: 13px;
   padding: 7px 16px;
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
   border-radius: var(--radius);
   cursor: pointer;
@@ -432,7 +420,7 @@ for (const k of Object.keys(defaultIndexIndicators())) {
   padding: 1px 7px;
   margin-right: 4px;
   border-radius: 9px;
-  background: rgba(74, 158, 255, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
 }
 .status {
@@ -445,9 +433,9 @@ for (const k of Object.keys(defaultIndexIndicators())) {
   color: var(--text-dim);
 }
 .status.on {
-  border-color: var(--green, #4caf50);
-  color: var(--green, #4caf50);
-  background: rgba(76, 175, 80, 0.1);
+  border-color: var(--green, var(--down));
+  color: var(--green, var(--down));
+  background: color-mix(in srgb, var(--down) 10%, transparent);
 }
 .ops {
   white-space: nowrap;
@@ -534,7 +522,7 @@ for (const k of Object.keys(defaultIndexIndicators())) {
   font-size: 12.5px;
 }
 .hint-err {
-  color: var(--warn, #f0a020);
+  color: var(--warn, var(--warn));
   font-size: 11px;
   font-style: normal;
   margin-top: 4px;

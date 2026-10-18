@@ -88,3 +88,74 @@ def test_rank_snapshot_rejects_a_share():
         assert "港股/美股" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("SH 应抛 ValueError")
+
+
+# ── 翻页上限（防无限循环 / 内存无界增长）──────────────────────────────────────
+
+
+class _EndlessClient:
+    """坏服务端：忽略 start 参数、每页都返回满页，且总数查询失败。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def goods_count(self, market: int) -> int:
+        return 0
+
+    def goods_quotes_list(self, market: int, start: int = 0, count: int = 80):
+        self.calls += 1
+        return _quotes_df([_row(f"C{self.calls}_{i}", f"股{i}", 10.0, 10.0) for i in range(count)])
+
+
+def test_build_with_client_stops_at_page_cap(monkeypatch):
+    """服务端总是返回满页时，必须靠翻页上限退出。
+
+    回归：旧实现只有「返回空」「不满一页」两个出口，服务端忽略 start 参数时
+    循环永不退出、frames 持续增长 —— 后台线程卡死 + 内存无界增长。
+    """
+    monkeypatch.setattr(rank_mod, "_MAX_PAGES_PER_MARKET", 3)
+    client = _EndlessClient()
+
+    rank_mod._build_with_client("US", client)
+
+    assert client.calls == 3, "达到上限后必须停止翻页"
+
+
+def test_build_with_client_stops_on_short_page():
+    """最后不满一页时正常退出（不得因上限而多翻）。"""
+
+    class _TwoPage:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def goods_count(self, market: int) -> int:
+            return 0
+
+        def goods_quotes_list(self, market: int, start: int = 0, count: int = 80):
+            self.calls += 1
+            n = 80 if start == 0 else 20
+            return _quotes_df([_row(f"C{start + i}", f"股{i}", 10.0, 10.0) for i in range(n)])
+
+    client = _TwoPage()
+    rank_mod._build_with_client("US", client)
+    assert client.calls == 2
+
+
+def test_build_with_client_stops_when_total_reached():
+    """已拉够市场总数即停（与 symbol_index._fetch_all 同口径）。"""
+
+    class _Exact:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def goods_count(self, market: int) -> int:
+            return 100
+
+        def goods_quotes_list(self, market: int, start: int = 0, count: int = 80):
+            self.calls += 1
+            return _quotes_df([_row(f"C{start + i}", f"股{i}", 10.0, 10.0) for i in range(80)])
+
+    client = _Exact()
+    rank_mod._build_with_client("US", client)
+    # 第一页 offset=80 < 100 继续；第二页后 offset=160 >= 100 停止
+    assert client.calls == 2

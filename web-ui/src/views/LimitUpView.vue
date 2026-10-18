@@ -313,10 +313,10 @@ function pctClass(pct: number): string {
 .limitup-view {
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 .view-head,
 .stat-strip,
@@ -424,7 +424,7 @@ function pctClass(pct: number): string {
   padding: 3px 0;
 }
 .l-height.high {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--up);
 }
 .l-chips {
@@ -439,7 +439,7 @@ function pctClass(pct: number): string {
   padding: 4px 10px;
   font-size: 12px;
   border-radius: 999px;
-  background: rgba(239, 65, 70, 0.08);
+  background: color-mix(in srgb, var(--up) 8%, transparent);
   border: 1px solid var(--border);
   cursor: pointer;
 }
@@ -447,13 +447,13 @@ function pctClass(pct: number): string {
   border-color: var(--up);
 }
 .chip-s.blown {
-  background: rgba(255, 165, 0, 0.08);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
 }
 .chip-s.blown:hover {
   border-color: var(--warn);
 }
 .chip-s.downed {
-  background: rgba(24, 160, 88, 0.08);
+  background: color-mix(in srgb, var(--down) 8%, transparent);
 }
 .chip-s.downed:hover {
   border-color: var(--down);

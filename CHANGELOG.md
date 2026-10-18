@@ -4,6 +4,334 @@
 
 ## [未发布] — 2026-10-12
 
+### 代码审查第三轮：回测正确性三项修复 + 一键寻优费率口径补齐
+
+本轮对全仓（后端 287 模块 / 前端 Vue3）做系统性审查，先用探针实证、再修，四项缺陷全部附带回归测试。
+
+**回测正确性（均已实证）**
+
+- **`reject_policy="reduce"` 降仓买入会超支，导致现金为负**（[orders.py](src/easy_tdx/backtest/orders.py)）：旧式 `available_cash / price` 只预留了最低佣金，未预留按比例佣金，整手取整后「成交额 + 实际佣金」超出可用现金。实测 cash=350000 / price=1 / size=500000 → 结算后现金 **-4.97 元**。改为按 `price * (1 + commission)` 折算，与 `_calculate_buy_size` 同口径（同场景结余 +95.06 元）。回归：`TestReducePolicyCashSafety`。
+- **`_find_bar_index` 返回 index 标签却被当位置索引用，成交落在错误的 K 线上**（[engine.py](src/easy_tdx/backtest/engine.py)）：`idxmax()` 返回的是标签，而 `ExecutionModel` 一律按 `.iloc` 取数。当 df 的 index 不是 `RangeIndex`（调用方做过 `dropna` / 切片 / 拼接时很常见）两者不一致——实测切片后**错位 5 根 bar**（应在 20240116 成交，实际在 20240121）。改为统一换算成位置索引（与 `PortfolioTracker` 的 datetime→位置 映射同口径）。回归：`TestFindBarIndexPositional`。
+  - 注：`OrderSimulator` 一侧上一轮已修过同类问题（见 `TestNonContinuousIndex`），本次补齐的是 `execution_model`（TWAP/VWAP/LimitExecution）分支。
+- **滑点不进入成交明细 pnl，Σpnl 与净值变动对不上账**（[engine.py](src/easy_tdx/backtest/engine.py) `_compute_pnls`）：持仓成本与 pnl 只用 `price + commission`，漏掉 `slippage`，而现金/净值侧是扣了滑点的。实测 slippage=0.2% 时 Σpnl 比净值变动多 **40 元**、0.5% 时多 100 元，且 Σpnl 恒定不变——胜率/盈亏比/平均盈亏/SQN 系统性偏乐观。滑点现已计入持仓成本基数与卖出 pnl，三种滑点档位下 Σpnl 与净值变动**逐分对账**。回归：`TestSlippageEntersPnl`。
+
+**Web API 费率口径**
+
+- **`/backtest/optimize-all`（一键寻优）补齐 `min_commission` / `stamp_tax` / `auto_fees`**（[backtest_schemas.py](src/easy_tdx/web/backtest_schemas.py)、[routers/backtest.py](src/easy_tdx/web/routers/backtest.py)）：旧 schema 只有 `commission` + `slippage`，`_optimize_one_strategy` 也未接收另两项，恒落默认 `5.0` / `0.001`，且**未调用** `_resolve_effective_fees()`。后果是 ETF/可转债在一键寻优下仍按股票 0.1% 收印花税，同一标的在「一键寻优」与「单策略寻优」下收益对不上，用户也无处覆盖。现在与 `/optimize`、`/backtest` 同口径（含买入持有基准）。回归：`test_optimize_all_request_exposes_fee_fields`、`test_optimize_all_passes_resolved_fees_to_optimizer`。
+
+**前端竞态**
+
+- **`StockDialog.vue` 序号守卫形同虚设**：`loadDaily()` / `loadMinute()` 内部各自直接写 `dailyBars` / `minutePoints`，`loadCharts` 的 `if (my !== chartSeq) return` 只在这两个 `await` **之后**才检查，撤不回已写入的数据——快速切换标的时「日K属于 A、分时属于 B」。序号现下传至两个加载函数，在每个 `await` 之后、每次赋值之前比对（同文件 `loadIntra` 本就是正确范式，属漏改）。顺带修掉 `watch(minuteDays, loadMinute)` 会把 `(newVal, oldVal)` 误当 seq 传入的隐患。
+
+**验证**：后端单测 2030 → **2041 项全绿**（新增 11 项），`ruff check` / `ruff format --check` / `mypy --strict` 零错误；前端 `vue-tsc` 零错误、42 项 node:test 全过、生产构建成功；离线冒烟 8 通过 / 0 失败，Web API 9 端点全 200。
+
+### 遗留问题清零：后端资源/挂单/取消语义 + 前端竞态与轮询中止 + bundle 拆包
+
+上一轮审查报告中「遗留未修」的 18 项全部处理完毕。
+
+**后端**
+
+- **港美股榜单翻页无上限**（[overseas_rank.py](src/easy_tdx/web/overseas_rank.py)）：原来只有「返回空」「不满一页」两个出口。服务端若忽略 `start` 参数（每页都返回满页）且总数查询失败，循环永不退出、`frames` 无界增长 → 后台线程卡死 + OOM。现按「市场总数 / 页大小 + 2」定上限（总数未知时 400 页兜底），触顶记 warning；同时补上「已拉够总数即停」（与 `symbol_index._fetch_all` 同口径）。
+- **符号索引 socket 泄漏**（[symbol_index.py](src/easy_tdx/web/symbol_index.py)）：`client_to_close` 原本在 `connect()` **之后**才赋值，而 `connect()`（建 socket + 登录）才是最常抛错的一步 —— 一旦抛错 `finally` 拿到 None，每次冷路径请求漏一条 socket。改为先登记再 connect。
+- **轮动挂单被静默丢弃**（[rotation.py](src/easy_tdx/backtest/rotation.py)）：资金/整手不足时直接 `continue`，订单既不成交也不回队。轮动场景下卖出与买入同日排队、卖出尚未回款时买入必然预算不足 —— 新入选的标的会**永远进不了组合**，且无日志。现与停牌同语义顺延到次日，连续 5 个交易日仍不成交则放弃并 warning。
+- **轮动成交 `cost_basis` 口径**（同上 `_trade_row`）：原来用 `price * size`（卖出金额）当成本基数，主引擎用 `avg_cost * size`（持仓成本）。`PerformanceAnalyzer` 用 `pnl / cost_basis` 算单笔收益率，分母不同会让 `avg_win` / `avg_loss` / `max_win` / `max_loss` / `sqn` 跨引擎不可比。现已统一为持仓成本。
+- **心跳吞掉取消**（[_reconnect.py](src/easy_tdx/_reconnect.py)）：`except asyncio.CancelledError: break` 让协程正常返回，`task.cancelled()` 为 False，取消语义被静默吞掉；取消若发生在 `_heartbeat_cmd()`（最长 timeout 秒的网络调用）期间也无法中断。改为 `raise`，与 `sentiment_sampler` / `quote_streamer` 口径一致。
+- **`reject_policy` 非法值产生超额买入**（[orders.py](src/easy_tdx/backtest/orders.py)、[engine.py](src/easy_tdx/backtest/engine.py)）：docstring 曾把取值写成 `('reduce', 'reject')`，实现只认 `reduce` / `skip`。传 `'reject'` 时两个分支都不命中，直接落到末尾产生一笔 `total_cost > cash` 的买入。现于 `OrderSimulator.__post_init__` 快失败（ValueError），docstring 同步改正。
+
+**前端**
+
+- **新增 `src/utils/asyncGuard.ts`**：把「序号守卫 + 可中止 sleep + AbortError 识别」收敛成可复用原语（`createSeqGuard()` / `sleep()` / `abortError()` / `isAbortError()`），并附 8 项 node:test 自检。守卫的正确用法是把序号**下传**到真正写入状态的函数、在每个 `await` 之后比对 —— 只在外层 `await` 后检查是无效的。
+- **6 处竞态统一修复**：`BoardDialog`（日K/分时用 `Promise.all` 并行且两者都无守卫）、`AShareKlinePanel`（`loadBars` 无守卫 + 日/周/月K chip 无 `disabled`）、`OverseasDashboard`（分钟K/日K 无守卫）、`IndexCalendarView`（`loadIndex` 无守卫，连"命中缓存"的早返回也要领新序号，否则在飞请求仍会盖回来）、`SentimentView`（A股与外盘共用展示区，故共用一个守卫）、`CustomList`（预览无守卫且 `fetchKlineOption` 支持 signal 却没传）。
+- **长轮询接入 `AbortSignal`**（[stores/backtest.ts](web-ui/src/stores/backtest.ts)）：`pollTask` 与 4 处复制粘贴的内联 `while(true)` 全部收敛成一个 `pollTask`，并统一由 `newTaskSignal()` 发放信号；`BacktestView` / `OptimizeView` / `PortfolioView` 在 `onBeforeUnmount` 调 `cancelAll()`。此前页面切走后轮询仍以 300~500ms 打 HTTP 最长 10 分钟，结束时还写 running/error 回全局 store，其它页面会看到一条不属于本页的报错横幅。
+- **AI 解读轮询真中止**（[api.ts](web-ui/src/api.ts)）：`signal` 此前只覆盖 sleep 边界，两次真实网络请求都没接 —— 关闭弹窗后已提交的服务端任务白跑 1-3 分钟，且若 abort 发生在 fetch 悬挂期间要等它返回才退出。现已下发给 `submitLlmChatTask` / `fetchLlmChatTask`，等待段也可中断。
+- **SSE 与行情缓存**（[stores/quotes.ts](web-ui/src/stores/quotes.ts)）：`quotes` Map 只增不删 → 加 5000 条上限按插入顺序淘汰；重连退避加**抖动**（多标签页错开）、加**次数上限**（20 次后停止自动重连，避免永久打空请求），新增 `retrying` 状态让徽标区分「服务挂了」与「正在重连」，页面重新可见时自动恢复。
+- **自选补名**（[WatchlistView.vue](web-ui/src/views/WatchlistView.vue)）：`fillMissingNames()` 原来是串行 await 且不接 rejection —— 自选 80 只就是 80 次串行请求，一次抖动还会冒泡进外层 catch 把整页挂上「网络错误」红条。改为 4 路并发 + 单条失败跳过。
+- **卸载后仍在写状态**：`CcpmView` 新增 `onBeforeUnmount` + 序号守卫（此前完全没有生命周期清理）；`AiInterpretModal` 的配置探测加 `alive` 检查；`OverseasDashboard` 的指数条迷你分时（串行多请求）加 `alive` 断路。
+- **bundle 拆包**（[router.ts](web-ui/src/router.ts)、[vite.config.ts](web-ui/vite.config.ts)）：23 个视图原本全部静态 import，Rollup 只能打成单个 **1183 kB** 主 chunk（gzip 397 kB），首屏必须等整套回测/港美股/中金所/AI 设置解析完才渲染。改为路由级 `() => import()`（仅首屏看板静态）后，主 chunk **93.5 kB**（gzip 30 kB），其余按路由切分；echarts 独立成 chunk 664 kB（gzip 221 kB）—— 已是「5 类图表 + Canvas + 6 组件」的固有体积且首屏就要用雷达图，故把告警线按此调到 700 kB 并注明理由。
+
+**验证**（本轮）：后端 2041 → **2057 项全绿**（新增 16 项：`test_symbol_index.py` 新建 3 项、榜单翻页 3 项、轮动挂单/成本 5 项、心跳取消 2 项、`reject_policy` 校验 3 项）；`ruff check` / `ruff format --check` 全通过、`mypy --strict` 287 文件零错误；前端 **50 项** node:test 全过（新增 `asyncGuard.test.ts` 8 项）、`vue-tsc` 零错误、构建成功且无体积告警；离线冒烟 8 通过 / 0 失败，Web API 9 端点全 200。
+
+### 数据源能力补齐：三市场 3 年 K 线 + 港美股五档盘口
+
+对 A 股 / 港股 / 美股三条取数链路做了一次实测校准（真连服务器，非静态推断），修掉两个一直存在、但只在翻页和盘口上才显形的缺陷，并明确记录了数据源的时段边界。
+
+**修复**
+
+- **港美股 K 线翻页每页静默漏 100 根**（[market_gateway.py](src/easy_tdx/web/market_gateway.py)）：扩展市场协议单次最多返回 700 根（请求 800 也只给 700），而网关把 `count` 原样透传；前端 `fetchBars` 又按「本页返回 count 根」用固定 800 步进翻页。实测 AAPL 日K：页0 = 2024-01-03→2026-10-16，页1(start=800) = 2020-10-27→2023-08-09，**中间 2023-08-10 ~ 2024-01-02 约 100 个交易日整段缺失** —— 直接影响「取最近 3 年日K」的完整性。现改为按实际返回根数续取（`_ex_kline`），凑满 `count` 为止。
+- **续取后时间列非单调**（同上）：第二页是更旧的数据，直接拼在尾部会得到「新→旧→更旧」的序列，而下游（K 线图、指标、回测、`_attach_derived` 的 `pre_close=shift(1)`）一律假设升序。现统一按时间列稳定排序。
+- **港美股五档盘口一直拿不到**（`_all_prices_null` + `_ex_quotes_with_fallback`，同上）：判空逻辑只认 `price` 列，而扩展栈报价的价格列叫 `close` → 每一帧都被判成「全空价格」→ **永远**回落免费快照源 → 快照源没有量档深度 → 前端 `hasDepth` 恒为 false，只能降级显示「实时快照」。此外 `goods_quotes` 也没传字段集，默认 37 列本就不含 bid/ask。
+  - 现改为：价格列 `price` / `close` 双兼容；显式请求 `BASIC + VOLUME + HANDICAP` 字段集；新增 `_EX_DEPTH_ALIASES` 把扩展栈的 `bid_price` / `bid2_price` / `bid_volume` 映射为与 A 股同构的 `bid1` / `bid2` / `bid_vol1`（前端 `SecurityQuote` 契约）。港美股报价由 16 列（快照）变为 33 列（含 16 个档位列）。
+
+**实测能力矩阵**（2026-10-18，真连 7709 / 7727）
+
+| 能力 | A 股（7709） | 港股（7727） | 美股（7727） |
+|------|--------------|--------------|--------------|
+| 最近 3 年日K | ✓ 800 根 = 3.3 年 | ✓ 800 根 = 3.25 年 | ✓ 800 根 = 3.2 年 |
+| 更长历史 | 翻页可达 | 翻页可达（2 页 = 5.5 年） | 翻页可达（2 页 = 5.5 年） |
+| 月/周线 | ✓ | ✓（月线至 2004） | ✓（月线至 1990） |
+| 实时报价 | ✓ | ✓ | ✓ |
+| 五档盘口 | ✓ 20 列（`bid1`~`ask_vol5`） | ✓ 16 列 | ✓ 16 列 |
+| 分钟线时段 | 连续竞价 | 09:30–16:00 | **仅盘中** 21:30–04:00（北京） |
+| 盘前 / 盘后 / 夜盘 | — | — | **数据源不提供** |
+
+**边界说明（重要）**
+
+- 美股分钟线在 TDX 扩展栈里**只有盘中**：5 分钟线 78 根/日，北京时间 21:30–04:00（美东 09:30–16:00）。盘前（北京 16:00–21:30）、盘后（04:00–08:00）、夜盘（08:00–16:00）**均无数据**。
+- 已实测对照东方财富 `push2his`（同为 78 根/日，仅盘中）与 Yahoo（本机 403 拦截）；免费源普遍如此，夜盘尤其只有付费源（IBKR / Polygon 等）提供。
+- 前端美股时段切换按钮保留（`US_SESSION_FILTERS`），切到无数据的时段会走 `barsTooFew` 的「K线不足」提示；[market.ts](web-ui/src/market.ts) 里「TDX 分钟线含盘前盘后」的旧注释已更正为实测结论，避免后人再按错误前提排查。
+
+**验证**：后端 2057 → **2067 项全绿**（新增 `test_market_gateway.py` 10 项）；`ruff check` / `ruff format --check` 全通过、`mypy --strict` 零错误；前端 `vue-tsc` 零错误、50 项 node:test 全过。
+
+### 美股时段视图：移除无数据档位，盘中改为纯价格面板
+
+[OverseasDashboard.vue](web-ui/src/components/OverseasDashboard.vue)、[market.ts](web-ui/src/market.ts)：
+
+- **移除「盘前 / 盘后 / 夜盘」三个档位**，只保留「全部」（日/周/月 K 线）与「盘中」。这三段在 TDX 与东财免费接口下均无数据（实测美股分钟线仅美东 09:30–16:00），摆出来只会让人点了看到空白。`USSessionFilter` 类型与 `inUsSessionFilter` 的四态判定**保留**，将来接入盘前盘后数据源时把档位加回来即可。
+- **「盘中」改为纯价格面板**：不再画曲线，只呈现最新价、涨跌幅与昨收/今开/最高/最低/成交量/成交额。数据取实时报价（SSE store 优先、REST 兜底），不再请求分时序列 —— `loadSessionMinute` / `sessionPoints` / `IntradayChart` 依赖一并移除。
+- 切档时清空上一视图的错误条（日K 失败过的红条不该糊在价格面板上）；`barsTooFew` 改为「仅 K 线模式判定」，价格面板与 K 线无关。
+
+**顺带修掉两个「数据通了但前端拿不到」的问题**
+
+- **港美股 REST 报价缺 `price` 列**（[market_gateway.py](src/easy_tdx/web/market_gateway.py)）：A 股标准协议给 `price`、扩展栈给 `close`，出口不统一，导致前端 `normalizeQuote` 与 SSE 的 `_df_to_dicts` **各自打了一次补丁**。现于网关出口统一补 `price`（已有则不动），下游两处补丁变成冗余但无害，新增调用方不必再想这件事。端到端实测：`/quotes` 的 AAPL / 00700 由 `price=null` 变为有值。
+- **自选股盘口永远停在「实时快照」**（[StockDialog.vue](web-ui/src/components/StockDialog.vue)）：`ensureQuote` 原本按「store 里有没有这条报价」决定是否拉 REST，而 SSE 推的是精简报价（`_QUOTE_FIELDS` 白名单不含 bid/ask），自选股在 store 里天然有一份**没有五档**的快照 → 直接 return → 盘口永远降级为快照。现改为按「有没有真实档位」判断，没有就补拉一次 REST。**上一轮打通的五档，此前对自选股其实并未生效。**
+
+**验证**：后端 2067 → **2069 项**（`test_market_gateway.py` 10 → 12 项，新增 `price` 补齐与不覆盖已有值两条）；前端 **54 项** node:test 全过（含上一轮 `toHhmm` 归一化 4 项）；`vue-tsc` 零错误、`ruff` / `mypy --strict` 全通过、生产构建成功。
+
+### 前端 UI 打磨：盘中价格面板补盘口、K 线日期去重、空态与控件对比度
+
+用 Playwright 截图逐页评审后按「信息密度 / 专业度 / 首次可用性」三条线改，不做无依据的大改版。
+
+**1. 美股「盘中」面板：价格 + 五档盘口两栏**
+
+原先只有一个大号价格 + 六格指标，右侧整块留白，看着像半成品。现改为左栏「价格 + 开/昨收/高/低/量/额」、右栏「五档盘口」（卖 5→卖 1 → 现价 → 买 1→买 5，与交易软件档位顺序一致）：
+
+- 顺带把上一轮打通、但一直没在界面上露脸的**实时五档真正用起来**；
+- 休市时档位全为 0（0 价不可能是真实挂单），**不铺 10 行 `—`**（那看着像坏了），收成一句「暂无挂单数据 · 休市期间交易所不提供买卖盘」；
+- 档位缺失的行整体压暗（`pd-nil`），避免和真实档位混看；
+- 窄屏（<1180px）指标降为两列、（<980px）盘口移到价格下方。
+
+**2. K 线日期轴只画一次**（[kline_option.py](src/easy_tdx/kline_option.py)）
+
+主图早已关闭日期标签，但**成交量图与副图各带一份**，屏幕上是两行一模一样的日期。现改为「只在最下方那个 grid 显示」：有副图时由副图承担，无副图时由成交量图承担。补 2 项 `test_web_chart.py` 回归。
+
+**3. 全局表单控件对比度**（[style.css](web-ui/src/style.css)）
+
+输入框底色原为 `--bg`，与页面背景同色，深色主题下只剩一圈极淡描边，「看不出这里能填东西」。现改为 `--bg-panel` 面板色、hover 描边加深、focus 加 `color-mix` 主题色光晕（老浏览器不支持时仅少一圈光晕，不影响可用性），并补 `::placeholder` 颜色。
+
+**4. 空态从「一行灰字」改成有结构的引导**
+
+- **自选为空**（[WatchlistView.vue](web-ui/src/views/WatchlistView.vue)）：☆ 标记 + 标题 + 按当前市场给出具体输入示例（A 股 6 位 / 港股 4-5 位 / 美股字母），并说明「点击行可看分时与盘口」；
+- **回测无结果**（[BacktestView.vue](web-ui/src/views/BacktestView.vue)）：虚线卡片 + 标题 + 三步操作清单 + 「行情自动拉取」提示，替代原先居中一句灰字。
+
+**验证**：后端 2069 → **2071 项**（`test_web_chart.py` 8 → 10）；前端 54 项 node:test、`vue-tsc`、`ruff`、`mypy --strict` 全通过，生产构建成功；四页截图（A 股看板 / 美股看板 / 自选 / 回测）逐一比对确认。
+
+### 全站样式归一：硬编码色 → 语义 token（33 个组件/页面）
+
+「优化所有 UI 文件」的核心不是逐个调样式，而是先解决一个系统性缺陷：**同一个语义用了多个色值，且不随主题切换**。
+
+**问题量化**
+
+- 各 `<style>` 块里共 **201 处硬编码色、73 种色值**；
+- 同类语义各有多套写法：红色 `#ef4146` / `#f44336` / `#e53935`（及 3 种半透明底）、黄色 `#f0a020` / `#f59e0b` / `#fbbf24` / `#ffc107`、蓝色 `#4a9eff` / `#0078d4` / `#1a73e8`、绿色 `#18a058` / `#4caf50` / `#22c55e`；
+- 后果：切到「晴昼 / 宣纸」等浅色主题时，这些元素**仍是深色主题的配色**，与周围白底打架。
+
+**改造方式**
+
+1. 建语义映射并批量替换（只动 `<style>` 块，JS 里的图表配色仍走 `theme.ts`，不受影响）：
+   - 红 → `var(--up)`，绿 → `var(--down)`，黄 → `var(--warn)`，蓝 → `var(--accent)`；
+   - 半透明底 → `color-mix(in srgb, var(--up) 12%, transparent)` 这类写法，自动跟随主题；
+   - 阴影 → `var(--shadow)`，弹窗底色 → `color-mix(… var(--bg-elevated) 97% …)`。
+2. 新增 3 个 token 补齐缺口：`--on-accent`（accent 底上的文字）、`--tag-purple` / `--tag-purple-soft`（「自定义/用户产」标记）。
+3. **修掉一个历史遗漏**：`paper`（宣纸）主题的 vars 一直缺 token，本次校验发现它连新增的 `--on-accent` 都没有——该主题下 `var()` 未定义会回退继承色，紫标直接看不见。现已四套主题 **22 个 token 完全对齐**。
+4. `style.css` 的 `:root` 兜底同步新增 token（含 `--scheme`），保证 JS 未执行的首帧不出现未定义变量。
+
+**结果**：硬编码色 201 → **1 处**（剩一处 `rgba(255,255,255,.65)` 是刻意的半透明白高光）；四套主题切换不再有「深色残留」。
+
+**验证**：Playwright 遍历四套主题（深空/晴昼/暮色/宣纸）与浅色下的密集表单页逐一截图比对；`vue-tsc` 零错误、54 项 node:test 全过、生产构建成功（主 chunk 94 kB 无变化，纯 CSS 改动不增体积）。
+
+### 视觉改版：侧栏层级、表格与指数卡交互
+
+样式归一（上一段）解决的是「颜色不一致」，这一段解决「层级与交互看不出来」。
+
+**1. 侧栏（全站每页可见，面积最大）**（[App.vue](web-ui/src/App.vue)）
+
+- 选中项从「通栏 + 左侧 2px 竖条」改为**圆角块 + accent 淡底**：23 个导航项的长列表里，通栏高亮太抢注意力，收敛成块状更像现代终端；左右留 8px 让圆角有呼吸空间。
+- 三个分组（行情 / 分析 / 系统）之间加**极淡分隔线**，并加大组标题上边距——原先 5 个分组连排，边界靠 11px 灰字勉强区分。
+- 宽度 176 → 186px，导航项 `padding` 7 → 7.5px，加 `transition` 让 hover 不突变。
+- 版本号 `v1.32.6` 从「灰色小字」改为 accent 淡底小标签，品牌区主次分明。
+
+**2. 行情表格 `.qtable`**（[style.css](web-ui/src/style.css)，全站共用）
+
+- 表头字号降至 11.5px + 字距 0.3px + 淡色底：数据行是紧凑数字，表头比数据更「安静」才不抢视线；
+- 行分隔改用 `--hairline`（比表头分隔更淡），一眼能分出表头区与数据区；
+- 新增行 hover（accent 6% 淡底）。
+
+**3. 指数卡**（[DashboardView.vue](web-ui/src/views/DashboardView.vue)）
+
+原先 `hover` 与 `active` 是同一种边框色，**移开鼠标就看不出当前在看哪只指数**。现改为：active = 实边框 + accent 7% 淡底（双重信号），hover = 半透边框 + 上浮 1px。
+
+**验证**：Playwright 深色/浅色两种主题截图比对；`vue-tsc` 零错误、54 项 node:test 全过、生产构建成功。
+
+### 统一 UI 风格：排版刻度 + 全站标题归一
+
+「统一所有界面风格」的最后一环。前两轮解决了颜色与层级，这轮补排版基准。
+
+**核心发现：全站 22 个页面，没有一处定义过 `h1`–`h6`**
+
+标题一直在吃浏览器默认样式，而默认值是**相对父级字号**的 `em` —— 父容器 `font-size` 不同的页面，同一级标题就会大小不一。这是「各页看着不像一套系统」最隐蔽也最根本的一条。
+
+现于 [style.css](web-ui/src/style.css) 统一：`h1` 20px、`h2` 17px（页面标题）、`h3` 13px（卡片标题）、`h4` 12px，字重 600、行高 1.35、统一字距。因为各页此前**没有任何 scoped 覆盖**，这条全局规则一落地即全站生效，零冲突。
+
+**新增排版刻度**
+
+全站间距此前散落成 2/5/6/7/8/10/11/12/14/16/18/20/24/28/32 一堆值。新增：
+
+- 间距 `--sp-1..8`（4/8/12/16/20/24/32，4 的倍数）
+- 字号 `--fs-xs..2xl` + `--fs-title`（页面标题专用）
+- 圆角 `--radius-sm` / `--radius-lg`
+
+新样式一律引用 token，老硬编码值逐步替换。
+
+**卡片规格统一**
+
+- `StrategiesView` / `StrategyTypesView` 的 `.card` 原本 padding 分别是 `14` 和 `12 14`、gap `10` 和 `6`，现统一为 `var(--sp-3) var(--sp-4)` + `var(--sp-2)`。
+- 调研发现另有一批跨文件同名类（`.stat-card` / `.panel-section` / `.report-section`）**定义本来就一致**（早期复制粘贴留下的），无需改动——这类「看起来该统一」的地方先核实再动手，避免无谓 churn。
+
+**验证**：看板 / 自选 / 策略库 / 服务器设置四页截图比对（标题层级、卡片间距、表头）；`vue-tsc` 零错误、54 项 node:test 全过、生产构建成功。
+
+### 页面骨架统一：新增 `PageShell` 并迁移 11 个工具/设置型页面
+
+前几轮解决了「颜色 / 层级 / 标题 / 表格」，但**页面骨架仍是各写各的**：22 个页面的根容器 class 全不相同（`.dash` / `.board-view` / `.ccpm-view` / …），顶部结构有「`<h2>` 跟一排控件挤在一行」的，也有「左标题+副标题 / 右操作」的，padding 从 `14px 16px` 到 `16px 20px 32px` 不等。翻页时标题位置会跳。
+
+**新增 [PageShell.vue](web-ui/src/components/PageShell.vue)**：统一「标题 + 描述 + 右侧操作 + 可选工具条 + 内容区」三段式，三个插槽：
+
+| 插槽 | 用途 |
+|------|------|
+| `#actions` | 标题右侧主操作（新建 / 刷新 / 导出） |
+| `#toolbar` | 标题下方筛选/切换（tab、下拉、搜索）——固定不随内容滚动 |
+| 默认 | 内容 |
+
+padding 走 `var(--sp-4)`，标题吃全站统一后的 `h2`（17px），描述 12px。
+
+**已迁移 11 页**，按原有结构分三类处理：
+
+*① 标准 `page-header` 型（4 页）*
+
+- [WatchlistView](web-ui/src/views/WatchlistView.vue)：原先「标题 + 输入框 + 数量提示」挤在一行，现在标题/描述居左、添加控件居右；
+- [StrategiesView](web-ui/src/views/StrategiesView.vue)：tab 移入 `#toolbar`（内容滚动时保持可见）；
+- [IndexSettingsView](web-ui/src/views/IndexSettingsView.vue)：市场 tab 移入 `#toolbar`；
+- [StrategyTypesView](web-ui/src/views/StrategyTypesView.vue)：搜索框并入 `#actions`。
+
+*② 单卡片型（2 页）*：标题原先在卡片内部，现提到页头，卡片只留内容 ——
+
+- [IndicatorSettingsView](web-ui/src/views/IndicatorSettingsView.vue)、[CustomIndicatorsView](web-ui/src/views/CustomIndicatorsView.vue)。
+
+*③ 两栏配置型（4 页）*：左栏内的 `<h2>` 提到页头，左栏从配置项开始；原根容器样式改挂到内层 `.layout` ——
+
+- [ServerSettingsView](web-ui/src/views/ServerSettingsView.vue)、[PushSettingsView](web-ui/src/views/PushSettingsView.vue)、[LlmSettingsView](web-ui/src/views/LlmSettingsView.vue)、[LlmHistoryView](web-ui/src/views/LlmHistoryView.vue)。
+
+*另有* [SignalRadarView](web-ui/src/views/SignalRadarView.vue)：`page-header` 的 subtitle 含插值，改用 `computed` 生成描述；筛选条移入 `#toolbar`。
+
+每页同时删掉各自的 `.xxx-view` / `.page-header` / `.subtitle` / `.header-actions` 样式。
+
+**踩到一个 tsc 与 build 都不报的坑**：`StrategyTypesView` 与 `SignalRadarView` 迁移时漏了 `import PageShell`，`vue-tsc` 与 `vite build` 双双通过，但运行时 Vue 把 `<PageShell>` 当作**未知原生标签**渲染（DOM 里是 `<PAGESHELL>`），`title` / `desc` 两个 prop 自然不显示——页面顶部直接是内容区，看起来「页头凭空消失」。是逐个页面截图时才发现的。已补导入并对全部 11 页做了一遍「用到了 PageShell 就必须有 import」的脚本校验。
+
+**验证**：11 页逐张截图确认页头渲染、标题位置、操作右对齐、tab 固定；`vue-tsc` 零错误、54 项 node:test 全过、生产构建成功。
+
+### 展示型 11 页的针对性优化（不套统一骨架）
+
+数据展示型页面（看板 / 总览 / 热点 / 情绪 / 涨停 / 日历 / CCPM / 回测 / 组合 / 寻优 / 对比）布局是「内容自适应铺满」，不适合三段式 PageShell。先做结构盘点，再只补真正的差异：
+
+**盘点结论**（避免无谓改动）
+
+- 5 个展示页（行业/概念总览、热点、情绪、涨停、日历）的 `.view-head` 样式**本来就完全一致**（早期统一过），无需改；
+- 4 个工作台页（回测/组合/寻优/对比）的 `.config-panel`（320px / padding 16）与 `.report-panel` 也**完全一致**；
+- 真正的差异只有三处。
+
+**① 容器规格统一**（6 页）
+
+`padding` 14/16 或 16 → `var(--sp-4)`；`gap` 10 → `var(--sp-3)`（行业/概念总览、热点、情绪、涨停、日历、CCPM、看板）。
+
+**② CCPM 页头结构对齐**：`.toolbar` → `.view-head`（与其余 5 个展示页同名同规格）。
+
+改这里踩到**三个连环的 CSS 陷阱**，值得记下来：
+
+1. `justify-content: space-between` 下控件被挤成一列 → 加 `flex-shrink: 0`；
+2. 中文可**逐字断行**，`flex-shrink: 0` 也无效（min-content 只有一个字宽），「自动取最近交易日」被压成竖排 → 必须给子元素 `white-space: nowrap`；
+3. 加完 nowrap，全局 `input, select { width: 100% }` 又开始撑满整行，把其余控件顶出屏幕（表现为「只剩一个下拉框」）→ 需显式 `width: auto`。
+
+**③ 看板补页头标题**：原先只有状态条（休市 / 刷新 / 门控），没有页面名，翻页时与其它页缺少共同视觉锚点。现把状态条升级为「标题 + 状态徽标 + 右侧操作」的页头；同时修掉加标题后「仅交易时段自动刷新」被挤成三行的问题——让时段说明承担收缩（超长省略），其余元素不压缩。
+
+**④ 工作台结果区 padding** `16px 20px` → `var(--sp-4)`（4 页）。
+
+**验证**：看板 / 行业总览 / CCPM / 回测四页截图逐张比对；`vue-tsc` 零错误、54 项 node:test 全过、生产构建成功。
+
+> 附带说明：E2E mock 下「行业总览」返回 `加载失败：'market'`（后端 `KeyError: 'market'`），属 mock 数据未覆盖该接口的**既有问题**，与本次样式改动无关。
+
+### 美股「盘中」档改为分时图（+ 五档盘口）
+
+此前该档是「价格 + 五档」的纯文字面板（按上一版需求去掉了曲线）。经确认真实需求是**盘中要看分时走势**，现恢复为「分时图（主区）+ 五档盘口（右栏）」：
+
+- [IntradayChart](web-ui/src/components/IntradayChart.vue) 新增 `height` prop：原先高度写死 440px（适合弹窗整页），嵌进面板会被撑破；面板内传 `232px`。
+- 分时数据仍取 `/minute`，按 `inUsSessionFilter(..., 'open')` 只保留盘中段落（美东 09:30–16:00）；时间经 `toHhmm()` 归一化后再比对——直接截子串在带日期的格式下会把整段过滤成空。
+- 价格与开/高/低/量压成**一行摘要**（`pp-meta`）放在图上方，原来的六格网格删除，把纵向空间让给分时图。
+- **指数无分时**时不再笼统报「暂无数据」：真指数（DJI/IXIC/NDX/SPX）直接给出可搜索的 ETF 替代（DIA/QQQ/SPY）。
+
+**两个实测结论**（避免误判为 bug）
+
+1. **默认标的是指数**（纳斯达克综合指数），指数本身没有分时行情——切到个股（如 AAPL）才有曲线。这是数据源限制，不是渲染失败。
+2. **AAPL 分时量柱看起来只有两根**：分时 `vol` 是每分钟增量且 390 个点全部非零（求和 5999.68 万 = 报价成交量），但**收盘集合竞价那根是 1435 万**，是常规分钟（20–50 万）的 30 倍；Y 轴自适应后其余柱子被压成细线。属真实数据特征，不做失真处理。
+
+**验证**：在真实服务（`127.0.0.1:8000`，非 mock）上选 AAPL → 点「盘中」，确认价格 343.46、分时曲线含均价线、右栏盘口就位；`vue-tsc` 零错误、54 项 node:test 全过、构建成功。
+
+### K 线历史深度从 250 根放开到 800 根
+
+**问题**：所有 K 线视图（A 股看板、港美股看板、个股弹窗、板块弹窗）最远只能看到约一年前（2025-10-20）。
+
+**根因**：`fetchBars` 实际取回了 800 根（后端与分页逻辑均正常，2023-06-28 起），但前端在四处调用点用 `slice(-250)` **把 800 根截成了最近 250 根**（[AShareKlinePanel](web-ui/src/components/AShareKlinePanel.vue) / [OverseasDashboard](web-ui/src/components/OverseasDashboard.vue) / [StockDialog](web-ui/src/components/StockDialog.vue) / [BoardDialog](web-ui/src/components/BoardDialog.vue)）。250 个交易日 ≈ 1 年，与「最远 2025-10-20」精确吻合。
+
+**修复**：四处统一改为 `slice(-800)`，数据深度 = 3.3 年（2023-06-28 ~ 2026-10-16）。后端无截断（已核对 `routers/chart.py` 与 `kline_option.py`）。
+
+**顺带调整初始视窗**（[kline_option.py](src/easy_tdx/kline_option.py)）：dataZoom 初始只露最近 120 根——数据量提到 800 后仍只露 120 根，用户会误以为「没有更早的数据」。现改为 **250 根（约一年）**，更早的靠底部滑块往左拖。
+
+**验证**：真实服务上用 Playwright 拖动滑块到最左，确认 X 轴起点落在 **2023-06-28**；初始视窗 250 根、滑块占比 31% 符合预期；`vue-tsc` 零错误、54 项 node:test、后端全量单测全过，构建成功。
+
+### K 线历史深度放开到全部（上证指数 1990-12 上市至今）
+
+上一段放开到 800 根（2023-06 起）后仍不够，继续追溯发现**后端指标接口还有一道隐藏上限**：
+
+- `fetchBars` 翻页上限 10 页 × 800 = 8000 根 → **12 页 = 9600 根**（[api.ts](web-ui/src/api.ts)），覆盖上证指数 1990-12-19 上市至今的全部日线；
+- 四处 `slice(-800)` 全部移除，前端不再做任何截断；
+- **`KlineOptionRequest.bars` 的 `max_length` 从 2000 放宽到 10000**（[chart.py](src/easy_tdx/web/routers/chart.py)）——这是真正的拦路虎：9600 根的请求被 422 拒掉，而前端 `throwError` 对 Pydantic 校验错误（`detail` 是数组）处理不当，界面上只显示 `[object Object]`，K 线区整块空白，很难定位。两处一并修复（[api.ts](web-ui/src/api.ts) 的 `throwError` 现在会把 422 的 `msg` 列表拼成可读文本）。
+
+**实测**：上证指数 SH000001 拖动 dataZoom 到最左，X 轴起点 **1990-12-19**（Y 轴 0–7000 完整呈现 2007 年 6124 大顶），MA/成交量/MACD 全程有值。
+
+**验证**：`vue-tsc` 零错误、前端 54 项全过、后端 `test_web_chart` + `test_web_api` 43 项全过；新增 1 项防回归测试（2001 根请求不得 422）。
+
+### 修复指数的分钟级视图：K 线弹窗各周期按钮 + 看板「盘中」
+
+**排查矩阵**（A 股/港股/美股 × 分时/15分K/30分K/1小时K/4小时K/日K，指数与个股分别验证）：
+
+| 组合 | 个股（AAPL/00700/600000） | 指数（IXIC/DJI/SPX/NDX/HSI） |
+|------|------|------|
+| 日K | ✅ 800 根 | ✅ 800 根 |
+| 分时（当日） | ✅ 390 根 | **❌ 仅 1 根 qq 快照**（A股指数 ✅ 332+ 根） |
+| 15分K/30分K/1小时K | ✅ 320 根 | **❌ 仅 1 根**（A股指数 ✅） |
+| 4小时K（MIN_240） | ✅ 320 根 | **❌ 仅 1 根** |
+
+**结论**：MAC 扩展栈不提供美股/港股**指数**的分时与分钟 K——数据层只回落到 1 根 qq 快照，这是硬限制，无法从数据源修复；A 股指数走标准协议，不受影响。个股全周期、全市场均正常（此前对 `HOUR_1/HOUR_4` 的怀疑是排查脚本拼错了 category，前端实际传 `MIN_60/MIN_240`，后端原生支持）。
+
+**方案：ETF 代理 + UI 明示**。新增共享映射表 [INDEX_ETF_PROXY](web-ui/src/market.ts)（DJI→DIA、IXIC/NDX→QQQ、SPX→SPY、HSI→02800 盈富基金），两处消费：
+
+- **看板「盘中」**（[OverseasDashboard.vue](web-ui/src/components/OverseasDashboard.vue)）：指数的分时取对应 ETF 渲染，价格行显示琥珀徽标「分时以 QQQ 代理」；
+- **指数弹窗**（[StockDialog.vue](web-ui/src/components/StockDialog.vue)）：分时 + 四档分钟 K 同样代理，图表上方显示「15分K以 QQQ 代理（指数无原生分钟 K，走势形态一致、点位不同）」。
+
+代理是诚实的妥协：走势形态与指数高度相关（可用于形态分析），但**点位不是指数本身**，因此 UI 必须明示——不标注会让 500 元的 QQQ 被误读成 26000 点的纳指。
+
+**过程中修掉一个自伤 bug**：代理标注最初放在 `v-else-if` 渲染链里，非空时把后面的 `IntradayChart` / `StockKline` 整个吞掉——「有了提示反而没了图」。标注是附加信息，不参与条件渲染链。
+
+**验证**：真实服务逐 tab 截图（分时/15分K/4小时K），代理标注与完整 K 线（蜡烛+均线+量柱+MACD）并存；看板「盘中」同验。`vue-tsc` 零错误、前端 65 项 node:test 全过、构建成功。
+
 ### 大智慧指标包：一键导入 52 个自定义指标
 
 - **桌面「大智慧指标」62 个公式批量转换为引擎可识别的自定义指标**（[对照表](docs/dzh-indicators.md)，成功 52 / 跳过 10）：新增 `scripts/convert_dzh_indicators.py`（绘图语句剔除 / 跨市场-Level2-流通股本等不可复刻语义剔除并级联 / 未定义参数注入 / 动态窗口近似 / 合成 K 线试算验证），产物为随前端下发的 `web-ui/public/dzh-custom-indicators.json`。

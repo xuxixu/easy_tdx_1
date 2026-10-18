@@ -247,3 +247,82 @@ def test_rotation_new_listing_not_bought_on_zero_score():
     assert buys_b == []  # 旧码 B 以 0 分登顶被买入
     # A 作为唯一有效候选被正常买入
     assert any(t["symbol"] == "SH:600001" and t["direction"] == "BUY" for t in res.trades)
+
+
+# ── 挂单顺延（资金不足不得静默丢弃）／成交成本口径 ───────────────────────────
+
+
+def _defer(still_pending: list, retries: dict, sym: str = "SH:600000") -> None:
+    RotationEngine._defer_pending(still_pending, retries, sym, "BUY", "rank_in", "单槽预算不足一手")
+
+
+def test_defer_pending_requeues_order():
+    """资金/整手不足时，挂单应回到队列等下一个交易日（旧实现直接丢弃）。"""
+    still_pending: list = []
+    retries: dict = {}
+
+    _defer(still_pending, retries)
+
+    assert still_pending == [("SH:600000", "BUY", "rank_in")]
+    assert retries[("SH:600000", "BUY")] == 1
+
+
+def test_defer_pending_gives_up_after_cap(caplog):
+    """连续多日买不起则放弃并留下告警日志（不再无限排队、也不静默）。"""
+    from easy_tdx.backtest.rotation import _MAX_PENDING_RETRIES
+
+    still_pending: list = []
+    retries: dict = {}
+    for _ in range(_MAX_PENDING_RETRIES):
+        _defer(still_pending, retries)
+        still_pending.clear()  # 模拟次日重新排队
+
+    assert retries[("SH:600000", "BUY")] == _MAX_PENDING_RETRIES
+
+    with caplog.at_level("WARNING"):
+        _defer(still_pending, retries)
+
+    assert still_pending == [], "超过上限后应放弃挂单"
+    assert ("SH:600000", "BUY") not in retries
+    assert "挂单放弃" in caplog.text
+
+
+def test_defer_pending_isolates_directions():
+    """同一标的的 BUY / SELL 各自计数，互不影响。"""
+    still_pending: list = []
+    retries: dict = {}
+    RotationEngine._defer_pending(still_pending, retries, "SH:600000", "BUY", "r", "why")
+    RotationEngine._defer_pending(still_pending, retries, "SH:600000", "SELL", "r", "why")
+    assert retries[("SH:600000", "BUY")] == 1
+    assert retries[("SH:600000", "SELL")] == 1
+
+
+def test_sell_trade_cost_basis_matches_position_cost():
+    """卖出成交的 cost_basis 必须是持仓成本，且与 pnl 自洽。
+
+    回归：旧实现写的是 `price * size`（卖出金额），而主引擎用
+    `avg_cost * size`。PerformanceAnalyzer 用 pnl / cost_basis 算单笔收益率，
+    分母不同会让 avg_win / avg_loss / sqn 跨引擎不可比。
+    """
+    pool = _pool({"SH:600519": 0.002, "SZ:000001": 0.001, "SZ:000858": 0.0005})
+    result = RotationEngine(pool, momentum_score(20), slots=1, refresh="weekly").run()
+
+    sells = [t for t in result.trades if t["direction"] == "SELL"]
+    assert sells, "该场景应产生卖出成交"
+
+    for t in sells:
+        assert t["cost_basis"] > 0
+        # pnl 与 cost_basis 必须自洽：pnl = 卖出金额 - 持仓成本 - 费用
+        expected = t["price"] * t["size"] - t["cost_basis"] - t["commission"]
+        assert t["pnl"] == pytest.approx(expected, abs=1e-6), (
+            f"pnl={t['pnl']} 与 cost_basis={t['cost_basis']} 不自洽"
+        )
+
+
+def test_buy_trade_cost_basis_is_zero():
+    """买入成交不设成本基数（与主引擎 _compute_pnls 一致）。"""
+    pool = _pool({"SH:600519": 0.002, "SZ:000001": 0.001})
+    result = RotationEngine(pool, momentum_score(20), slots=1, refresh="weekly").run()
+    for t in result.trades:
+        if t["direction"] == "BUY":
+            assert t["cost_basis"] == 0.0

@@ -56,6 +56,31 @@ import type {
 
 const BASE = '/api/v1'
 
+/**
+ * 可被 AbortSignal 中断的等待。
+ *
+ * 本模块由 `src/__tests__/api.test.ts` 通过 Node 的类型剥离直接加载，因此
+ * 这里不引入 `./utils/asyncGuard`（Node 的 ESM 解析要求显式扩展名，无扩展名
+ * 相对导入会 ERR_MODULE_NOT_FOUND）。逻辑与 asyncGuard.sleep 一致。
+ */
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(true)
+      return
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve(false)
+    }, ms)
+    function onAbort() {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 /** 把未知错误格式化为用户可读的消息（网络错误给友好提示）。 */
 export function formatError(e: unknown): string {
   if (e instanceof TypeError && e.message.includes('fetch')) {
@@ -69,7 +94,17 @@ async function throwError(resp: Response): Promise<never> {
   let detail = `${resp.status} ${resp.statusText}`
   try {
     const body = (await resp.json()) as ApiError
-    if (body?.detail) detail = body.detail
+    if (body?.detail) {
+      // Pydantic 校验失败（422）时 detail 是数组而非字符串，直接赋值会显示 [object Object]
+      detail =
+        typeof body.detail === 'string'
+          ? body.detail
+          : Array.isArray(body.detail)
+            ? body.detail
+                .map((d) => (d as { msg?: string }).msg ?? JSON.stringify(d))
+                .join('；')
+            : JSON.stringify(body.detail)
+    }
   } catch {
     // 非 JSON 错误体，用 statusText
   }
@@ -90,7 +125,7 @@ export async function fetchStrategies(): Promise<StrategiesResponse> {
  * 自动分页拉取（start=0, 800, 1600...）拼接，直到覆盖 startDate 或达上限。
  * 可选 startDate/endDate 对结果做闭区间过滤（ISO 日期字符串，如 "2024-01-01"）。
  */
-const MAX_PAGES = 10 // 翻页上限：10 × 800 = 8000 根（约 32 年日线）
+const MAX_PAGES = 12 // 翻页上限：12 × 800 = 9600 根，覆盖上证指数全部历史（1990-12 上市）
 
 export async function fetchBars(
   market: string,
@@ -313,8 +348,8 @@ export async function submitOptimizeAllTask(
 }
 
 /** 查询后台任务状态（轮询用）。 */
-export async function fetchTask(taskId: string): Promise<TaskState> {
-  const resp = await fetch(`${BASE}/backtest/tasks/${taskId}`)
+export async function fetchTask(taskId: string, signal?: AbortSignal): Promise<TaskState> {
+  const resp = await fetch(`${BASE}/backtest/tasks/${taskId}`, { signal })
   if (!resp.ok) await throwError(resp)
   return (await resp.json()) as TaskState
 }
@@ -966,19 +1001,21 @@ export async function submitLlmChatTask(
   prompt: string,
   context?: LlmChatContext | null,
   systemPrompt?: string | null,
+  signal?: AbortSignal,
 ): Promise<TaskSubmitResponse> {
   const resp = await fetch(`${BASE}/llm/chat/async`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, system_prompt: systemPrompt ?? null, context: context ?? null }),
+    signal,
   })
   if (!resp.ok) await throwError(resp)
   return (await resp.json()) as TaskSubmitResponse
 }
 
 /** 查询 AI 解读任务状态（轮询用）。 */
-export async function fetchLlmChatTask(taskId: string): Promise<TaskState> {
-  const resp = await fetch(`${BASE}/llm/chat/tasks/${taskId}`)
+export async function fetchLlmChatTask(taskId: string, signal?: AbortSignal): Promise<TaskState> {
+  const resp = await fetch(`${BASE}/llm/chat/tasks/${taskId}`, { signal })
   if (!resp.ok) await throwError(resp)
   return (await resp.json()) as TaskState
 }
@@ -1000,19 +1037,23 @@ export async function runLlmChatWithPolling(
   timeoutMs = 20 * 60_000,
   signal?: AbortSignal,
 ): Promise<TaskState> {
-  const { task_id } = await submitLlmChatTask(prompt, context)
+  if (signal?.aborted) throw abortError()
+  // signal 必须下发给两次真实网络请求：此前只在 sleep 边界检查，若 abort 正好
+  // 发生在文档卸载、而某次 fetch 悬挂，则要等它返回才退出（网络卡住时窗口不可控）。
+  const { task_id } = await submitLlmChatTask(prompt, context, undefined, signal)
   const start = Date.now()
   // eslint-disable-next-line no-constant-condition
   while (true) {
     if (signal?.aborted) throw abortError()
-    const state = await fetchLlmChatTask(task_id)
+    const state = await fetchLlmChatTask(task_id, signal)
+    if (signal?.aborted) throw abortError()
     onPoll?.(state)
     if (state.status === 'done' || state.status === 'failed') return state
     if (Date.now() - start > timeoutMs) {
       throw new Error(`AI 解读任务超时（${timeoutMs / 1000}s），任务仍在后台运行，可稍后重试`)
     }
-    await new Promise((r) => setTimeout(r, intervalMs))
-    if (signal?.aborted) throw abortError()
+    // 等待段同样可中断，否则 abort 后仍要等满一个 interval
+    if (await sleepAbortable(intervalMs, signal)) throw abortError()
   }
 }
 

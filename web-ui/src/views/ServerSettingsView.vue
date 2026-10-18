@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageShell from '../components/PageShell.vue'
 // 服务器设置页面：列出通达信行情服务器、测速、点选切换。
 // 解决"有些 IP 能连通有些不能"的问题——不同地区/运营商对各服务器连通性不同。
 import { onMounted, ref } from 'vue'
@@ -132,9 +133,9 @@ function latencyText(ms: number | null): string {
 </script>
 
 <template>
-  <div class="server-settings">
+  <PageShell title="服务器设置" desc="添加 / 测速 / 切换通达信行情服务器，当前连接与节点列表一览">
+    <div class="layout">
     <aside class="config-panel">
-      <h2>服务器设置</h2>
       <div class="current-host">
         <span class="label">当前服务器</span>
         <span class="host-value">{{ currentHost || '未连接' }}</span>
@@ -217,13 +218,15 @@ function latencyText(ms: number | null): string {
         </tbody>
       </table>
     </main>
-  </div>
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.server-settings {
+.layout {
   display: flex;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 .config-panel {
@@ -257,7 +260,7 @@ function latencyText(ms: number | null): string {
   width: 100%;
   padding: 10px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
@@ -279,7 +282,7 @@ function latencyText(ms: number | null): string {
 .message {
   margin-top: 12px;
   padding: 8px 12px;
-  background: var(--accent-bg, rgba(0, 120, 212, 0.1));
+  background: var(--accent-bg, color-mix(in srgb, var(--accent) 10%, transparent));
   border-radius: var(--radius);
   font-size: 13px;
   color: var(--accent);
@@ -287,10 +290,10 @@ function latencyText(ms: number | null): string {
 .error-banner {
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.1);
+  background: color-mix(in srgb, var(--up) 10%, transparent);
   border-radius: var(--radius);
   font-size: 13px;
-  color: var(--red, #f44336);
+  color: var(--red, var(--up));
 }
 .report-panel {
   flex: 1;
@@ -317,7 +320,7 @@ function latencyText(ms: number | null): string {
   border-bottom: 1px solid var(--border);
 }
 .host-table tr.is-current {
-  background: var(--accent-bg, rgba(0, 120, 212, 0.05));
+  background: var(--accent-bg, color-mix(in srgb, var(--accent) 5%, transparent));
 }
 .host-table tr.is-unreachable {
   opacity: 0.5;
@@ -338,19 +341,19 @@ function latencyText(ms: number | null): string {
 }
 .badge-current {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .badge-ok {
-  background: rgba(76, 175, 80, 0.15);
-  color: var(--green, #4caf50);
+  background: color-mix(in srgb, var(--down) 15%, transparent);
+  color: var(--green, var(--down));
 }
 .badge-unknown {
   background: var(--bg-panel);
   color: var(--text-dim);
 }
 .badge-bad {
-  background: rgba(244, 67, 54, 0.1);
-  color: var(--red, #f44336);
+  background: color-mix(in srgb, var(--up) 10%, transparent);
+  color: var(--red, var(--up));
 }
 .btn-switch {
   padding: 4px 16px;
@@ -363,7 +366,7 @@ function latencyText(ms: number | null): string {
 }
 .btn-switch:hover:not(:disabled) {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn-switch:disabled {
   opacity: 0.5;
@@ -380,8 +383,8 @@ function latencyText(ms: number | null): string {
   font-size: 12px;
 }
 .btn-del:hover:not(:disabled) {
-  border-color: var(--red, #f44336);
-  color: var(--red, #f44336);
+  border-color: var(--red, var(--up));
+  color: var(--red, var(--up));
 }
 .add-box {
   display: flex;
@@ -414,14 +417,14 @@ function latencyText(ms: number | null): string {
 }
 .btn-add:hover:not(:disabled) {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn-add:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .current-mark {
-  color: var(--green, #4caf50);
+  color: var(--green, var(--down));
   font-size: 16px;
 }
 .empty {

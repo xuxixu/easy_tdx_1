@@ -20,32 +20,39 @@ import {
   type OverseasRank,
   type OverseasSymbol,
 } from '../api'
-import { dirClass, fmtAmount, fmtPctSigned, fmtVolShares } from '../format'
+import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVolShares } from '../format'
 import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
 import { enabledIndices } from '../indexIndicators'
 import {
+  INDEX_ETF_PROXY,
   inUsSessionFilter,
   isUsDst,
   MARKET_DEFAULT_INDEX,
   marketLabel,
+  toHhmm,
   US_SESSION_FILTERS,
   type Market,
   type USSessionFilter,
-  usSession,
 } from '../market'
 import { useQuoteStore } from '../stores/quotes'
-import type { Bar, BoardRow } from '../types'
+import type { Bar, BoardRow, Category, MinutePoint, SecurityQuote } from '../types'
+import { createSeqGuard } from '../utils/asyncGuard'
 import BoardDialog from './BoardDialog.vue'
 import IndicatorChips from './IndicatorChips.vue'
+import IntradayChart from './IntradayChart.vue'
 import MoodRadar from './MoodRadar.vue'
 import SourceBadge from './SourceBadge.vue'
 import Sparkline from './Sparkline.vue'
 import StockDialog from './StockDialog.vue'
 import StockKline from './StockKline.vue'
+import UsOptionsRail from './UsOptionsRail.vue'
 
 const props = defineProps<{ market: Market }>()
 
 const quoteStore = useQuoteStore()
+
+/** 是否显示期权右侧栏：只给美股模式挂，港股没有对应期权链口径，硬挂会变成噪音。 */
+const showOptionsRail = computed(() => props.market === 'US')
 
 /** 指数条（参照沪市看板三卡：价格 + 涨跌幅 + 迷你分时，点击切 K 线面板）。 */
 // 指数条取自「指数设置」页配置（enabledIndices 内部读 localStorage，
@@ -71,15 +78,40 @@ function stripPct(idx: { market: string; code: string }): number | null {
   return (q.price / q.pre_close - 1) * 100
 }
 
+/**
+ * 组件是否仍挂载。指数条迷你分时是串行多请求，卸载后必须停止后续请求且不再
+ * 写状态；`onBeforeUnmount` 里置 false。
+ */
+let alive = true
+
 async function loadStripSparks() {
+  // 指数条价格走 SSE，但休市时推送间隔 60s，首屏会长时间显示 “—”。挂载时先
+  // 主动拉一次报价兜底（与 focal 的 SSE 兜底同理），并把分时序列画成迷你走势。
+  try {
+    const qs = await fetchQuotes(stripIndices.value.map((i) => ({ market: i.market, code: i.code })))
+    quoteStore.seedQuotes(qs)
+  } catch {
+    // 拉取失败就等 SSE 推送
+  }
   for (const idx of stripIndices.value) {
+    // 组件已卸载：停止后续串行请求，也不再写响应式状态（旧实现会一路拉完
+    // 并在卸载后继续写 stripSparks / stripSparkBase）。
+    if (!alive) return
     try {
-      const pts = await fetchMinute(idx.market, idx.code)
+      // 美股/港股**指数**在 MAC 扩展栈没有分时（只回 1 根 qq 快照），直接
+      // fetchMinute(指数代码) 是空——迷你分时永远画不出来。改走 INDEX_ETF_PROXY
+      // 对应的 ETF 分时：走势形态一致（恒生→02800、标普→SPY、纳指→QQQ、道指→DIA）。
+      // 代理分时的点位是 ETF 而非指数，因此基准（Sparkline 昨收线）也必须用
+      // ETF 分时首价，而不是指数报价的 pre_close——两者量级不同，混用会让
+      // 涨跌着色和虚线基准都错位。
+      const proxy = INDEX_ETF_PROXY[idx.code]
+      const target = proxy ? { market: proxy.market, code: proxy.code } : idx
+      const pts = await fetchMinute(target.market, target.code)
+      if (!alive) return
       if (pts.length > 0) {
         const key = stripSymbol(idx)
         stripSparks.value.set(key, pts.map((p) => p.price))
-        const q = stripQuote(idx)
-        stripSparkBase.value.set(key, q?.pre_close ?? pts[0].price)
+        stripSparkBase.value.set(key, pts[0].price)
       }
     } catch {
       // 单指数失败跳过
@@ -108,10 +140,14 @@ watch(
     focal.value = { ...MARKET_DEFAULT_INDEX[m] }
     searchText.value = ''
     searchResults.value = []
-    // 切市场重置时段档：美股回到当前时段（分钟K），港股/其它回到「全部」（日K）
-    sessionFilter.value = m === 'US' ? (usSession() as USSessionFilter) : 'all'
+    // 切市场重置视图：美股默认「盘中」价格面板，港股/其它默认「全部」（日K）
+    sessionFilter.value = m === 'US' ? 'open' : 'all'
     minuteMode.value = sessionFilter.value !== 'all'
-    if (minuteMode.value) loadMinuteBars()
+    restQuote.value = null
+    if (minuteMode.value) {
+      void loadFocalQuote()
+      void loadSessionMinute()
+    }
     else loadFocal()
   },
 )
@@ -160,58 +196,193 @@ function pickSymbol(s: OverseasSymbol) {
 const bars = ref<Bar[]>([])
 const barsError = ref('')
 const barsLoading = ref(false)
-const kCategory = ref<'DAY' | 'WEEK' | 'MONTH'>('DAY')
-const K_CATS: Array<{ value: 'DAY' | 'WEEK' | 'MONTH'; label: string }> = [
+
+// 序号守卫：外盘走扩展栈（7727）延迟波动更大，日K/分钟K/时段切换互相覆盖的
+// 概率高于 A 股；切标的与切周期都可能连点。
+const barsGuard = createSeqGuard()
+
+const kCategory = ref<Category>('DAY')
+const K_CATS: Array<{ value: Category; label: string }> = [
   { value: 'DAY', label: '日K' },
   { value: 'WEEK', label: '周K' },
   { value: 'MONTH', label: '月K' },
+  // 分钟周期：港股指数已修复（后端从当日分时聚合，无历史分钟K，仅当日）；
+  // 美股指数分钟K数据源受限（见 _http_bars / INDEX_ETF_PROXY 说明），
+  // 少数周期可能只有当日几根，K线不足时前端会提示。
+  { value: 'MIN_15', label: '15分' },
+  { value: 'MIN_30', label: '30分' },
+  { value: 'MIN_60', label: '60分' },
+  { value: 'MIN_120', label: '120分' },
+  { value: 'MIN_240', label: '240分' },
 ]
 
-// ── 美股时段过滤（分钟数据按 夜盘/盘前/盘中/盘后 查看）────────────────────────
-// TDX 分钟线含盘前盘后，夜盘无数据。选时段后自动切 MIN_5 并按北京时钟过滤；
-// 切回日/周/月即退出时段模式。默认档：美股 = 当前时段（分钟K），
-// 「全部」才回日K（盘后/夜盘看全貌，别默认把用户钉在分时上）。
-const sessionFilter = ref<USSessionFilter>(
-  props.market === 'US' ? (usSession() as USSessionFilter) : 'all',
-)
+// ── 美股时段视图（「盘中」= 纯价格面板，不画曲线）────────────────────────────
+// 只保留「全部」（日/周/月 K 线）与「盘中」（价格面板）两档。盘前 / 盘后 /
+// 夜盘在 TDX 与东财免费接口下均无数据（实测美股分钟线仅美东 09:30–16:00），
+// 摆出来只会让人点了看到空白，故移除。
+//
+// 价格面板直接读实时报价（SSE store 优先、REST 兜底），不取分时序列、
+// 不画曲线，只呈现价格与量额。
+const sessionFilter = ref<USSessionFilter>(props.market === 'US' ? 'open' : 'all')
 const minuteMode = ref(sessionFilter.value !== 'all')
+
+/** REST 兜底的报价（非自选股不会进 SSE store，需要单独拉一次）。 */
+const restQuote = ref<SecurityQuote | null>(null)
+
+/** 当前标的实时报价：SSE store 优先，其次 REST 兜底。 */
+const focalQuote = computed<SecurityQuote | null>(
+  () => quoteStore.getQuote(`${focal.value.market}${focal.value.code}`) ?? restQuote.value,
+)
+
+/** 主动拉一次报价填入兜底；失败静默——价格面板缺数据显示「—」，不弹错误条。 */
+async function loadFocalQuote() {
+  restQuote.value = null
+  try {
+    const symbol = `${focal.value.market}${focal.value.code}`
+    const rows = await fetchQuotes([
+      { market: focal.value.market, code: focal.value.code },
+    ])
+    restQuote.value = rows.find((r) => r.symbol === symbol) ?? rows[0] ?? null
+  } catch {
+    restQuote.value = null
+  }
+}
+
+/** 「盘中」档的分时点（已按盘中时段裁剪）。 */
+const sessionPoints = ref<MinutePoint[]>([])
+
+/** 分时以 ETF 代理时的标注（如「QQQ」）；空 = 指数原生分时（不存在，但保留语义）。 */
+const sessionProxy = ref('')
+
+/** 分时图昨收基准（涨跌着色用）。 */
+// 焦点是指数、分时走 ETF 代理时，focalQuote 是**指数**报价，其 pre_close
+// （如道指 ~50000）和代理 ETF 分时点（如 DIA ~400）量级不同，直接当基准会
+// 毁掉 y 轴对称。因此真正的基准由 sessionPreClose 提供，加载分时时按
+// 「走代理取 ETF 昨收 / 不走代理取焦点昨收」赋值，见其定义。
+//（原 focalPreClose computed 已移除，避免与 sessionPreClose 两套基准打架。）
+
+/**
+ * 分时图真正的昨收基准。
+ *
+ * 焦点是**指数**且分时走 ETF 代理时，分时点量级是 ETF（如 DIA ~400），而
+ * focalPreClose 是指数昨收（如道指 ~50000）——把 50000 当基准画 400±5 的分时，
+ * y 轴单侧幅度会被 base 撑成巨大，价格线压成一条贴边的平线，比例彻底失衡。
+ * 因此代理分时的昨收必须取**代理 ETF** 的 pre_close（IndexTrend 组件同样这么处理）。
+ * 非代理（个股原生分时）回退到 focalPreClose。
+ */
+const sessionPreClose = ref<number | null>(null)
+
+/**
+ * 取当日分时，只保留「盘中」时段（美东 09:30–16:00 = 北京 21:30–04:00）。
+ *
+ * 分时点的时间只有 `HH:MM:SS`，先经 `toHhmm` 归一化再比对窗口——直接
+ * 截取子串在带日期的格式下会把整段过滤成空。
+ */
+async function loadSessionMinute() {
+  const my = barsGuard.next()
+  barsLoading.value = true
+  barsError.value = ''
+  sessionPoints.value = []
+  sessionProxy.value = ''
+  // 分时昨收基准也随切换清空，避免上一个标的（尤其上一只代理 ETF）的
+  // 昨收残留到新分时加载完成，造成短期的 y 轴对称基准错位。
+  sessionPreClose.value = null
+  try {
+    // 真指数（道指/纳指/标普）在 MAC 数据源里没有分时行情（只回 1 根 qq 快照），
+    // 直接展示就是空白/一个点。这里用对应 ETF 的分时**代理渲染**——走势形态一致，
+    // 但点位不是指数本身，必须通过 sessionProxy 在图上明示。
+    const proxy = INDEX_ETF_PROXY[focal.value.code]
+    const target = proxy ? { market: proxy.market, code: proxy.code } : focal.value
+    const pts = await fetchMinute(target.market, target.code)
+    if (barsGuard.stale(my)) return
+    // 代理分时的昨收基准必须取代理 ETF 的 pre_close（与分时点同量级），
+    // 不能拿指数 quote 的昨收——否则 y 轴对称的基准错位，见 sessionPreClose 注释。
+    if (proxy) {
+      try {
+        const q = await fetchQuotes([{ market: target.market, code: target.code }])
+        sessionPreClose.value = q[0]?.pre_close ?? null
+      } catch {
+        sessionPreClose.value = null
+      }
+    } else {
+      sessionPreClose.value = focalQuote.value?.pre_close ?? null
+    }
+    if (pts.length === 0) throw new Error('无分时数据')
+    const dst = isUsDst()
+    sessionPoints.value = pts.filter((p) => {
+      const t = toHhmm(p.datetime)
+      return t !== '' && inUsSessionFilter(t, 'open', dst)
+    })
+    if (sessionPoints.value.length === 0) {
+      barsError.value = proxy
+        ? `${proxy.label}（代理）也暂无分时数据，该标的当日可能无盘中成交`
+        : '盘中时段暂无分时数据（该标的当日无盘中成交）'
+      return
+    }
+    if (proxy) sessionProxy.value = proxy.label
+  } catch (e) {
+    if (barsGuard.stale(my)) return
+    barsError.value = formatError(e)
+  } finally {
+    if (!barsGuard.stale(my)) barsLoading.value = false
+  }
+}
 
 function pickSession(s: USSessionFilter) {
   sessionFilter.value = s
+  // 切档清掉上一个视图的错误（日K 失败过的红条不该糊在分时/盘口上）
+  barsError.value = ''
   if (s === 'all') {
     minuteMode.value = false
+    sessionPoints.value = []
+    sessionProxy.value = ''
     loadFocal()
     return
   }
   minuteMode.value = true
-  loadMinuteBars()
+  void loadFocalQuote()
+  void loadSessionMinute()
 }
 
-async function loadMinuteBars() {
-  barsLoading.value = true
-  barsError.value = ''
-  try {
-    const fetched = await fetchBars(focal.value.market, focal.value.code, 'MIN_5', undefined, undefined)
-    if (fetched.length === 0) throw new Error('无分钟数据')
-    bars.value = fetched.slice(-800)
-  } catch (e) {
-    bars.value = []
-    barsError.value = formatError(e)
-  } finally {
-    barsLoading.value = false
-  }
-}
-
-/** 过滤后的 K 线（时段模式下按北京时钟过滤分钟 bar）。 */
-const shownBars = computed(() => {
-  if (!minuteMode.value || sessionFilter.value === 'all') return bars.value
-  const dst = isUsDst()
-  return bars.value.filter((b) => {
-    const t = b.datetime.slice(11, 16)
-    if (!t || b.datetime.length <= 10) return true
-    return inUsSessionFilter(t, sessionFilter.value, dst)
-  })
+/** 价格面板的涨跌幅（无昨收时返回 null，由 UI 显示「—」）。 */
+const focalPct = computed(() => {
+  const q = focalQuote.value
+  if (!q?.price || !q.pre_close) return null
+  return (q.price / q.pre_close - 1) * 100
 })
+
+// ── 五档盘口 ────────────────────────────────────────────────────────────────
+// A 股标准协议 20 个档位列齐全；扩展栈（港美股）只回了 16 个（缺 vol2/vol5），
+// 且休市时全为 0。**0 价不可能是真实挂单**，一律按「无」处理并显示「—」，
+// 而不是画一排 0.00 让人误以为盘口坏了。
+
+function quoteRec(): Record<string, number | null> | null {
+  return focalQuote.value as unknown as Record<string, number | null> | null
+}
+
+/** 档位价格文本；无挂单返回 null。 */
+function lvPrice(side: 'bid' | 'ask', lv: number): string | null {
+  const v = quoteRec()?.[`${side}${lv}`]
+  return typeof v === 'number' && v > 0 ? fmt2(v) : null
+}
+
+/** 档位挂单量文本；无挂单返回 null。港美股单位是股、A 股是手。 */
+function lvVol(side: 'bid' | 'ask', lv: number): string | null {
+  const v = quoteRec()?.[`${side}_vol${lv}`]
+  if (typeof v !== 'number' || v <= 0) return null
+  return fmtVolShares(v)
+}
+
+/** 是否有任一有效档位（决定盘口区显示表格还是「休市无挂单」）。 */
+const hasDepth = computed(() => {
+  for (let lv = 1; lv <= 5; lv += 1) {
+    if (lvPrice('bid', lv) !== null || lvPrice('ask', lv) !== null) return true
+  }
+  return false
+})
+
+/** 日/周/月 K 线。 */
+const shownBars = computed(() => bars.value)
 
 /** 当前 K 线数据源（bars 首根的 source 标记）。 */
 const barsSource = computed(() => bars.value[0]?.source)
@@ -245,13 +416,16 @@ const US_ETF_PROXY: Record<string, { market: string; code: string; name: string 
   SPX: { market: 'US', code: 'SPY', name: '标普500ETF' },
 }
 
-/** 当前标的是否 K 线不足（美股真指数只有快照 1 根，画不出图）。 */
-const barsTooFew = computed(() => !barsLoading.value && !barsError.value && shownBars.value.length < 2)
+/** K 线是否不足（「盘中」价格面板与 K 线无关，直接放行）。 */
+const barsTooFew = computed(
+  () => !minuteMode.value && !barsLoading.value && !barsError.value && shownBars.value.length < 2,
+)
 const etfProxy = computed(() =>
   props.market === 'US' ? (US_ETF_PROXY[focal.value.code] ?? null) : null,
 )
 
 async function loadFocal() {
+  const my = barsGuard.next()
   barsLoading.value = true
   barsError.value = ''
   try {
@@ -262,13 +436,15 @@ async function loadFocal() {
       undefined,
       undefined,
     )
+    if (barsGuard.stale(my)) return
     if (fetched.length === 0) throw new Error('无K线数据（可能为新股或代码有误）')
-    bars.value = fetched.slice(-250)
+    bars.value = fetched
   } catch (e) {
+    if (barsGuard.stale(my)) return
     bars.value = []
     barsError.value = formatError(e)
   } finally {
-    barsLoading.value = false
+    if (!barsGuard.stale(my)) barsLoading.value = false
   }
 }
 
@@ -491,8 +667,11 @@ function openBoard(code: string | undefined, name: string | undefined) {
 let refreshTimer = 0
 
 onMounted(() => {
-  // 默认档：美股=当前时段分钟K（盘前/盘中/盘后/夜盘），其余=日K
-  if (minuteMode.value) loadMinuteBars()
+  // 默认视图：美股=「盘中」价格面板，其余=日K
+  if (minuteMode.value) {
+      void loadFocalQuote()
+      void loadSessionMinute()
+    }
   else loadFocal()
   loadStripSparks()
   loadRank()
@@ -508,6 +687,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  alive = false
   window.clearTimeout(searchTimer)
   window.clearTimeout(rankTimer)
   window.clearInterval(refreshTimer)
@@ -515,317 +695,405 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ov">
-    <!-- 指数条（参照沪市看板：三卡，点击切 K 线面板）+ 搜索 -->
-    <div class="ov-head">
-      <div
-        v-for="idx in stripIndices"
-        :key="stripSymbol(idx)"
-        class="idx-card"
-        :class="{ active: focal.code === idx.code }"
-        @click="pickIndex(idx)"
-      >
-        <div class="idx-top">
-          <span class="idx-price mono" :class="dirClass(stripPct(idx))">
-            {{ stripQuote(idx)?.price?.toFixed(2) ?? '—' }}
-          </span>
-          <Sparkline
-            :prices="stripSparks.get(stripSymbol(idx)) ?? []"
-            :base="stripSparkBase.get(stripSymbol(idx)) ?? null"
-            :width="110"
-            :height="24"
-          />
-        </div>
-        <div class="idx-bottom">
-          <span class="idx-name">{{ idx.name }}</span>
-          <span class="idx-chg mono" :class="dirClass(stripPct(idx))">
-            {{ fmtPctSigned(stripPct(idx)) }}
-          </span>
-        </div>
-      </div>
-      <div class="search-box">
-        <input
-          v-model="searchText"
-          class="search-input"
-          :placeholder="`搜索${marketLabel(props.market)}代码/名称（如 ${props.market === 'HK' ? '00700 腾讯' : 'AAPL 苹果'}）`"
-          @input="onSearchInput"
-          @keyup.enter="searchResults.length > 0 && pickSymbol(searchResults[0])"
-        />
-        <div v-if="searching" class="search-hint">搜索中…</div>
-        <div v-else-if="searchError" class="search-hint err">{{ searchError }}</div>
-        <div v-else-if="searchResults.length > 0" class="search-list">
-          <div
-            v-for="s in searchResults"
-            :key="s.symbol"
-            class="search-row"
-            @click="pickSymbol(s)"
-          >
-            <span class="s-name">{{ s.name || s.code }}</span>
-            <span class="s-code mono dim">{{ s.symbol }}</span>
-            <span v-if="s.sub_market" class="s-sub">{{ s.sub_market }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- K线面板（全宽） -->
-    <div class="card k-panel">
-      <div class="k-head">
-        <h3>{{ focal.name }} <span class="dim mono code">{{ focal.market }}{{ focal.code }}</span></h3>
-        <SourceBadge :source="barsSource" />
-        <span class="k-cats">
-          <button
-            v-for="c in K_CATS"
-            :key="c.value"
-            class="chip"
-            :class="{ on: kCategory === c.value }"
-            @click="kCategory = c.value"
-          >
-            {{ c.label }}
-          </button>
-        </span>
-        <IndicatorChips
-          :overlays="indParams.overlays ?? []"
-          :sub="indParams.subPane"
-          @toggle-overlay="toggleOverlay"
-          @select-sub="setSubPane"
-        />
-        <!-- 美股时段切换（分钟数据按 夜盘/盘前/盘中/盘后 过滤查看） -->
-        <span v-if="props.market === 'US'" class="k-cats session-cats">
-          <button
-            v-for="s in US_SESSION_FILTERS"
-            :key="s.value"
-            class="chip"
-            :class="{ on: (s.value === 'all' ? !minuteMode : minuteMode && sessionFilter === s.value) }"
-            :title="
-              s.value === 'all'
-                ? '返回日K'
-                : s.value === 'open'
-                  ? '只看盘中（21:30~04:00）分钟线——TDX 目前只提供此时段'
-                  : `只看${s.label}时段分钟线（TDX 暂无此时段数据）`
-            "
-            @click="pickSession(s.value)"
-          >
-            {{ s.label }}
-          </button>
-        </span>
-        <button class="chip" @click="dialog = { ...focal }">分时/盘口 ⌗</button>
-      </div>
-      <div v-if="barsLoading" class="loading">加载中…</div>
-      <div v-else-if="barsError" class="err">{{ barsError }}</div>
-      <div v-else-if="barsTooFew" class="loading">
-        <!-- 时段模式下是"该时段无分钟数据"；日K 不足才是数据源只给快照 -->
-        <template v-if="minuteMode">
-          {{ focal.name }} 该时段无分钟数据（夜盘 TDX 不提供；指数无分钟线）。点「全部」回日K。
-        </template>
-        <template v-else>
-          {{ focal.name }} K 线数据源仅提供实时快照，画不出 K 线。
-          <button
-            v-if="etfProxy"
-            class="chip"
-            @click="focal = { ...etfProxy }; loadFocal()"
-          >
-            切 {{ etfProxy.name }} 看完整 K 线
-          </button>
-        </template>
-      </div>
-      <StockKline v-else :bars="shownBars" :params="indParams" />
-    </div>
-
-    <!-- 六宫格（A 股同款口径，港美股无涨跌停制度故无涨停雷达） -->
-    <div class="grid">
-      <!-- 市场统计（榜单快照：涨/平/跌/总数） -->
-      <div class="card">
-        <h3>市场统计</h3>
-        <div v-if="rankError" class="err">{{ rankError }}</div>
-        <template v-else-if="breadth && rank?.status === 'ready'">
-          <div class="breadth-bar">
-            <div class="seg up" :style="{ width: `${breadth.up}%` }"></div>
-            <div class="seg flat" :style="{ width: `${breadth.flat}%` }"></div>
-            <div class="seg down" :style="{ width: `${breadth.down}%` }"></div>
-          </div>
-          <div class="stat-nums">
-            <span class="up">涨 {{ rank.up }}</span>
-            <span class="flat">平 {{ rank.flat }}</span>
-            <span class="down">跌 {{ rank.down }}</span>
-            <span class="dim">共 {{ rank.total }}</span>
-          </div>
-        </template>
-        <div v-else class="loading">
-          {{ rank?.status === 'building' ? `榜单构建中…${rank.progress ? `（${rank.progress}）` : ''}` : '加载中…' }}
-        </div>
-      </div>
-
-      <!-- 市场情绪雷达（量能维无全市场成交数据，固定中性） -->
-      <div class="card">
-        <h3>市场情绪 <span class="mood-score mono">{{ moodScore }}</span></h3>
-        <MoodRadar :values="radarValues" />
-        <div class="mood-foot">
-          <span class="mood-word">{{ moodLabel(moodScore) }}</span>
-          <span class="dim mono">量能 —（暂无全市场成交）</span>
-        </div>
-      </div>
-
-      <!-- 涨跌分布直方图（榜单快照 22 桶） -->
-      <div class="card dist-card">
-        <h3>涨跌分布 <span class="dim title-sub">（全市场 {{ distTotal || '…' }} 只）</span></h3>
-        <div v-if="rankError" class="err">{{ rankError }}</div>
+  <!--
+    美股模式多一条右侧栏（期权结构精简版）；港股模式不显示。
+    外层 .ov-shell 只为放这条右栏而存在，.ov 内部布局保持原样。
+  -->
+  <div class="ov-shell" :class="{ 'has-rail': showOptionsRail }">
+    <div class="ov">
+      <!-- 指数条（参照沪市看板：三卡，点击切 K 线面板）+ 搜索 -->
+      <div class="ov-head">
         <div
-          v-else-if="distCounts"
-          ref="distChartEl"
-          class="dist-chart"
-          @mousemove="onDistMove"
-          @mouseleave="hoverBucket = -1"
+          v-for="idx in stripIndices"
+          :key="stripSymbol(idx)"
+          class="idx-card"
+          :class="{ active: focal.code === idx.code }"
+          @click="pickIndex(idx)"
         >
-          <div
-            v-for="(count, i) in distCounts"
-            :key="i"
-            class="dist-col"
-            :class="{ zero: BUCKETS[i] === '0', hovered: hoverBucket === i }"
-            @mouseenter="hoverBucket = i"
-          >
-            <div class="dist-bar" :style="{ height: distHeight(count), background: distColor(i) }"></div>
-            <div class="dist-label">{{ BUCKETS[i] }}</div>
+          <div class="idx-top">
+            <span class="idx-price mono" :class="dirClass(stripPct(idx))">
+              {{ stripQuote(idx)?.price?.toFixed(2) ?? '—' }}
+            </span>
+            <Sparkline
+              :prices="stripSparks.get(stripSymbol(idx)) ?? []"
+              :base="stripSparkBase.get(stripSymbol(idx)) ?? null"
+              :width="110"
+              :height="24"
+            />
           </div>
-          <div v-if="hoverBucket >= 0" class="dist-pop" :style="{ left: `${popX}px`, top: `${popY}px` }">
-            <div class="pop-range">{{ bucketRange(hoverBucket) }}</div>
-            <div class="pop-count mono">{{ distCounts[hoverBucket] }} 只</div>
-            <div class="pop-share mono">占 {{ bucketShare(distCounts[hoverBucket]) }}</div>
-          </div>
-        </div>
-        <div v-else class="loading">
-          {{ rank?.status === 'building' ? '全市场榜单构建中…（首次约 20~70 秒）' : '加载中…' }}
-        </div>
-      </div>
-
-      <!-- 行业板块（热 + 冷，点击看成分股） -->
-      <div class="card board-card">
-        <h3>行业板块 <span class="dim title-sub">热</span></h3>
-        <div v-if="boardsError" class="err">{{ boardsError }}</div>
-        <div v-else class="board-list">
-          <div
-            v-for="b in hotBoards(industryBoards)"
-            :key="b.code"
-            class="board-row clickable"
-            @click="openBoard(b.code, b.name)"
-          >
-            <span class="b-name">{{ b.name }}</span>
-            <div class="b-bar-wrap">
-              <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), industryBoards) }"></div>
-            </div>
-            <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
+          <div class="idx-bottom">
+            <span class="idx-name">{{ idx.name }}</span>
+            <span class="idx-chg mono" :class="dirClass(stripPct(idx))">
+              {{ fmtPctSigned(stripPct(idx)) }}
+            </span>
           </div>
         </div>
-        <h3 class="cold-title">冷</h3>
-        <div v-if="!boardsError" class="board-list">
-          <div
-            v-for="b in coldBoards(industryBoards)"
-            :key="`c${b.code}`"
-            class="board-row clickable"
-            @click="openBoard(b.code, b.name)"
-          >
-            <span class="b-name">{{ b.name }}</span>
-            <div class="b-bar-wrap">
-              <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), industryBoards) }"></div>
-            </div>
-            <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 概念板块（热 + 冷） -->
-      <div class="card board-card">
-        <h3>概念板块 <span class="dim title-sub">热</span></h3>
-        <div v-if="boardsError" class="err">{{ boardsError }}</div>
-        <div v-else class="board-list">
-          <div
-            v-for="b in hotBoards(conceptBoards)"
-            :key="b.code"
-            class="board-row clickable"
-            @click="openBoard(b.code, b.name)"
-          >
-            <span class="b-name">{{ b.name }}</span>
-            <div class="b-bar-wrap">
-              <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), conceptBoards) }"></div>
-            </div>
-            <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
-          </div>
-        </div>
-        <h3 class="cold-title">冷</h3>
-        <div v-if="!boardsError" class="board-list">
-          <div
-            v-for="b in coldBoards(conceptBoards)"
-            :key="`c${b.code}`"
-            class="board-row clickable"
-            @click="openBoard(b.code, b.name)"
-          >
-            <span class="b-name">{{ b.name }}</span>
-            <div class="b-bar-wrap">
-              <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), conceptBoards) }"></div>
-            </div>
-            <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 排行榜（涨幅/跌幅/成交额/成交量，每行都带成交额） -->
-      <div class="card rank-panel">
-        <h3>
-          {{ marketLabel(props.market) }}行情榜
-          <span v-if="rank?.status === 'ready'" class="dim title-sub">（{{ rank.total }} 只）</span>
-        </h3>
-        <div v-if="rankError" class="err">{{ rankError }}</div>
-        <div v-else-if="!rank || rank.status === 'building'" class="loading">
-          全市场榜单构建中…{{ rank?.progress ? `（${rank.progress}）` : '（首次约 20~70 秒）' }}
-        </div>
-        <template v-else>
-          <span class="rank-tabs">
-            <button
-              v-for="t in RANK_TABS"
-              :key="t.value"
-              class="rank-tab"
-              :class="{ on: rankTab === t.value }"
-              @click="rankTab = t.value"
+        <div class="search-box">
+          <input
+            v-model="searchText"
+            class="search-input"
+            :placeholder="`搜索${marketLabel(props.market)}代码/名称（如 ${props.market === 'HK' ? '00700 腾讯' : 'AAPL 苹果'}）`"
+            @input="onSearchInput"
+            @keyup.enter="searchResults.length > 0 && pickSymbol(searchResults[0])"
+          />
+          <div v-if="searching" class="search-hint">搜索中…</div>
+          <div v-else-if="searchError" class="search-hint err">{{ searchError }}</div>
+          <div v-else-if="searchResults.length > 0" class="search-list">
+            <div
+              v-for="s in searchResults"
+              :key="s.symbol"
+              class="search-row"
+              @click="pickSymbol(s)"
             >
-              {{ t.label }}
+              <span class="s-name">{{ s.name || s.code }}</span>
+              <span class="s-code mono dim">{{ s.symbol }}</span>
+              <span v-if="s.sub_market" class="s-sub">{{ s.sub_market }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- K线面板（全宽） -->
+      <div class="card k-panel">
+        <div class="k-head">
+          <h3>{{ focal.name }} <span class="dim mono code">{{ focal.market }}{{ focal.code }}</span></h3>
+          <SourceBadge :source="barsSource" />
+          <span class="k-cats">
+            <button
+              v-for="c in K_CATS"
+              :key="c.value"
+              class="chip"
+              :class="{ on: kCategory === c.value }"
+              @click="kCategory = c.value"
+            >
+              {{ c.label }}
             </button>
           </span>
-          <table class="qtable">
-            <tbody>
-              <tr
-                v-for="(r, i) in rankRows"
-                :key="`${rankTab}${r.code}`"
-                @click="openRow(r.market, r.code, r.name)"
-              >
-                <td>{{ i + 1 }}. {{ r.name || r.code }}</td>
-                <td class="mono dim">{{ rankTab === 'by_vol' ? fmtVolShares(Number(r.vol ?? 0)) : fmtAmount(Number(r.amount ?? 0)) }}</td>
-                <td class="mono" :class="rankTab === 'by_vol' ? 'dim' : dirClass(r.change_pct)">
-                  {{ rankTab === 'by_vol' ? fmtAmount(Number(r.amount ?? 0)) : fmtPctSigned(r.change_pct) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </template>
+          <IndicatorChips
+            :overlays="indParams.overlays ?? []"
+            :sub="indParams.subPane"
+            @toggle-overlay="toggleOverlay"
+            @select-sub="setSubPane"
+          />
+          <!-- 美股视图切换：「全部」= 日/周/月 K 线，「盘中」= 纯价格面板 -->
+          <span v-if="props.market === 'US'" class="k-cats session-cats">
+            <button
+              v-for="s in US_SESSION_FILTERS"
+              :key="s.value"
+              class="chip"
+              :class="{ on: (s.value === 'all' ? !minuteMode : minuteMode && sessionFilter === s.value) }"
+              :title="s.value === 'all' ? '返回日K' : '盘中分时图 + 五档盘口'"
+              @click="pickSession(s.value)"
+            >
+              {{ s.label }}
+            </button>
+          </span>
+          <button class="chip" @click="dialog = { ...focal }">分时/盘口 ⌗</button>
+        </div>
+        <div v-if="barsLoading" class="loading">加载中…</div>
+        <div v-else-if="barsError" class="err">{{ barsError }}</div>
+        <!-- 「盘中」：分时图（左）+ 五档盘口（右） -->
+        <div v-else-if="minuteMode" class="pp">
+          <div class="pp-left">
+            <div class="pp-price-row">
+              <span class="pp-price mono" :class="dirClass(focalPct)">
+                {{ fmt2(focalQuote?.price) }}
+              </span>
+              <span class="pp-pct mono" :class="dirClass(focalPct)">
+                {{ fmtPctSigned(focalPct) }}
+              </span>
+            <span class="pp-meta dim mono">
+              开 {{ fmt2(focalQuote?.open) }} · 高 {{ fmt2(focalQuote?.high) }} · 低
+              {{ fmt2(focalQuote?.low) }} · 量 {{ fmtVolShares(focalQuote?.vol) }}
+            </span>
+            <!-- 指数无原生分时：用 ETF 代理渲染时必须明示，否则价格量级会被误读 -->
+            <span v-if="sessionProxy" class="pp-proxy">分时以 {{ sessionProxy }} 代理</span>
+          </div>
+            <IntradayChart
+              v-if="sessionPoints.length >= 2"
+              :points="sessionPoints"
+              :pre-close="sessionPreClose"
+              :vol-unit-shares="true"
+              height="232px"
+            />
+            <div v-else class="loading">分时加载中…</div>
+          </div>
+            <!-- 五档盘口：卖盘在上（高→低）、现价居中、买盘在下（高→低），与交易软件一致 -->
+            <div class="pp-depth">
+              <div class="pd-head">
+                <span>五档盘口</span>
+                <span class="dim">{{ hasDepth ? '实时' : '休市' }}</span>
+              </div>
+              <!-- 无挂单时不铺 10 行短横线（那样看着像坏了），收成一个说明 -->
+              <div v-if="!hasDepth" class="pd-empty">
+                <span class="dim">暂无挂单数据</span>
+                <span class="pd-empty-sub dim">休市期间交易所不提供买卖盘</span>
+              </div>
+              <template v-else>
+                <div
+                  v-for="lv in [5, 4, 3, 2, 1]"
+                  :key="`a${lv}`"
+                  class="pd-row"
+                  :class="{ 'pd-nil': lvPrice('ask', lv) === null }"
+                >
+                  <span class="pd-tag">卖{{ lv }}</span>
+                  <span class="pd-price mono down">{{ lvPrice('ask', lv) ?? '—' }}</span>
+                  <span class="pd-vol mono">{{ lvVol('ask', lv) ?? '—' }}</span>
+                </div>
+                <div class="pd-row pd-mid">
+                  <span class="pd-tag">现价</span>
+                  <span class="pd-price mono" :class="dirClass(focalPct)">
+                    {{ fmt2(focalQuote?.price) }}
+                  </span>
+                  <span class="pd-vol mono dim">{{ fmtVolShares(focalQuote?.vol) }}</span>
+                </div>
+                <div
+                  v-for="lv in [1, 2, 3, 4, 5]"
+                  :key="`b${lv}`"
+                  class="pd-row"
+                  :class="{ 'pd-nil': lvPrice('bid', lv) === null }"
+                >
+                  <span class="pd-tag">买{{ lv }}</span>
+                  <span class="pd-price mono up">{{ lvPrice('bid', lv) ?? '—' }}</span>
+                  <span class="pd-vol mono">{{ lvVol('bid', lv) ?? '—' }}</span>
+                </div>
+              </template>
+            </div>
+        </div>
+        <div v-else-if="barsTooFew" class="loading">
+          {{ focal.name }} K 线数据源仅提供实时快照，画不出 K 线。
+          <button v-if="etfProxy" class="chip" @click="focal = { ...etfProxy }; loadFocal()">
+            切 {{ etfProxy.name }} 看完整 K 线
+          </button>
+        </div>
+        <StockKline v-else :bars="shownBars" :params="indParams" />
       </div>
+
+      <!-- 六宫格（A 股同款口径，港美股无涨跌停制度故无涨停雷达） -->
+      <div class="grid">
+        <!-- 市场统计（榜单快照：涨/平/跌/总数） -->
+        <div class="card">
+          <h3>市场统计</h3>
+          <div v-if="rankError" class="err">{{ rankError }}</div>
+          <template v-else-if="breadth && rank?.status === 'ready'">
+            <div class="breadth-bar">
+              <div class="seg up" :style="{ width: `${breadth.up}%` }"></div>
+              <div class="seg flat" :style="{ width: `${breadth.flat}%` }"></div>
+              <div class="seg down" :style="{ width: `${breadth.down}%` }"></div>
+            </div>
+            <div class="stat-nums">
+              <span class="up">涨 {{ rank.up }}</span>
+              <span class="flat">平 {{ rank.flat }}</span>
+              <span class="down">跌 {{ rank.down }}</span>
+              <span class="dim">共 {{ rank.total }}</span>
+            </div>
+          </template>
+          <div v-else class="loading">
+            {{ rank?.status === 'building' ? `榜单构建中…${rank.progress ? `（${rank.progress}）` : ''}` : '加载中…' }}
+          </div>
+        </div>
+
+        <!-- 市场情绪雷达（量能维无全市场成交数据，固定中性） -->
+        <div class="card">
+          <h3>市场情绪 <span class="mood-score mono">{{ moodScore }}</span></h3>
+          <MoodRadar :values="radarValues" />
+          <div class="mood-foot">
+            <span class="mood-word">{{ moodLabel(moodScore) }}</span>
+            <span class="dim mono">量能 —（暂无全市场成交）</span>
+          </div>
+        </div>
+
+        <!-- 涨跌分布直方图（榜单快照 22 桶） -->
+        <div class="card dist-card">
+          <h3>涨跌分布 <span class="dim title-sub">（全市场 {{ distTotal || '…' }} 只）</span></h3>
+          <div v-if="rankError" class="err">{{ rankError }}</div>
+          <div
+            v-else-if="distCounts"
+            ref="distChartEl"
+            class="dist-chart"
+            @mousemove="onDistMove"
+            @mouseleave="hoverBucket = -1"
+          >
+            <div
+              v-for="(count, i) in distCounts"
+              :key="i"
+              class="dist-col"
+              :class="{ zero: BUCKETS[i] === '0', hovered: hoverBucket === i }"
+              @mouseenter="hoverBucket = i"
+            >
+              <div class="dist-bar" :style="{ height: distHeight(count), background: distColor(i) }"></div>
+              <div class="dist-label">{{ BUCKETS[i] }}</div>
+            </div>
+            <div v-if="hoverBucket >= 0" class="dist-pop" :style="{ left: `${popX}px`, top: `${popY}px` }">
+              <div class="pop-range">{{ bucketRange(hoverBucket) }}</div>
+              <div class="pop-count mono">{{ distCounts[hoverBucket] }} 只</div>
+              <div class="pop-share mono">占 {{ bucketShare(distCounts[hoverBucket]) }}</div>
+            </div>
+          </div>
+          <div v-else class="loading">
+            {{ rank?.status === 'building' ? '全市场榜单构建中…（首次约 20~70 秒）' : '加载中…' }}
+          </div>
+        </div>
+
+        <!-- 行业板块（热 + 冷，点击看成分股） -->
+        <div class="card board-card">
+          <h3>行业板块 <span class="dim title-sub">热</span></h3>
+          <div v-if="boardsError" class="err">{{ boardsError }}</div>
+          <div v-else class="board-list">
+            <div
+              v-for="b in hotBoards(industryBoards)"
+              :key="b.code"
+              class="board-row clickable"
+              @click="openBoard(b.code, b.name)"
+            >
+              <span class="b-name">{{ b.name }}</span>
+              <div class="b-bar-wrap">
+                <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), industryBoards) }"></div>
+              </div>
+              <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
+            </div>
+          </div>
+          <h3 class="cold-title">冷</h3>
+          <div v-if="!boardsError" class="board-list">
+            <div
+              v-for="b in coldBoards(industryBoards)"
+              :key="`c${b.code}`"
+              class="board-row clickable"
+              @click="openBoard(b.code, b.name)"
+            >
+              <span class="b-name">{{ b.name }}</span>
+              <div class="b-bar-wrap">
+                <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), industryBoards) }"></div>
+              </div>
+              <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 概念板块（热 + 冷） -->
+        <div class="card board-card">
+          <h3>概念板块 <span class="dim title-sub">热</span></h3>
+          <div v-if="boardsError" class="err">{{ boardsError }}</div>
+          <div v-else class="board-list">
+            <div
+              v-for="b in hotBoards(conceptBoards)"
+              :key="b.code"
+              class="board-row clickable"
+              @click="openBoard(b.code, b.name)"
+            >
+              <span class="b-name">{{ b.name }}</span>
+              <div class="b-bar-wrap">
+                <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), conceptBoards) }"></div>
+              </div>
+              <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
+            </div>
+          </div>
+          <h3 class="cold-title">冷</h3>
+          <div v-if="!boardsError" class="board-list">
+            <div
+              v-for="b in coldBoards(conceptBoards)"
+              :key="`c${b.code}`"
+              class="board-row clickable"
+              @click="openBoard(b.code, b.name)"
+            >
+              <span class="b-name">{{ b.name }}</span>
+              <div class="b-bar-wrap">
+                <div class="b-bar" :class="dirClass(boardPct(b))" :style="{ width: barWidth(boardPct(b), conceptBoards) }"></div>
+              </div>
+              <span class="b-pct mono" :class="dirClass(boardPct(b))">{{ fmtPctSigned(boardPct(b)) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 排行榜（涨幅/跌幅/成交额/成交量，每行都带成交额） -->
+        <div class="card rank-panel">
+          <h3>
+            {{ marketLabel(props.market) }}行情榜
+            <span v-if="rank?.status === 'ready'" class="dim title-sub">（{{ rank.total }} 只）</span>
+          </h3>
+          <div v-if="rankError" class="err">{{ rankError }}</div>
+          <div v-else-if="!rank || rank.status === 'building'" class="loading">
+            全市场榜单构建中…{{ rank?.progress ? `（${rank.progress}）` : '（首次约 20~70 秒）' }}
+          </div>
+          <template v-else>
+            <span class="rank-tabs">
+              <button
+                v-for="t in RANK_TABS"
+                :key="t.value"
+                class="rank-tab"
+                :class="{ on: rankTab === t.value }"
+                @click="rankTab = t.value"
+              >
+                {{ t.label }}
+              </button>
+            </span>
+            <table class="qtable">
+              <tbody>
+                <tr
+                  v-for="(r, i) in rankRows"
+                  :key="`${rankTab}${r.code}`"
+                  @click="openRow(r.market, r.code, r.name)"
+                >
+                  <td>{{ i + 1 }}. {{ r.name || r.code }}</td>
+                  <td class="mono dim">{{ rankTab === 'by_vol' ? fmtVolShares(Number(r.vol ?? 0)) : fmtAmount(Number(r.amount ?? 0)) }}</td>
+                  <td class="mono" :class="rankTab === 'by_vol' ? 'dim' : dirClass(r.change_pct)">
+                    {{ rankTab === 'by_vol' ? fmtAmount(Number(r.amount ?? 0)) : fmtPctSigned(r.change_pct) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+        </div>
+      </div>
+
+      <StockDialog
+        v-if="dialog"
+        :market="dialog.market"
+        :code="dialog.code"
+        :name="dialog.name"
+        @close="dialog = null"
+      />
+      <BoardDialog
+        v-if="boardDialog"
+        :code="boardDialog.code"
+        :name="boardDialog.name"
+        @close="boardDialog = null"
+      />
     </div>
 
-    <StockDialog
-      v-if="dialog"
-      :market="dialog.market"
-      :code="dialog.code"
-      :name="dialog.name"
-      @close="dialog = null"
-    />
-    <BoardDialog
-      v-if="boardDialog"
-      :code="boardDialog.code"
-      :name="boardDialog.name"
-      @close="boardDialog = null"
-    />
+    <aside v-if="showOptionsRail" class="ov-rail">
+      <UsOptionsRail />
+    </aside>
   </div>
 </template>
 
 <style scoped>
+/* 外壳只为承载美股模式的期权右侧栏；无右栏时退化成普通块，不影响原布局 */
+.ov-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ov-shell.has-rail {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.ov-shell.has-rail > .ov {
+  /* min-width:0 是关键：.ov 内部的指数条/榜单是 flex，不加会被右侧栏挤出视口 */
+  flex: 1;
+  min-width: 0;
+}
+.ov-rail {
+  width: 288px;
+  flex-shrink: 0;
+  /* 看板整页滚动（.dash），所以右栏跟随滚动吸附；超长时自己内部滚，
+     不把主区的滚动条顶下去 */
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
 .ov {
   display: flex;
   flex-direction: column;
@@ -908,7 +1176,7 @@ onBeforeUnmount(() => {
   margin-top: 4px;
   max-height: 320px;
   overflow: auto;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 24px var(--shadow);
 }
 .search-row {
   display: flex;
@@ -978,7 +1246,7 @@ onBeforeUnmount(() => {
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .rank-panel {
   min-height: 300px;
@@ -995,7 +1263,7 @@ onBeforeUnmount(() => {
 .rank-tab.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .breadth-bar {
   display: flex;
@@ -1065,7 +1333,7 @@ onBeforeUnmount(() => {
 }
 .dist-pop {
   position: absolute;
-  background: rgba(26, 29, 38, 0.97);
+  background: color-mix(in srgb, var(--bg-elevated) 97%, transparent);
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 6px 10px;
@@ -1073,7 +1341,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   pointer-events: none;
   text-align: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 14px var(--shadow);
   z-index: 20;
 }
 .pop-range {
@@ -1163,5 +1431,126 @@ onBeforeUnmount(() => {
 }
 .dim {
   color: var(--text-dim);
+}
+
+/* 「盘中」：左价格与关键指标，右五档盘口；整体不画曲线 */
+.pp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 292px;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  align-items: stretch;
+}
+.pp-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.pp-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.pp-price {
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.5px;
+}
+.pp-pct {
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+/* 开/高/低/量：跟在价格后的一行紧凑摘要，不再单独占一块六格 */
+.pp-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+/* 分时以 ETF 代理时的明示徽标：点位不是指数本身，不标会被误读 */
+.pp-proxy {
+  font-size: var(--fs-xs);
+  color: var(--warn);
+  border: 1px solid var(--warn-line);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* 五档盘口（卖盘在上 → 现价 → 买盘在下，与交易软件一致） */
+.pp-depth {
+  display: flex;
+  flex-direction: column;
+  padding-left: 24px;
+  border-left: 1px solid var(--hairline);
+}
+.pd-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 8px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.pd-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 84px;
+  align-items: center;
+  gap: 8px;
+  padding: 2.5px 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+/* 无挂单（休市/该档为空）：整行压暗，避免一排 0.00 被误读成真实盘口 */
+.pd-row.pd-nil {
+  opacity: 0.4;
+}
+.pd-mid {
+  margin: 6px 0;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+}
+.pd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 34px 8px;
+  font-size: 13px;
+}
+.pd-empty-sub {
+  font-size: 11px;
+}
+.pd-tag {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.pd-price {
+  text-align: right;
+}
+.pd-vol {
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 980px) {
+  .pp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pp-depth {
+    padding-left: 0;
+    padding-top: 14px;
+    border-left: none;
+    border-top: 1px solid var(--hairline);
+  }
 }
 </style>

@@ -101,7 +101,7 @@ onUnmounted(() => {
   padding: 40px 36px 28px;
   box-shadow:
     0 12px 40px var(--shadow),
-    0 0 0 1px rgba(245, 158, 11, 0.08);
+    0 0 0 1px color-mix(in srgb, var(--warn) 8%, transparent);
   overflow: hidden;
 }
 
@@ -118,7 +118,7 @@ onUnmounted(() => {
   display: block;
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, #f59e0b, #ea580c);
+  background: linear-gradient(90deg, var(--warn), var(--warn));
   transform-origin: left center;
   animation: quote-progress-fill var(--quote-interval, 3000ms) linear infinite;
 }
@@ -135,7 +135,7 @@ onUnmounted(() => {
   font-size: 64px;
   font-family: Georgia, 'Times New Roman', serif;
   line-height: 1;
-  color: rgba(245, 158, 11, 0.18);
+  color: color-mix(in srgb, var(--warn) 18%, transparent);
   user-select: none;
   pointer-events: none;
 }
@@ -157,7 +157,7 @@ onUnmounted(() => {
 
 .quote-author {
   font-size: 13px;
-  color: #f59e0b;
+  color: var(--warn);
   font-weight: 600;
   text-align: right;
 }
@@ -180,7 +180,7 @@ onUnmounted(() => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: var(--warn);
   animation: quote-pulse 1.2s ease-in-out infinite;
 }
 @keyframes quote-pulse {

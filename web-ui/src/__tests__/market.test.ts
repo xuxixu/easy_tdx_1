@@ -20,6 +20,7 @@ import {
   isUsDst,
   MARKET_DEFAULT_INDEX,
   MARKET_INDEX_STRIP,
+  toHhmm,
   usSession,
 } from '../market.ts'
 
@@ -125,4 +126,35 @@ test('指数条：港股三指数齐全 + 各市场默认指数存在', () => {
     assert.ok(def && def.code, `${key} 默认指数缺失`)
     assert.ok(MARKET_INDEX_STRIP[key].length >= 1, `${key} 指数条为空`)
   }
+})
+// ── toHhmm：分时时间归一化 ────────────────────────────────────────────────────
+
+test('toHhmm：三种常见写法都归一到 HH:MM', () => {
+  // 扩展栈分时（无日期）
+  assert.equal(toHhmm('21:30:00'), '21:30')
+  // 已是 HH:MM
+  assert.equal(toHhmm('21:30'), '21:30')
+  // 带日期（A 股路径可能长这样）
+  assert.equal(toHhmm('2026-10-16 21:30:00'), '21:30')
+})
+
+test('toHhmm：个位数小时补零', () => {
+  assert.equal(toHhmm('9:05'), '09:05')
+  assert.equal(toHhmm('9:05:00'), '09:05')
+})
+
+test('toHhmm：解析不出返回空串（调用方应跳过该点）', () => {
+  assert.equal(toHhmm(''), '')
+  assert.equal(toHhmm('--'), '')
+  assert.equal(toHhmm('not-a-time'), '')
+})
+
+test('toHhmm 与 inUsSessionFilter 联动：带日期的分时也能正确分时段', () => {
+  // 这是回归重点：直接 slice(0,5) 对带日期的串会得到 "2026-"，全部判 false，
+  // 表现为「切到任何时段都是空图」。
+  const dates = ['2026-10-16 21:35:00', '2026-10-17 03:59:00', '2026-10-16 17:00:00']
+  const inOpen = dates.filter((d) => inUsSessionFilter(toHhmm(d), 'open'))
+  const inPre = dates.filter((d) => inUsSessionFilter(toHhmm(d), 'pre'))
+  assert.deepEqual(inOpen, ['2026-10-16 21:35:00', '2026-10-17 03:59:00'])
+  assert.deepEqual(inPre, ['2026-10-16 17:00:00'])
 })

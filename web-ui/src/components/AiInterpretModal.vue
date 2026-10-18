@@ -30,21 +30,26 @@ const aiReply = ref('')
 let aiTimer = 0
 /** 卸载时中止后台轮询（runLlmChatWithPolling 检查 signal 立即退出）。 */
 let abortCtrl: AbortController | null = null
+/** 组件是否仍挂载：探测配置的 Promise 可能在秒关弹窗后才 resolve。 */
+let alive = true
 
 onMounted(() => {
   // 打开时探测 LLM 是否已配置（失败静默——导出 Prompt 的老路径不依赖后端）
   fetchLlmConfig()
     .then((resp) => {
+      if (!alive) return
       llmReady.value = resp.configured
       const p = resp.providers.find((x) => x.id === resp.config.provider)
       llmLabel.value = p ? `${p.label} · ${resp.resolved.model}` : resp.resolved.model
     })
     .catch(() => {
+      if (!alive) return
       llmReady.value = false
     })
 })
 
 onBeforeUnmount(() => {
+  alive = false
   if (aiTimer) {
     window.clearInterval(aiTimer)
     aiTimer = 0
@@ -274,6 +279,6 @@ function downloadAiPrompt() {
 .ai-note {
   margin-top: 4px;
   font-size: 11px;
-  color: var(--warn, #ffc107);
+  color: var(--warn, var(--warn));
 }
 </style>

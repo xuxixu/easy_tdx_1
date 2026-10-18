@@ -256,7 +256,7 @@ watch(details, refreshItems, { deep: true })
 .report-panel {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: var(--sp-4);
 }
 .placeholder {
   display: flex;
@@ -266,7 +266,7 @@ watch(details, refreshItems, { deep: true })
   color: var(--text-dim);
 }
 .error-banner {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   border: 1px solid var(--up);
   color: var(--up);
   padding: 10px 14px;

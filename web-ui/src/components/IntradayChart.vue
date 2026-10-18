@@ -17,6 +17,8 @@ const props = defineProps<{
   dayMarks?: Array<{ start: number; date: string }>
   /** 成交量单位：A 股=手（万手/亿手），港美股=股（万股/亿股）。 */
   volUnitShares?: boolean
+  /** 图表高度（CSS 长度）。默认 440px 适合弹窗整页；嵌在面板里时传更小的值。 */
+  height?: string
 }>()
 
 const container = ref<HTMLDivElement>()
@@ -49,21 +51,32 @@ function buildOption(): echarts.EChartsCoreOption {
     return cumVol > 0 ? cumAmt / cumVol : p.price
   })
 
-  // y 轴范围：单日围绕昨收对称；多日自适应全段
+  // y 轴范围
   const hi = Math.max(...prices)
   const lo = Math.min(...prices)
   let yMax: number
   let yMin: number
   if (multi) {
-    const pad = (hi - lo) * 0.08 || hi * 0.002
+    // 多日：自适应全段，留 8% 余量。此前 `|| hi*0.002` 在整段走平的行情里
+    // 会把它当成 pad，比例跟着失真——平盘时最多取现价 0.3% 的视觉余量。
+    const span = hi - lo
+    const pad = span > 0 ? span * 0.08 : Math.max(hi * 0.003, 1e-9)
     yMax = hi + pad
     yMin = lo - pad
   } else {
-    const hi2 = Math.max(base, hi)
-    const lo2 = Math.min(base, lo)
-    const pad = Math.max((hi2 - lo2) * 0.1, base * 0.0025)
-    yMax = hi2 + pad
-    yMin = lo2 - pad
+    // 单日：严格围绕昨收（base）中心对称。昨收基准线是分时图的语义零点，
+    // 它必须在图形垂直正中，涨/跌空间才等比——若只对 [base, hi/lo] 这段做
+    // 等量 pad，base 会偏离中线，同幅度的上涨和下跌看起来不一样长。
+    // 单侧总幅度 = max(最高偏离, 最低偏离) + 余量，再 base ± 它。
+    const upAmp = hi - base
+    const dnAmp = base - lo
+    const amp = Math.max(upAmp, dnAmp, 0)
+    // 余量取最大偏离的 12%，但至少保住现价 0.15% 的视觉厚度——波动小的
+    // 高价品种（如 QQQ 单日 ±0.5%）也不会被 pad 吃成一条平线。
+    const pad = amp * 0.12 + Math.max(base * 0.0015, 1e-9)
+    const half = amp + pad
+    yMax = base + half
+    yMin = base - half
   }
 
   // 量柱颜色：与前一分钟价格比较（红涨绿跌），首柱与基准比
@@ -98,8 +111,11 @@ function buildOption(): echarts.EChartsCoreOption {
 
   // 每点相对基准的涨跌幅（%）：分时图 hover 的核心信息，主流行情都显示
   const pcts = base > 0 ? pts.map((p) => ((p.price / base - 1) * 100)) : pts.map(() => 0)
-  // 右轴：与主图同量纲的涨跌幅刻度（右侧百分比，与左侧价格一一对应）
-  const pctAxisMax = Math.max(...pcts.map(Math.abs), 0.05)
+  // 右轴涨跌幅刻度：必须与左轴价格共用**同一归一化范围**，否则同一条水平线上
+  // 左轴价格和右轴百分比对不上。顶部 yMax 对应的真实百分比就是
+  // (yMax-base)/base*100；旧写法 `max|pct_i|` 少了 pad 那一段，右轴被压缩，
+  // 除中点外的刻度整体偏移（这正是「分时图比例」问题）。多日右轴不显示，值随意。
+  const pctAxisMax = !multi && base > 0 ? ((yMax - base) / base) * 100 : 0.05
 
   // 多日分隔线 + 单日昨收基准线
   const markLines: Array<Record<string, unknown>> = multi
@@ -263,11 +279,14 @@ onBeforeUnmount(() => {
   chart?.dispose()
   chart = null
 })
-watch(() => [props.points, props.dayMarks], render)
+// preClose 也要参与重绘：弹窗/面板里分时点常先到、报价后到，若只监听 points，
+// 图表会带着「base=首点价」画出并就此定格——昨收基准线不在正中，涨跌不对称
+// （正是「分时图比例」问题）。报价到达后必须按 preClose 重画。
+watch(() => [props.points, props.dayMarks, props.preClose], render)
 </script>
 
 <template>
-  <div ref="container" class="intraday-chart"></div>
+  <div ref="container" class="intraday-chart" :style="height ? { height } : undefined"></div>
 </template>
 
 <style scoped>

@@ -101,12 +101,12 @@ const sortedDimensions = computed<DimensionScore[]>(() =>
   font-weight: 600;
 }
 .flag-losing {
-  background: rgba(239, 65, 70, 0.15);
+  background: color-mix(in srgb, var(--up) 15%, transparent);
   color: var(--up);
   border: 1px solid var(--up);
 }
 .flag-insufficient {
-  background: rgba(240, 160, 32, 0.15);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
   color: var(--warn);
   border: 1px solid var(--warn);
 }
@@ -117,8 +117,8 @@ const sortedDimensions = computed<DimensionScore[]>(() =>
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px;
-  background: rgba(239, 65, 70, 0.06);
-  border: 1px solid rgba(239, 65, 70, 0.25);
+  background: color-mix(in srgb, var(--up) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--up) 25%, transparent);
   border-radius: var(--radius);
 }
 .veto-item {

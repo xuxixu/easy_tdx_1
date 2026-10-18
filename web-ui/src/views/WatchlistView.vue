@@ -17,6 +17,7 @@ import {
 } from '../api'
 import StockDialog from '../components/StockDialog.vue'
 import BoardDialog from '../components/BoardDialog.vue'
+import PageShell from '../components/PageShell.vue'
 import Sparkline from '../components/Sparkline.vue'
 import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol, fmtVolShares } from '../format'
 import { detectAShareMarket } from '../market'
@@ -55,29 +56,50 @@ async function loadList() {
   try {
     const resp = await fetchWatchlist()
     items.value = resp.items
-    loadSparks()
-    loadReturns()
-    restFallback()
-    fillMissingNames()
+    // 以下四项都是「锦上添花」，各自失败不应影响列表本身。补名尤其要注意：
+    // 它是网络请求，旧实现直接调用而不接 rejection，一次抖动就会冒泡进上面的
+    // catch，把整页挂上一条「网络错误：无法连接后端服务」红条。
+    void loadSparks()
+    void loadReturns()
+    void restFallback()
+    void fillMissingNames()
   } catch (e) {
     listError.value = formatError(e)
   }
 }
 
-/** 给历史遗留的"只有代码没有名称"的自选项补中文名（幂等写回存储）。 */
+/**
+ * 给历史遗留的「只有代码没有名称」的自选项补中文名（幂等写回存储）。
+ *
+ * 并发 4 路：旧实现串行 `await`，自选 80 只就是 80 次串行请求（可见的卡顿）。
+ * 单条失败只跳过该条，既不影响其余条目，也不冒泡成页面错误。
+ */
 async function fillMissingNames() {
   const missing = items.value.filter((i) => !i.name)
-  for (const it of missing) {
-    const name = await fetchSymbolName(it.market, it.code)
-    if (name) {
-      it.name = name
+  if (missing.length === 0) return
+  const CONCURRENCY = 4
+  let cursor = 0
+  async function worker() {
+    while (cursor < missing.length) {
+      const it = missing[cursor]
+      cursor += 1
       try {
-        await addWatchItem(it.market, it.code, name)
+        const name = await fetchSymbolName(it.market, it.code)
+        if (!name) continue
+        it.name = name
+        try {
+          await addWatchItem(it.market, it.code, name)
+        } catch {
+          // 写回失败仅影响下次加载，静默
+        }
       } catch {
-        // 写回失败仅影响下次加载，静默
+        // 单只查名失败（网络抖动 / 代码失效）跳过
       }
     }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, missing.length) }, () => worker()),
+  )
 }
 
 // ── 行情（SSE 快照 + REST 首次兜底） ────────────────────────────────────────
@@ -284,9 +306,9 @@ function openItem(item: WatchItem) {
 
 const emptyHint = computed(() =>
   items.value.length === 0 && !listError.value
-    ? `自选为空：当前${marketStore.market === 'HK' ? '港股' : marketStore.market === 'US' ? '美股' : 'A股'}模式，输入${
-        marketStore.market === 'US' ? '字母代码加入（如 AAPL）' : marketStore.market === 'HK' ? '4-5 位代码加入（如 00700）' : '6 位代码加入（如 600519）'
-      }。加入后行情实时推送。`
+    ? `当前${marketStore.market === 'HK' ? '港股' : marketStore.market === 'US' ? '美股' : 'A股'}模式，在上方输入${
+        marketStore.market === 'US' ? '字母代码（如 AAPL）' : marketStore.market === 'HK' ? '4-5 位代码（如 00700）' : '6 位代码（如 600519）'
+      }加入自选；加入后行情实时推送，点击行可看分时与盘口。`
     : '',
 )
 
@@ -296,16 +318,14 @@ const addPlaceholder = computed(() =>
 </script>
 
 <template>
-  <div class="wl">
-    <div class="toolbar">
-      <h2>自选行情</h2>
+  <PageShell title="自选行情" :desc="`共 ${items.length} 只 · 行情实时推送`">
+    <template #actions>
       <div class="add-row">
         <input v-model="addCode" class="code-input" :placeholder="addPlaceholder" :maxlength="marketStore.market === 'US' ? 12 : 6" @keyup.enter="add" />
         <input v-model="addName" class="name-input" placeholder="备注名（可空）" maxlength="16" @keyup.enter="add" />
         <button class="primary" :disabled="adding" @click="add">{{ adding ? '加入中…' : '加入自选' }}</button>
       </div>
-      <span class="hint">共 {{ items.length }} 只 · 行情实时推送</span>
-    </div>
+    </template>
 
     <div v-if="listError" class="err">{{ listError }}</div>
 
@@ -330,7 +350,13 @@ const addPlaceholder = computed(() =>
         </thead>
         <tbody>
           <tr v-if="emptyHint" class="empty-row">
-            <td colspan="15">{{ emptyHint }}</td>
+            <td colspan="15">
+              <div class="wl-empty">
+                <div class="wl-empty-mark">☆</div>
+                <div class="wl-empty-title">自选列表还是空的</div>
+                <div class="wl-empty-desc">{{ emptyHint }}</div>
+              </div>
+            </td>
           </tr>
           <tr v-for="item in items" :key="item.symbol" class="data-row" @click="openItem(item)">
             <td>
@@ -382,23 +408,10 @@ const addPlaceholder = computed(() =>
       @close="boardDlg = null"
       @watchlist-changed="loadList"
     />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.wl {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 14px 16px;
-  gap: 10px;
-}
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
 .toolbar h2 {
   font-size: 16px;
 }
@@ -411,11 +424,6 @@ const addPlaceholder = computed(() =>
 }
 .name-input {
   width: 140px;
-}
-.hint {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-left: auto;
 }
 .err {
   color: var(--up);
@@ -447,8 +455,33 @@ const addPlaceholder = computed(() =>
 .empty-row td {
   text-align: center;
   color: var(--text-dim);
-  padding: 40px 0;
+  padding: 0;
   font-size: 13px;
+}
+/* 空态：整页发白时给一个视觉锚点，而不是一行贴在表头下的灰字 */
+.wl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 76px 20px 88px;
+}
+.wl-empty-mark {
+  font-size: 38px;
+  line-height: 1;
+  color: var(--text-dim);
+  opacity: 0.55;
+}
+.wl-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.wl-empty-desc {
+  max-width: 480px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-dim);
 }
 .del {
   padding: 1px 7px;

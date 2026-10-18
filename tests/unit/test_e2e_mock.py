@@ -101,6 +101,17 @@ async def test_mock_tdx_minute_and_stat() -> None:
         assert col in stat.columns
 
 
+async def test_mock_tdx_security_count_by_market() -> None:
+    """get_security_count 返回 int（GET /security/count；此前 mock 缺此方法 → 500）。"""
+    client = MockTdxClient()
+    sh = await client.get_security_count(Market.SH)
+    sz = await client.get_security_count(Market.SZ)
+    assert isinstance(sh, int) and isinstance(sz, int)
+    assert sh > 0 and sz > 0
+    # 各市场数量不同（避免所有市场返回同一个数）
+    assert sh != sz
+
+
 async def test_mock_minute_skips_lunch_break() -> None:
     """分时时间戳必须跳过午休（09:30~11:29 + 13:00~14:59）。
 
@@ -216,6 +227,10 @@ def test_app_serves_synthetic_data_in_mock_mode(monkeypatch: pytest.MonkeyPatch)
         stat = client.get("/api/v1/market/stat")
         assert stat.status_code == 200
         assert stat.json()["data"][0]["up_count"] > 0
+
+        count = client.get("/api/v1/security/count", params={"market": "SH"})
+        assert count.status_code == 200
+        assert count.json()["count"] > 0
 
         rank = client.get("/api/v1/mac/quote-list", params={"count": 10})
         assert rank.status_code == 200

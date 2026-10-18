@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageShell from '../components/PageShell.vue'
 // 推送设置页：买卖信号 key-only 推送（Server酱 / WXPush / 百度云推送 / MobPush / Webhook）。
 // 表单 ⇆ ~/.easy_tdx/push.json；key 脱敏回显，留空/原样回传不覆盖已存 key。
 import { onMounted, ref } from 'vue'
@@ -108,9 +109,9 @@ async function test() {
 </script>
 
 <template>
-  <div class="push-settings">
+  <PageShell title="推送设置" desc="把信号雷达的买入/卖出信号推送到外部通道">
+    <div class="layout">
     <aside class="config-panel">
-      <h2>推送设置</h2>
       <p class="hint">
         填 key 即可把信号雷达的买入/卖出信号推出去。配置落盘到
         <code>{{ configPath || '~/.easy_tdx/push.json' }}</code>。
@@ -209,13 +210,15 @@ async function test() {
         标题自动汇总买/卖家数，正文列出标的×策略×日期×收盘（最多 50 条）。
       </p>
     </main>
-  </div>
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.push-settings {
+.layout {
   display: flex;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 .config-panel {
@@ -279,8 +282,8 @@ async function test() {
   cursor: pointer;
 }
 .btn-mini-del:hover {
-  border-color: var(--red, #f44336);
-  color: var(--red, #f44336);
+  border-color: var(--red, var(--up));
+  color: var(--red, var(--up));
 }
 .field {
   display: block;
@@ -329,7 +332,7 @@ async function test() {
   flex: 1;
   padding: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
@@ -352,7 +355,7 @@ async function test() {
 .message {
   margin-top: 12px;
   padding: 8px 12px;
-  background: var(--accent-bg, rgba(0, 120, 212, 0.1));
+  background: var(--accent-bg, color-mix(in srgb, var(--accent) 10%, transparent));
   border-radius: var(--radius);
   font-size: 12px;
   color: var(--accent);
@@ -361,31 +364,31 @@ async function test() {
 .test-result {
   margin-top: 10px;
   padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.08);
+  background: color-mix(in srgb, var(--up) 8%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--red, #f44336);
+  color: var(--red, var(--up));
   word-break: break-all;
 }
 .test-result.ok {
-  background: rgba(76, 175, 80, 0.12);
-  color: var(--green, #4caf50);
+  background: color-mix(in srgb, var(--down) 12%, transparent);
+  color: var(--green, var(--down));
 }
 .error-banner {
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.1);
+  background: color-mix(in srgb, var(--up) 10%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--red, #f44336);
+  color: var(--red, var(--up));
 }
 .warn-banner {
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(255, 193, 7, 0.1);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
   border-radius: var(--radius);
   font-size: 12px;
-  color: var(--warn, #ffc107);
+  color: var(--warn, var(--warn));
 }
 .info-panel {
   flex: 1;

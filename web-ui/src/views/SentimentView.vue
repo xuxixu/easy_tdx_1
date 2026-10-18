@@ -21,6 +21,7 @@ import {
 import { fmtAmount, fmtPctSigned } from '../format'
 import { marketLabel } from '../market'
 import { useMarketStore } from '../stores/market'
+import { createSeqGuard } from '../utils/asyncGuard'
 import type {
   BoardFundDay,
   LimitUpHistoryRow,
@@ -61,12 +62,24 @@ const exBreadth = computed(() => {
   }
 })
 
+// A 股与外盘共用同一块展示区，来回切换顶栏市场时两种 load 会并发；
+// 慢的那条（外盘榜单快照 / A 股 vipdoc 全量回算）最后写入会把另一种模式的
+// 数据留在屏幕上。故两种模式共用一个守卫，切模式即作废对方的在飞请求。
+const pageGuard = createSeqGuard()
+
+/** 组件是否仍挂载（卸载后 render() 触碰已 dispose 的图表实例会炸）。 */
+let alive = true
+
 async function loadEx() {
+  const my = pageGuard.next()
   exError.value = ''
   try {
-    exRank.value = await fetchOverseasRank(marketStore.market)
+    const rank = await fetchOverseasRank(marketStore.market)
+    if (pageGuard.stale(my) || !alive) return
+    exRank.value = rank
     lastRefresh.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (e) {
+    if (pageGuard.stale(my) || !alive) return
     exError.value = formatError(e)
   }
 }
@@ -88,6 +101,7 @@ const loading = ref(false)
 const lastRefresh = ref('')
 
 async function load() {
+  const my = pageGuard.next()
   loading.value = today.value === null
   error.value = ''
   try {
@@ -97,16 +111,19 @@ async function load() {
       fetchLimitUpHistory(60),
       fetchMarketStat().catch(() => null),
     ])
+    if (pageGuard.stale(my) || !alive) return
     today.value = t
     histDays.value = h.days
     luHistory.value = lu
     stat.value = st
     lastRefresh.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (e) {
+    if (pageGuard.stale(my) || !alive) return
     error.value = formatError(e)
   } finally {
-    loading.value = false
+    if (!pageGuard.stale(my) && alive) loading.value = false
   }
+  if (pageGuard.stale(my) || !alive) return
   // loading 复位触发 v-else-if 切换后，图表容器才挂载到 DOM
   await nextTick()
   render()
@@ -156,6 +173,8 @@ function hm(minute: number): string {
 }
 
 function render() {
+  // 卸载后图表实例已 dispose，这里再 setOption 会炸
+  if (!alive) return
   renderToday()
   renderHistory()
 }
@@ -495,6 +514,8 @@ onMounted(async () => {
   window.addEventListener('resize', onResize)
 })
 onBeforeUnmount(() => {
+  alive = false
+  pageGuard.next() // 作废全部在飞请求，避免卸载后继续写状态 / render
   aiAbort?.abort()
   aiAbort = null
   window.clearInterval(timer)
@@ -671,10 +692,10 @@ onBeforeUnmount(() => {
 .sentiment-view {
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 .view-head,
 .stat-strip,

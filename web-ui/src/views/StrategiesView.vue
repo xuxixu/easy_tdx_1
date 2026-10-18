@@ -24,6 +24,7 @@ import {
 import { buildPortfolioAiPrompt } from '../aiPrompt'
 import { GRADE_META, gradePortfolio } from '../grading'
 import { detectMarket } from '../market'
+import PageShell from '../components/PageShell.vue'
 import StrategyEditor, { type StrategyForm } from '../components/StrategyEditor.vue'
 import type { Category, MultiStrategyItem, Performance, SavedStrategy } from '../types'
 import { useBacktestStore } from '../stores/backtest'
@@ -565,56 +566,53 @@ const aiContext = computed(() => ({
 </script>
 
 <template>
-  <div class="strategies-view">
-    <header class="page-header">
-      <div>
-        <h2>策略库</h2>
-        <p class="subtitle">
-          保存你觉得不错的策略，下次直接载入或重跑。共 {{ strategies.length }} 条。
-        </p>
-      </div>
-      <div class="header-actions">
-        <button
-          v-if="activeTab === 'single'"
-          class="primary sm"
-          :disabled="selectedStrategies.length === 0 || store.multiStrategyRunning"
-          @click="onComboBacktest"
-        >
-          {{ store.multiStrategyRunning ? '组合回测中…' : `组合回测（${selectedStrategies.length}）` }}
-        </button>
-        <button
-          v-if="activeTab === 'single' && selectedStrategies.length > 0"
-          class="ghost sm"
-          @click="clearSelection"
-        >
-          清除选择
-        </button>
-        <button class="ghost" :disabled="loading" @click="load">
-          {{ loading ? '刷新中…' : '↻ 刷新' }}
-        </button>
-        <button class="primary sm" @click="openCreate">＋ 新增策略</button>
-      </div>
-    </header>
+  <PageShell
+    title="策略库"
+    :desc="`保存你觉得不错的策略，下次直接载入或重跑。共 ${strategies.length} 条。`"
+  >
+    <template #actions>
+      <button
+        v-if="activeTab === 'single'"
+        class="primary sm"
+        :disabled="selectedStrategies.length === 0 || store.multiStrategyRunning"
+        @click="onComboBacktest"
+      >
+        {{ store.multiStrategyRunning ? '组合回测中…' : `组合回测（${selectedStrategies.length}）` }}
+      </button>
+      <button
+        v-if="activeTab === 'single' && selectedStrategies.length > 0"
+        class="ghost sm"
+        @click="clearSelection"
+      >
+        清除选择
+      </button>
+      <button class="ghost" :disabled="loading" @click="load">
+        {{ loading ? '刷新中…' : '↻ 刷新' }}
+      </button>
+      <button class="primary sm" @click="openCreate">＋ 新增策略</button>
+    </template>
 
-    <!-- Tab 切换 -->
-    <nav class="tabs" role="tablist">
-      <button
-        role="tab"
-        :aria-selected="activeTab === 'single'"
-        :class="['tab', { active: activeTab === 'single' }]"
-        @click="switchTab('single')"
-      >
-        单标的<span class="tab-count">{{ singleStrategies.length }}</span>
-      </button>
-      <button
-        role="tab"
-        :aria-selected="activeTab === 'combo'"
-        :class="['tab', { active: activeTab === 'combo' }]"
-        @click="switchTab('combo')"
-      >
-        组合<span class="tab-count">{{ comboStrategies.length }}</span>
-      </button>
-    </nav>
+    <!-- Tab 切换：放进 toolbar 插槽，内容滚动时保持固定可见 -->
+    <template #toolbar>
+      <nav class="tabs" role="tablist">
+        <button
+          role="tab"
+          :aria-selected="activeTab === 'single'"
+          :class="['tab', { active: activeTab === 'single' }]"
+          @click="switchTab('single')"
+        >
+          单标的<span class="tab-count">{{ singleStrategies.length }}</span>
+        </button>
+        <button
+          role="tab"
+          :aria-selected="activeTab === 'combo'"
+          :class="['tab', { active: activeTab === 'combo' }]"
+          @click="switchTab('combo')"
+        >
+          组合<span class="tab-count">{{ comboStrategies.length }}</span>
+        </button>
+      </nav>
+    </template>
 
     <div v-if="error || store.error" class="error-banner">⚠ {{ error || store.error }}</div>
 
@@ -967,34 +965,13 @@ const aiContext = computed(() => ({
       @save="onEditorSave"
       @close="editorOpen = false; editingStrategy = null"
     />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.strategies-view {
-  height: 100%;
-  overflow-y: auto;
-  padding: 16px 20px 32px;
-}
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
 .page-header h2 {
   font-size: 16px;
   font-weight: 600;
-}
-.subtitle {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 4px;
-}
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 .header-actions .sm {
   font-size: 12px;
@@ -1043,7 +1020,7 @@ const aiContext = computed(() => ({
   font-weight: 400;
 }
 .tab.active .tab-count {
-  background: rgba(74, 158, 255, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
 }
 .ghost {
@@ -1075,7 +1052,7 @@ const aiContext = computed(() => ({
   line-height: 1.6;
 }
 .error-banner {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   border: 1px solid var(--up);
   color: var(--up);
   padding: 10px 14px;
@@ -1094,10 +1071,10 @@ const aiContext = computed(() => ({
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 .card-head {
   display: flex;
@@ -1129,13 +1106,13 @@ const aiContext = computed(() => ({
   font-size: 11px;
   padding: 2px 7px;
   border-radius: 4px;
-  background: rgba(74, 158, 255, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   flex-shrink: 0;
 }
 .kind-badge.portfolio {
-  background: rgba(140, 110, 220, 0.18);
-  color: #b39ddb;
+  background: var(--tag-purple-soft);
+  color: var(--tag-purple);
 }
 .card-title {
   font-size: 14px;
@@ -1358,7 +1335,7 @@ const aiContext = computed(() => ({
   border-radius: 4px;
 }
 .status-tag.holding {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   color: var(--up);
 }
 .status-tag.cleared {
@@ -1368,15 +1345,15 @@ const aiContext = computed(() => ({
 
 /* 组合卡片 / multi 视觉差异 */
 .card-multi {
-  border-color: rgba(245, 158, 11, 0.35);
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.04), var(--bg-panel) 30%);
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 4%, transparent), var(--bg-panel) 30%);
 }
 .card-multi:hover {
-  border-color: rgba(245, 158, 11, 0.6);
+  border-color: color-mix(in srgb, var(--warn) 60%, transparent);
 }
 .multi-icon {
   font-size: 18px;
-  color: #f59e0b;
+  color: var(--warn);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1384,8 +1361,8 @@ const aiContext = computed(() => ({
   text-align: center;
 }
 .kind-badge.multi {
-  background: rgba(245, 158, 11, 0.18);
-  color: #f59e0b;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
 }
 
 /* 保存组合按钮（结果区右上） */
@@ -1393,16 +1370,16 @@ const aiContext = computed(() => ({
   font-size: 12px;
   padding: 5px 12px;
   margin-left: 12px;
-  background: linear-gradient(135deg, #f59e0b, #ea580c);
-  border: 1px solid #f59e0b;
-  color: #fff;
+  background: linear-gradient(135deg, var(--warn), var(--warn));
+  border: 1px solid var(--warn);
+  color: var(--on-accent);
   font-weight: 600;
   border-radius: var(--radius);
   cursor: pointer;
   vertical-align: middle;
 }
 .save-combo-btn:hover {
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  background: linear-gradient(135deg, var(--warn), var(--warn));
 }
 .save-combo-btn:disabled {
   opacity: 0.5;
@@ -1430,17 +1407,17 @@ const aiContext = computed(() => ({
   line-height: 1.6;
 }
 .warn-box strong {
-  color: #fbbf24;
+  color: var(--warn);
 }
 .warn-box.overfit {
-  background: rgba(240, 160, 32, 0.1);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
   border-left: 3px solid var(--warn);
-  color: #f0a020;
+  color: var(--warn);
   margin-bottom: 14px;
 }
 .warn-box.disclaimer {
-  background: rgba(240, 160, 32, 0.06);
-  border: 1px dashed rgba(240, 160, 32, 0.4);
+  background: color-mix(in srgb, var(--warn) 6%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--warn) 40%, transparent);
   color: var(--text-muted);
   font-size: 11px;
   padding: 8px 12px;
@@ -1448,17 +1425,17 @@ const aiContext = computed(() => ({
 
 /* 多策略组合卡片的"重跑到今天"按钮：橙色 outline，呼应组合主题色 */
 .rerun-btn {
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.5);
-  color: #f59e0b;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent);
+  color: var(--warn);
   font-weight: 600;
   border-radius: var(--radius);
   cursor: pointer;
 }
 .rerun-btn:hover:not(:disabled) {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: #f59e0b;
-  color: #fbbf24;
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  border-color: var(--warn);
+  color: var(--warn);
 }
 .rerun-btn:disabled {
   opacity: 0.5;
@@ -1467,22 +1444,22 @@ const aiContext = computed(() => ({
 
 /* 持仓三态 */
 .status-tag.win {
-  background: rgba(24, 160, 88, 0.18);
+  background: color-mix(in srgb, var(--down) 18%, transparent);
   color: var(--down);
 }
 .status-tag.lose {
-  background: rgba(240, 160, 32, 0.18);
-  color: #f0a020;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
 }
 .status-tag.wait {
   background: var(--border);
   color: var(--text-dim);
 }
 .holdings-table tr.row-win {
-  background: rgba(24, 160, 88, 0.04);
+  background: color-mix(in srgb, var(--down) 4%, transparent);
 }
 .holdings-table tr.row-lose {
-  background: rgba(240, 160, 32, 0.05);
+  background: color-mix(in srgb, var(--warn) 5%, transparent);
 }
 
 /* 保存组合弹窗 */

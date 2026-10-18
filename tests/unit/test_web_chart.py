@@ -197,3 +197,36 @@ def test_bad_formula_400_empty_bars_422():
 def test_deterministic():
     body = {"bars": _bars(), "items": [_ma_item(), _macd_item()]}
     assert _option(body) == _option(body)
+
+
+def test_date_labels_rendered_once_on_bottom_grid():
+    """日期轴标签只画一次，且落在最下方那个 grid 上。
+
+    回归：有副图时 grid1（成交量）与 grid2（副图）都带日期标签，屏幕上就是
+    两行一模一样的日期（主图那行早已关闭），既挤又不像交易软件的做法。
+    """
+    opt = _option({"bars": _bars(), "items": [_ma_item(), _macd_item()]})
+    xs = opt["xAxis"]
+    assert len(xs) == 3
+    assert xs[0]["axisLabel"]["show"] is False, "主图不画日期"
+    assert xs[1]["axisLabel"]["show"] is False, "有副图时成交量图不画日期（避免重复）"
+    # 最下副图保持默认显示（不显式关闭即为显示）
+    assert xs[2].get("axisLabel", {}).get("show", True) is not False
+
+
+def test_date_labels_shown_when_no_sub_pane():
+    """无副图时成交量图即最下方，日期必须显示。"""
+    opt = _option({"bars": _bars(), "items": [_ma_item()]})
+    xs = opt["xAxis"]
+    assert len(xs) == 2
+    assert xs[1]["axisLabel"]["show"] is True
+
+
+def test_kline_option_accepts_full_history():
+    """上限 10000：前端 fetchBars 全量（约 9600 根）不能被 422 拒掉。
+
+    回归：原上限 2000，历史上限放开到上证指数全部历史（1990-12 上市至今
+    约 9600 根）后，2001 根的请求直接 422 且前端只显示 [object Object]。
+    """
+    opt = _option({"bars": _bars(2001)})
+    assert len(opt["xAxis"][0]["data"]) == 2001

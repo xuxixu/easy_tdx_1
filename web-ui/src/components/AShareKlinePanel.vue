@@ -8,6 +8,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { fetchBars, fetchSymbolName, formatError } from '../api'
 import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
 import { detectAShareMarket, MARKET_DEFAULT_INDEX, marketLabel, type Market } from '../market'
+import { createSeqGuard } from '../utils/asyncGuard'
 import type { Bar } from '../types'
 import StockDialog from './StockDialog.vue'
 import IndicatorChips from './IndicatorChips.vue'
@@ -71,7 +72,12 @@ const title = computed(
   () => `${marketLabel(props.market)}指数 · ${focal.value.name}`,
 )
 
+// 序号守卫：日K 要按页翻（单页 800 根）远慢于月K，快速切换周期或连点指数卡
+// 时，慢的日K 会晚于快的月K 返回并覆盖 —— 高亮月K、图表画日K。
+const barsGuard = createSeqGuard()
+
 async function loadBars() {
+  const my = barsGuard.next()
   barsLoading.value = true
   barsError.value = ''
   try {
@@ -82,13 +88,15 @@ async function loadBars() {
       undefined,
       undefined,
     )
+    if (barsGuard.stale(my)) return
     if (fetched.length === 0) throw new Error('无K线数据')
-    bars.value = fetched.slice(-250)
+    bars.value = fetched
   } catch (e) {
+    if (barsGuard.stale(my)) return
     bars.value = []
     barsError.value = formatError(e)
   } finally {
-    barsLoading.value = false
+    if (!barsGuard.stale(my)) barsLoading.value = false
   }
 }
 
@@ -102,9 +110,16 @@ async function applyCode() {
     return
   }
   const mkt = detectAShareMarket(c)
-  const name = (await fetchSymbolName(mkt, c)) || c
-  setFocal(mkt, c, name)
-  inputCode.value = ''
+  try {
+    const name = (await fetchSymbolName(mkt, c)) || c
+    setFocal(mkt, c, name)
+    inputCode.value = ''
+  } catch (e) {
+    // 查名失败不应静默（旧实现会让输入框毫无反应）；代码本身有效，
+    // 仍按代码切换标的，同时把原因显示出来。
+    inputError.value = formatError(e)
+    setFocal(mkt, c, c)
+  }
 }
 
 /** 外部切换标的（看板指数卡点击）。 */
@@ -128,6 +143,7 @@ loadBars()
           :key="c.value"
           class="chip"
           :class="{ on: kCategory === c.value }"
+          :disabled="barsLoading"
           @click="kCategory = c.value"
         >
           {{ c.label }}
@@ -198,7 +214,7 @@ loadBars()
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .k-search {
   display: flex;

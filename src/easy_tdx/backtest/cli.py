@@ -555,7 +555,12 @@ def portfolio(
     if fmt == "table":
         _print_portfolio_table(result)
     else:
-        click.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+        # to_dict() 内含 numpy.int64（合并净值/成交记录列）与 Timestamp，
+        # 直接 json.dumps 会抛 TypeError。to_json_native 在源头清洗为
+        # JSON 原生类型（数字保持数字，不降级为字符串）。
+        from .types import to_json_native
+
+        click.echo(json.dumps(to_json_native(result.to_dict()), ensure_ascii=False, indent=2))
 
 
 def _print_portfolio_table(result: Any) -> None:

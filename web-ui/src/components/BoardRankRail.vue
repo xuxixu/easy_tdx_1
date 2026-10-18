@@ -146,7 +146,7 @@ const recentFlips = computed(() => props.flips.slice(0, 12))
     background: transparent;
   }
   50% {
-    background: rgba(240, 160, 32, 0.18);
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
   }
 }
 .flip-row {

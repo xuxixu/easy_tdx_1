@@ -142,6 +142,82 @@ class TestPortfolioCLIFlags:
         assert "--wf" in result.output
         assert "--auto-fees" in result.output
 
+    def test_json_output_is_serializable(self, tmp_path, monkeypatch):
+        """回归：默认 JSON 输出必须可序列化（此前必崩）。
+
+        ``PortfolioResult.to_dict()`` 内 numpy.int64（win/lose/rejected_trades）
+        与 Timestamp（净值/成交记录）不是 JSON 原生类型；旧码直接
+        ``json.dumps(result.to_dict())`` 必然抛 TypeError，任何组合回测都跑不通。
+        """
+        import json
+
+        import numpy as np
+        import pandas as pd
+
+        import easy_tdx.cli.conn as conn_mod
+        from easy_tdx.backtest.cli import portfolio
+
+        n = 120
+        rng = np.random.default_rng(7)
+        close = 20.0 * np.cumprod(1.0 + rng.normal(0.001, 0.02, n))
+        open_ = np.concatenate([[20.0], close[:-1]])
+        vol = rng.integers(1_000_000, 5_000_000, n).astype("int64")
+        df = pd.DataFrame(
+            {
+                "datetime": pd.bdate_range("2022-01-03", periods=n),
+                "open": open_,
+                "high": np.maximum(open_, close) * 1.01,
+                "low": np.minimum(open_, close) * 0.99,
+                "close": close,
+                "vol": vol,
+                "amount": vol * close,
+            }
+        )
+
+        class _FakeMacClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def get_stock_kline(self, *args, **kwargs):
+                return df.copy()
+
+        monkeypatch.setattr(conn_mod, "get_mac_client", lambda: _FakeMacClient())
+
+        strategy_file = tmp_path / "buy_hold.py"
+        strategy_file.write_text(
+            "from easy_tdx.backtest import Strategy\n\n\n"
+            "class BuyHold(Strategy):\n"
+            "    def init(self):\n"
+            "        pass\n\n"
+            "    def next(self):\n"
+            "        if self._bar_index == 0:\n"
+            "            self.buy(size=0)\n",
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            portfolio,
+            [
+                "--stocks",
+                "SZ:000001,SH:600519",
+                "--strategy-file",
+                str(strategy_file),
+                "--count",
+                str(n),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # CliRunner.output 混入 stderr 的「策略: ...」提示行，从第一个 { 起解析
+        data = json.loads(result.output[result.output.index("{") :])
+        assert "total_performance" in data
+        assert "combined_equity" in data and len(data["combined_equity"]) == n
+        # 数值字段保持数字（不得因 default=str 降级成字符串）
+        assert isinstance(data["total_performance"]["win_trades"], int)
+
 
 class TestIgnoredFlagWarnings:
     """静默忽略的旗标组合必须显式告警（stderr），不得无提示吞掉。"""

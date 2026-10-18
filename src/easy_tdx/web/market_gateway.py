@@ -28,7 +28,7 @@ DataFrame **列结构一致**，调用方无需关心走了哪条栈：
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Final
 
 import pandas as pd
 
@@ -153,6 +153,98 @@ class MarketGateway:
     # 对外接口
     # ------------------------------------------------------------------ #
 
+    #: 扩展市场协议单次返回上限（实测：请求 count=800 也只返回 700 根）。
+    _EX_KLINE_PAGE_CAP = 700
+
+    #: 扩展栈报价的档位字段名 → 与 A 股标准协议 / 前端一致的名字。
+    #:
+    #: 扩展栈给的是 ``bid_price`` / ``bid2_price`` / ``bid_volume`` 这类写法，
+    #: 而 A 股标准协议与前端 ``SecurityQuote`` 一律用 ``bid1`` / ``bid2`` /
+    #: ``bid_vol1``。不归一化的话，即使服务端返回了盘口，前端 ``hasDepth``
+    #: （按 ``bid${i}`` 取）仍判定为无深度，只能降级显示快照。
+    _EX_DEPTH_ALIASES: dict[str, str] = {
+        "bid_price": "bid1",
+        "ask_price": "ask1",
+        "bid_volume": "bid_vol1",
+        "ask_volume": "ask_vol1",
+        **{f"bid{i}_price": f"bid{i}" for i in range(2, 6)},
+        **{f"ask{i}_price": f"ask{i}" for i in range(2, 6)},
+        **{f"bid{i}_volume": f"bid_vol{i}" for i in range(2, 6)},
+        **{f"ask{i}_volume": f"ask_vol{i}" for i in range(2, 6)},
+    }
+
+    def _normalize_ex_quotes(self, df: pd.DataFrame) -> pd.DataFrame:
+        """把扩展栈报价规整到与 A 股同构的契约。
+
+        两件事：
+        1. 档位列名 ``bid_price`` / ``bid2_price`` / ``bid_volume`` → ``bid1`` /
+           ``bid2`` / ``bid_vol1``（前端 ``SecurityQuote`` 按 ``bid${i}`` 读）。
+        2. 补 ``price`` 列。扩展栈的"最新价"叫 ``close``，A 股标准协议叫
+           ``price``；不在这里统一，下游就得各自打补丁 —— 前端 ``normalizeQuote``
+           与 SSE 的 ``_df_to_dicts`` 目前确实都各自补了一次。出口统一后这两处
+           变成冗余但无害，将来新增调用方也不必再想这件事。
+        """
+        if df is None or df.empty:
+            return df
+        out = df
+        mapping = {k: v for k, v in self._EX_DEPTH_ALIASES.items() if k in out.columns}
+        if mapping:
+            out = out.rename(columns=mapping)
+        if "price" not in out.columns and "close" in out.columns:
+            out = out.copy()
+            out["price"] = out["close"]
+        return out
+
+    async def _ex_kline(
+        self,
+        client: Any,
+        ex_market: int,
+        code: str,
+        period: Any,
+        start: int,
+        count: int,
+        adjust: Any,
+    ) -> pd.DataFrame:
+        """扩展栈 K 线：自动续取以凑满 ``count`` 根。
+
+        扩展市场协议单次最多返回 700 根。旧实现把 ``count`` 原样透传，而调用方
+        （前端 ``fetchBars``）按「本页返回 count 根」用固定 800 步进翻页，于是
+        **每页静默漏掉 100 根**。实测 AAPL 日K：页0 = 2024-01-03→2026-10-16，
+        页1(start=800) = 2020-10-27→2023-08-09，中间 2023-08-10 ~ 2024-01-02
+        约 100 个交易日整段缺失 —— 直接影响「取最近 3 年日K」的完整性。
+
+        这里按实际返回根数续取，直到凑满 ``count`` 或服务端取尽。
+        """
+        frames: list[pd.DataFrame] = []
+        got = 0
+        cursor = start
+        while got < count:
+            want = count - got
+            df = await client.goods_kline(ex_market, code, period, cursor, want, adjust)
+            n = 0 if df is None or df.empty else len(df)
+            if n == 0:
+                break
+            frames.append(df)
+            got += n
+            cursor += n
+            # 单页未达协议上限且不足所需 → 服务端已无更多数据
+            if n < min(want, self._EX_KLINE_PAGE_CAP):
+                break
+        if not frames:
+            return pd.DataFrame()
+        if len(frames) == 1:
+            return frames[0]
+        out = pd.concat(frames, ignore_index=True)
+        # 续取出来的第二页是**更旧**的数据，直接拼在尾部会让时间列变成
+        # 「新→旧→更旧」的非单调序列，而下游（K 线图、指标计算、回测、
+        # _attach_derived 的 pre_close=shift(1)）一律假设按时间升序。
+        # 这里统一按时间列稳定排序，保证与单页返回的语义一致。
+        for col in ("datetime", "date"):
+            if col in out.columns:
+                out = out.sort_values(col, kind="stable").reset_index(drop=True)
+                break
+        return out
+
     async def bars(
         self,
         market: str,
@@ -184,8 +276,11 @@ class MarketGateway:
                 return await _run_blocking(_http_bars, token, code, category, start, count, adjust)
             client = self._require_ex_client(token)
             period, times = period_times_from_category(category)
-            # 外盘扩展市场没有"多分钟周期"概念，times>1 时降级为单周期
-            df = await client.goods_kline(
+            # 外盘扩展市场没有"多分钟周期"概念，times>1 时降级为单周期。
+            # 必须走 _ex_kline 续取：协议单次上限 700 根，直接透传 count 会让
+            # 按 800 步进的翻页每页漏 100 根（见 _ex_kline 文档）。
+            df = await self._ex_kline(
+                client,
                 _resolve_ex_or_board(token, code),
                 code,
                 period,
@@ -280,11 +375,18 @@ class MarketGateway:
         """
         if self.mac_ex_client is not None:
             try:
+                from easy_tdx.codec.bitmap import PresetField
+
                 client = self.mac_ex_client
                 stocks = [(_resolve_ex_or_board(token, c), c) for c in codes]
-                df = await client.goods_quotes(stocks)
+                # 必须显式要盘口字段：默认字段集（37 列）不含 bid/ask，
+                # 港美股报价此前根本拿不到五档，前端只能降级成「实时快照」。
+                df = await client.goods_quotes(
+                    stocks,
+                    PresetField.BASIC + PresetField.VOLUME + PresetField.HANDICAP,
+                )
                 if self._tdx_usable(df):
-                    return _with_source(df, "tdx")
+                    return _with_source(self._normalize_ex_quotes(df), "tdx")
                 if df is not None and not df.empty:
                     logger.info("扩展栈 %s 返回全空价格（盘前/收盘后常见），回落免费快照源", token)
             except Exception as exc:  # noqa: BLE001 — 扩展栈失败走免费兜底
@@ -504,8 +606,82 @@ def _http_bars(
         from easy_tdx.sources.qq_index import fetch_bars
 
         df = fetch_bars(token, code, cat_name, start, count)
+    if cat_name in _MINUTE_PERIODS:
+        # 腾讯对指数分钟周期只回 1 根快照（无历史分钟 K）。用当日分时聚合出
+        # 目标周期 K（能画当日盘中形态；120/240 当日数据不足则返回空）。
+        # 聚合成功则以分时聚合结果为准，否则保留腾讯快照那 1 根。
+        agg = _index_minute_bars(token, code, cat_name, start, count)
+        if agg is not None and not agg.empty:
+            df = agg
     df = MarketGateway._normalize_columns(df, daily_plus=MarketGateway._is_daily_plus(category))
     return _with_source(df, source)
+
+
+_MINUTE_PERIODS: Final[dict[str, int]] = {
+    "MIN_5": 5,
+    "MIN_15": 15,
+    "MIN_30": 30,
+    "MIN_60": 60,
+    "MIN_120": 120,
+    "MIN_240": 240,
+}
+
+
+def _index_minute_bars(
+    token: str, code: str, category: str, start: int, count: int
+) -> pd.DataFrame:
+    """从当日分时聚合出目标分钟 K（腾讯指数无历史分钟 K，仅当日）。
+
+    为什么需要它：腾讯对**指数**的分钟周期（m5/m15/m30/m60）fqkline **只回 1 根
+    快照**（2026-10 实测，无论参数怎么传），没有任何历史分钟 K；新浪同样只有
+    日线，东财被本机 IP 限频，Yahoo 403 封锁——**历史分钟 K 没有免费可用源**。
+    但腾讯 ``minute/query`` 返回指数**当日完整分时**（约 332 个 1 分钟点）。
+
+    这里把 1 分钟分时按目标分钟数聚合：15 分 K=每 15 个点合一根（open=first /
+    high=max / low=min / close=last / vol=sum），得到**当日**的目标周期 K。
+    120/240 分 K 当日数据不足以成图时返回空表（宁可空也不拿 1 根冒充）。
+
+    Args:
+        token/code: 指数代码（如 "HK"/"HSI"）。
+        category: 周期名（"MIN_15" 等）。
+        start/count: TDX 分页语义（start=0 从最新往回数）。
+    """
+    from easy_tdx.sources.qq_index import fetch_minute
+
+    minutes = _MINUTE_PERIODS.get(category)
+    if minutes is None:
+        return pd.DataFrame()
+    try:
+        pts = fetch_minute(token, code)
+    except Exception as exc:  # noqa: BLE001 — 分时不可用回落原路径
+        logger.warning("指数分钟K聚合取分时失败 %s:%s: %s", token, code, exc)
+        return pd.DataFrame()
+    if pts is None or len(pts) < 2:
+        return pd.DataFrame()
+    df = pts.reset_index(drop=True)
+    # 分时点结构 datetime/price/vol（1 分钟粒度、升序）→ 按 minutes 聚合 OHLCV
+    rows: list[dict[str, Any]] = []
+    for i in range(0, len(df), minutes):
+        grp = df.iloc[i : i + minutes]
+        rows.append(
+            {
+                "datetime": grp["datetime"].iloc[-1],
+                "open": grp["price"].iloc[0],
+                "high": grp["price"].max(),
+                "low": grp["price"].min(),
+                "close": grp["price"].iloc[-1],
+                "vol": grp["vol"].sum(),
+                "amount": 0.0,
+            }
+        )
+    res = pd.DataFrame(rows)
+    if res.empty:
+        return res
+    res = res.sort_values("datetime").reset_index(drop=True)
+    total = len(res)
+    lo = max(0, total - start - count)
+    hi = max(0, total - start)
+    return res.iloc[lo:hi].reset_index(drop=True)
 
 
 def _merge_index_bars(ak_df: Any, qq_df: Any) -> Any:
@@ -538,17 +714,25 @@ def _merge_index_bars(ak_df: Any, qq_df: Any) -> Any:
 
 
 def _all_prices_null(df: Any) -> bool:
-    """报价帧是否全空价格（无 price 列也算）。
+    """报价帧是否全空价格（无价格列也算）。
 
-    扩展栈在盘前/收盘后常返回仅 pre_close 的行；pandas 里 None 进
-    float 列变 NaN，这里两种都判空。
+    扩展栈在盘前/收盘后常返回仅 pre_close 的行；pandas 里 None 进 float
+    列变 NaN，这里两种都判空。
+
+    **价格列名两套**：A 股标准协议叫 ``price``，扩展市场栈叫 ``close``。
+    旧实现只认 ``price``，于是扩展栈的每一帧都被判成「全空价格」，港美股
+    报价因此**永远**回落免费快照源 —— 而快照源没有量档深度，五档盘口也就
+    一直拿不到（前端只能降级成「实时快照」）。
     """
     try:
         import pandas as pd
 
-        if not isinstance(df, pd.DataFrame) or "price" not in df.columns:
+        if not isinstance(df, pd.DataFrame):
             return True
-        return bool(df["price"].isna().all())
+        for col in ("price", "close"):
+            if col in df.columns:
+                return bool(df[col].isna().all())
+        return True
     except Exception:  # noqa: BLE001 — 判空失败按"不可用"处理，走兜底
         return True
 

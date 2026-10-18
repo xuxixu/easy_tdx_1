@@ -1640,3 +1640,67 @@ def test_optimize_passes_resolved_fees_to_optimizer(sample_ohlcv, monkeypatch):
     )
     _run_optimize(df, req2)
     assert captured.get("stamp_tax") == 0.005
+
+
+def test_optimize_all_request_exposes_fee_fields(sample_ohlcv):
+    """一键寻优请求必须暴露 min_commission / stamp_tax / auto_fees。
+
+    回归：旧 schema 只有 commission + slippage，用户无法覆盖最低佣金与印花税，
+    ETF/可转债在一键寻优下仍按股票 0.1% 收印花税，与单策略寻优口径不一致。
+    """
+    from easy_tdx.web.backtest_schemas import OptimizeAllBacktestRequest
+
+    req = OptimizeAllBacktestRequest(ohlcv=sample_ohlcv)
+    assert req.min_commission == 5.0
+    assert req.stamp_tax == 0.001
+    assert req.auto_fees is False
+    assert req.commission == 0.0003
+
+    # 可显式覆盖（非空校验通过）
+    req2 = OptimizeAllBacktestRequest(
+        ohlcv=sample_ohlcv, stamp_tax=0.0, min_commission=1.0, auto_fees=True
+    )
+    assert req2.stamp_tax == 0.0
+    assert req2.min_commission == 1.0
+    assert req2.auto_fees is True
+
+
+def test_optimize_all_passes_resolved_fees_to_optimizer(sample_ohlcv, monkeypatch):
+    """一键寻优须与单策略寻优同口径：解析后的费率透传给 ParamGridOptimizer。"""
+    import easy_tdx.backtest.optimizer as opt_mod
+    from easy_tdx.web.backtest_schemas import OptimizeAllBacktestRequest
+    from easy_tdx.web.routers.backtest import _run_optimize_all
+
+    captured: dict = {}
+
+    class SpyOptimizer(opt_mod.ParamGridOptimizer):
+        def __init__(self, *args, **kwargs):  # noqa: ARG002
+            captured.update(kwargs)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(opt_mod, "ParamGridOptimizer", SpyOptimizer)
+
+    df = pd.DataFrame(sample_ohlcv)
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    req = OptimizeAllBacktestRequest(
+        cash=100_000.0,
+        symbol="SH:510300",  # ETF：免印花税
+        auto_fees=True,
+        workers=1,  # 串行：SpyOptimizer 在主进程生效
+    )
+    _run_optimize_all(df, req)
+    # ETF 口径：印花税解析为 0，最低佣金 5.0
+    assert captured.get("stamp_tax") == 0.0
+    assert captured.get("min_commission") == 5.0
+
+    # 显式非默认 stamp_tax 优先于品种默认
+    captured.clear()
+    req2 = OptimizeAllBacktestRequest(
+        cash=100_000.0,
+        symbol="SH:510300",
+        auto_fees=True,
+        stamp_tax=0.005,
+        workers=1,
+    )
+    _run_optimize_all(df, req2)
+    assert captured.get("stamp_tax") == 0.005

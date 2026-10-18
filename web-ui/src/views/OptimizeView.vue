@@ -2,7 +2,7 @@
 // 参数寻优主页面：左配置（选标的 + 策略 + 寻优参数）/ 右报告（排名表 + 热力图）。
 // 取行情已整合进「开始寻优」。另有「一键寻优所有策略」：用各策略预设网格逐策略寻优再全局排名。
 
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import GradeBadge from '../components/GradeBadge.vue'
@@ -17,6 +17,10 @@ import type { Category, ExecutionMode } from '../types'
 import { useBacktestStore } from '../stores/backtest'
 
 const store = useBacktestStore()
+
+// 页面切走即取消在飞的寻优轮询（全策略网格最慢，最长 300s），
+// 避免后台继续打 HTTP 并把结果/错误写回全局 store。
+onBeforeUnmount(() => store.cancelAll())
 const router = useRouter()
 const route = useRoute()
 
@@ -479,7 +483,7 @@ const rankingGrades = computed<GradeResult[]>(() =>
 }
 .hint {
   font-weight: 400;
-  color: var(--text-muted, #888);
+  color: var(--text-muted, var(--text-muted));
   font-size: 12px;
   margin-left: 6px;
 }
@@ -487,7 +491,7 @@ const rankingGrades = computed<GradeResult[]>(() =>
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text-muted, #888);
+  color: var(--text-muted, var(--text-muted));
 }
 .run-btn {
   width: 100%;
@@ -501,27 +505,27 @@ const rankingGrades = computed<GradeResult[]>(() =>
 
 /* 「一键寻优所有策略」按钮：暖橙渐变，比 primary 蓝更醒目 */
 .run-all-btn {
-  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
-  border: 1px solid #f59e0b;
-  color: #fff;
+  background: linear-gradient(135deg, var(--warn) 0%, var(--warn) 100%);
+  border: 1px solid var(--warn);
+  color: var(--on-accent);
   font-weight: 600;
-  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--warn) 35%, transparent);
 }
 .run-all-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
-  border-color: #fbbf24;
-  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.5);
+  background: linear-gradient(135deg, var(--warn), var(--warn));
+  border-color: var(--warn);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--warn) 50%, transparent);
   transform: translateY(-1px);
 }
 .run-all-btn:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--warn) 35%, transparent);
 }
 /* 运行中：暗橙 disabled，但仍是橙，区别于普通按钮的纯灰 */
 .run-all-btn:disabled {
-  background: linear-gradient(135deg, #b45309, #9a3412);
-  border-color: #b45309;
-  color: #fde68a;
+  background: linear-gradient(135deg, var(--warn), var(--warn));
+  border-color: var(--warn);
+  color: var(--warn);
   opacity: 0.9;
   cursor: not-allowed;
   box-shadow: none;
@@ -530,7 +534,7 @@ const rankingGrades = computed<GradeResult[]>(() =>
 .report-panel {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: var(--sp-4);
 }
 .placeholder {
   display: flex;
@@ -540,7 +544,7 @@ const rankingGrades = computed<GradeResult[]>(() =>
   color: var(--text-dim);
 }
 .error-banner {
-  background: rgba(239, 65, 70, 0.12);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
   border: 1px solid var(--up);
   color: var(--up);
   padding: 10px 14px;
@@ -630,7 +634,7 @@ const rankingGrades = computed<GradeResult[]>(() =>
   width: 32px;
 }
 .best {
-  background: rgba(74, 158, 255, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .best .rank {
   color: var(--accent);

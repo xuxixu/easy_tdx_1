@@ -97,7 +97,7 @@ function isOn(id: string): boolean {
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .chip-custom {
   border-style: dashed;

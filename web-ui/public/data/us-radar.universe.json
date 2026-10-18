@@ -1,0 +1,3654 @@
+{
+  "note": "观测池与分类（策展层）。首次由 build_us_radar.py 从快照播种；此文件不会被重建覆盖，可直接编辑以调整池子与分类。",
+  "watchlist": [
+    {
+      "ticker": "AA",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "AAOI",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AAPL",
+      "theme": "指数/杠杆ETF",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ABNB",
+      "theme": "消费/工业/其他",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "ADBE",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ADI",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AEHR",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AFRM",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "AGIX",
+      "theme": "AI基础设施/电力",
+      "gics": ""
+    },
+    {
+      "ticker": "AGQ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "AI",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AIPO",
+      "theme": "AI基础设施/电力",
+      "gics": ""
+    },
+    {
+      "ticker": "ALAB",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ALB",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "AMAT",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AMD",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AMGN",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "AMKR",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AMZN",
+      "theme": "软件/云/AI应用",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "ANET",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "APH",
+      "theme": "指数/杠杆ETF",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "APLD",
+      "theme": "AI基础设施/电力",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ARKG",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "ARM",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ASML",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ASTS",
+      "theme": "太空/量子/前沿",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ASTX",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "ASX",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AVGO",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "AXP",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "AXTI",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "BABA",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "BAND",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "BB",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "BBAI",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "BE",
+      "theme": "AI基础设施/电力",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "BIDU",
+      "theme": "中概",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "BILI",
+      "theme": "中概",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "BKNG",
+      "theme": "消费/工业/其他",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "BKR",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "BMNR",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "BRK-B",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "BUG",
+      "theme": "网络安全",
+      "gics": ""
+    },
+    {
+      "ticker": "BWXT",
+      "theme": "AI基础设施/电力",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "CAMT",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CBRS",
+      "theme": "AI算力-芯片",
+      "gics": ""
+    },
+    {
+      "ticker": "CEG",
+      "theme": "AI基础设施/电力",
+      "gics": "Utilities"
+    },
+    {
+      "ticker": "CF",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "CHKP",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CIEN",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CIFR",
+      "theme": "AI基础设施/电力",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CLSK",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "CNQ",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "COHR",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "COIN",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "CONL",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "COP",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "CRCL",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "CRDO",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CRM",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CRSP",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "CRWD",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CRWV",
+      "theme": "AI基础设施/电力",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CSCO",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CSPI",
+      "theme": "消费/工业/其他",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "CVX",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "DAL",
+      "theme": "消费/工业/其他",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "DAR",
+      "theme": "材料/化工/贵金属",
+      "gics": "Consumer Defensive"
+    },
+    {
+      "ticker": "DDOG",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "DELL",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "DJT",
+      "theme": "消费/工业/其他",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "DRAM",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "DVN",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "DXYZ",
+      "theme": "软件/云/AI应用",
+      "gics": ""
+    },
+    {
+      "ticker": "ELF",
+      "theme": "消费/工业/其他",
+      "gics": "Consumer Defensive"
+    },
+    {
+      "ticker": "EOG",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "EQT",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "ETH",
+      "theme": "金融科技/券商/加密",
+      "gics": ""
+    },
+    {
+      "ticker": "ETN",
+      "theme": "AI基础设施/电力",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "EUV",
+      "theme": "半导体设备/材料/光通信",
+      "gics": ""
+    },
+    {
+      "ticker": "EWJ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "EWT",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "EWY",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "FANG",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "FCEL",
+      "theme": "AI基础设施/电力",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "FCX",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "FIG",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "FIX",
+      "theme": "消费/工业/其他",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "FLKR",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "FLY",
+      "theme": "太空/量子/前沿",
+      "gics": ""
+    },
+    {
+      "ticker": "FN",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "FNGD",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "FNGS",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "FNGU",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "FTNT",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "FUTU",
+      "theme": "中概",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "GD",
+      "theme": "国防军工",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "GDX",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "GDXU",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "GEN",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "GEV",
+      "theme": "AI基础设施/电力",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "GILD",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "GLW",
+      "theme": "材料/化工/贵金属",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "GOOG",
+      "theme": "软件/云/AI应用",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "GOOGL",
+      "theme": "软件/云/AI应用",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "GS",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "HAL",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "HII",
+      "theme": "国防军工",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "HIMS",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "HIMX",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "HOOD",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "HPE",
+      "theme": "AI基础设施/电力",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "HSAI",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "HSBC",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "HUBS",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "IBKR",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "IBM",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ICHR",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "IGV",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "INOD",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "INTC",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "INTU",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "INTW",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "IONQ",
+      "theme": "太空/量子/前沿",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "IREN",
+      "theme": "AI基础设施/电力",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "IRON",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "ISRG",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "ITB",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "IWM",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "JD",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "JPM",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "KLAC",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "KMEM",
+      "theme": "其他",
+      "gics": ""
+    },
+    {
+      "ticker": "KMI",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "KO",
+      "theme": "消费/工业/其他",
+      "gics": "Consumer Defensive"
+    },
+    {
+      "ticker": "KORU",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "LABU",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "LHX",
+      "theme": "国防军工",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "LI",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "LITE",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "LLY",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "LMT",
+      "theme": "国防军工",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "LNG",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "LRCX",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "LSCC",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "LUNR",
+      "theme": "太空/量子/前沿",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "LYB",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "LYTE",
+      "theme": "其他",
+      "gics": ""
+    },
+    {
+      "ticker": "MA",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "MANU",
+      "theme": "消费/工业/其他",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "MARA",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "MCHP",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "MDB",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "META",
+      "theme": "软件/云/AI应用",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "MKSI",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "MOS",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "MP",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "MPC",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "MPWR",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "MRNA",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "MRVL",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "MS",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "MSFT",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "MSTR",
+      "theme": "金融科技/券商/加密",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "MU",
+      "theme": "存储",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "MUU",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "NASA",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "NBIS",
+      "theme": "AI基础设施/电力",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "NCLD",
+      "theme": "其他",
+      "gics": ""
+    },
+    {
+      "ticker": "NEM",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "NET",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "NFLX",
+      "theme": "消费/工业/其他",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "NIO",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "NOC",
+      "theme": "国防军工",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "NOK",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "NOW",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "NTAP",
+      "theme": "存储",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "NTES",
+      "theme": "中概",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "NVDA",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "NVO",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "NVTS",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "NXPI",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "OKE",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "OKLO",
+      "theme": "AI基础设施/电力",
+      "gics": "Utilities"
+    },
+    {
+      "ticker": "OKTA",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ON",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ONTO",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ORCL",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "OUST",
+      "theme": "指数/杠杆ETF",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "OXY",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "PANW",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "PATH",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "PDD",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "PFE",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "PG",
+      "theme": "消费/工业/其他",
+      "gics": "Consumer Defensive"
+    },
+    {
+      "ticker": "PGJ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "PLTR",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "POET",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "PSX",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "PWR",
+      "theme": "AI基础设施/电力",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "PYPL",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "QBTS",
+      "theme": "太空/量子/前沿",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "QCOM",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "QQQ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "QRVO",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "QUBT",
+      "theme": "太空/量子/前沿",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "RAM",
+      "theme": "其他",
+      "gics": ""
+    },
+    {
+      "ticker": "RDW",
+      "theme": "太空/量子/前沿",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "REGN",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "RGTI",
+      "theme": "太空/量子/前沿",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "RIOT",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "RKLB",
+      "theme": "太空/量子/前沿",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "RKLX",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "RMBS",
+      "theme": "存储",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "RTX",
+      "theme": "国防军工",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "S",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SAP",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SCHW",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "SE",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "SEI",
+      "theme": "AI基础设施/电力",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "SHOP",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SILJ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SIMO",
+      "theme": "存储",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SKHY",
+      "theme": "其他",
+      "gics": ""
+    },
+    {
+      "ticker": "SKUU",
+      "theme": "其他",
+      "gics": ""
+    },
+    {
+      "ticker": "SLB",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "SMCI",
+      "theme": "AI基础设施/电力",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SMR",
+      "theme": "AI基础设施/电力",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "SNDK",
+      "theme": "存储",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SNOW",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SOFI",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "SOUN",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SOXL",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SOXQ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SOXS",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SOXX",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SPCX",
+      "theme": "太空/量子/前沿",
+      "gics": ""
+    },
+    {
+      "ticker": "SPY",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SQM",
+      "theme": "材料/化工/贵金属",
+      "gics": "Basic Materials"
+    },
+    {
+      "ticker": "SQQQ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SSPC",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "STX",
+      "theme": "存储",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "SVIX",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "SWKS",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "TEAM",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "TEM",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "TER",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "TME",
+      "theme": "中概",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "TQQQ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "TSEM",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "TSLA",
+      "theme": "指数/杠杆ETF",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "TSLQ",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "TSM",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "TTMI",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "TWST",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "TXG",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "TXN",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "U",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "UBER",
+      "theme": "消费/工业/其他",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "UCTT",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "UGL",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "UMAC",
+      "theme": "太空/量子/前沿",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "UPST",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "USD",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "UVXY",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "V",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "VICR",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "VIXY",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "VLO",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "VOO",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "VRT",
+      "theme": "消费/工业/其他",
+      "gics": "Industrials"
+    },
+    {
+      "ticker": "VRTX",
+      "theme": "医药生物",
+      "gics": "Healthcare"
+    },
+    {
+      "ticker": "VSH",
+      "theme": "半导体设备/材料/光通信",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "VST",
+      "theme": "AI基础设施/电力",
+      "gics": "Utilities"
+    },
+    {
+      "ticker": "VYLD",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "WBD",
+      "theme": "消费/工业/其他",
+      "gics": "Communication Services"
+    },
+    {
+      "ticker": "WDAY",
+      "theme": "软件/云/AI应用",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "WDC",
+      "theme": "存储",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "WMB",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "WOLF",
+      "theme": "AI算力-芯片",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "WULF",
+      "theme": "金融科技/券商/加密",
+      "gics": "Financial Services"
+    },
+    {
+      "ticker": "XBI",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "XOM",
+      "theme": "能源(油气)",
+      "gics": "Energy"
+    },
+    {
+      "ticker": "XPEV",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "XPP",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "XYZ",
+      "theme": "金融科技/券商/加密",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "YANG",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "YINN",
+      "theme": "指数/杠杆ETF",
+      "gics": ""
+    },
+    {
+      "ticker": "YUMC",
+      "theme": "中概",
+      "gics": "Consumer Cyclical"
+    },
+    {
+      "ticker": "ZS",
+      "theme": "网络安全",
+      "gics": "Technology"
+    },
+    {
+      "ticker": "ZTO",
+      "theme": "中概",
+      "gics": "Industrials"
+    }
+  ],
+  "sectors": [
+    {
+      "ticker": "XLK",
+      "constituents": [
+        {
+          "ticker": "SHOP"
+        },
+        {
+          "ticker": "TEAM"
+        },
+        {
+          "ticker": "MSFT"
+        },
+        {
+          "ticker": "PLTR"
+        },
+        {
+          "ticker": "ZS"
+        },
+        {
+          "ticker": "AI"
+        },
+        {
+          "ticker": "SAP"
+        },
+        {
+          "ticker": "DDOG"
+        },
+        {
+          "ticker": "INTU"
+        },
+        {
+          "ticker": "MSTR"
+        },
+        {
+          "ticker": "NOW"
+        },
+        {
+          "ticker": "AAPL"
+        },
+        {
+          "ticker": "XYZ"
+        },
+        {
+          "ticker": "BB"
+        },
+        {
+          "ticker": "APH"
+        },
+        {
+          "ticker": "CHKP"
+        },
+        {
+          "ticker": "HUBS"
+        },
+        {
+          "ticker": "CSPI"
+        },
+        {
+          "ticker": "UBER"
+        },
+        {
+          "ticker": "CRM"
+        },
+        {
+          "ticker": "ASX"
+        },
+        {
+          "ticker": "OKTA"
+        },
+        {
+          "ticker": "FTNT"
+        },
+        {
+          "ticker": "IBM"
+        },
+        {
+          "ticker": "CSCO"
+        },
+        {
+          "ticker": "ADBE"
+        },
+        {
+          "ticker": "CIEN"
+        },
+        {
+          "ticker": "U"
+        },
+        {
+          "ticker": "WDAY"
+        },
+        {
+          "ticker": "FN"
+        },
+        {
+          "ticker": "PATH"
+        },
+        {
+          "ticker": "S"
+        },
+        {
+          "ticker": "INOD"
+        },
+        {
+          "ticker": "CRWD"
+        },
+        {
+          "ticker": "FIG"
+        },
+        {
+          "ticker": "LITE"
+        },
+        {
+          "ticker": "PANW"
+        },
+        {
+          "ticker": "SNOW"
+        },
+        {
+          "ticker": "HPE"
+        },
+        {
+          "ticker": "GLW"
+        },
+        {
+          "ticker": "NET"
+        },
+        {
+          "ticker": "ANET"
+        },
+        {
+          "ticker": "NOK"
+        },
+        {
+          "ticker": "BAND"
+        },
+        {
+          "ticker": "MDB"
+        },
+        {
+          "ticker": "ORCL"
+        },
+        {
+          "ticker": "TTMI"
+        },
+        {
+          "ticker": "OUST"
+        },
+        {
+          "ticker": "GEN"
+        },
+        {
+          "ticker": "COHR"
+        },
+        {
+          "ticker": "SOUN"
+        },
+        {
+          "ticker": "SMCI"
+        },
+        {
+          "ticker": "IONQ"
+        },
+        {
+          "ticker": "AAOI"
+        },
+        {
+          "ticker": "CRWV"
+        },
+        {
+          "ticker": "DELL"
+        },
+        {
+          "ticker": "BBAI"
+        },
+        {
+          "ticker": "AXTI"
+        },
+        {
+          "ticker": "QUBT"
+        },
+        {
+          "ticker": "RGTI"
+        },
+        {
+          "ticker": "POET"
+        },
+        {
+          "ticker": "APLD"
+        },
+        {
+          "ticker": "UMAC"
+        },
+        {
+          "ticker": "QBTS"
+        },
+        {
+          "ticker": "ASTS"
+        },
+        {
+          "ticker": "CIFR"
+        }
+      ]
+    },
+    {
+      "ticker": "XLF",
+      "constituents": [
+        {
+          "ticker": "MA"
+        },
+        {
+          "ticker": "V"
+        },
+        {
+          "ticker": "PYPL"
+        },
+        {
+          "ticker": "AFRM"
+        },
+        {
+          "ticker": "BRK-B"
+        },
+        {
+          "ticker": "AXP"
+        },
+        {
+          "ticker": "COIN"
+        },
+        {
+          "ticker": "JPM"
+        },
+        {
+          "ticker": "CRCL"
+        },
+        {
+          "ticker": "UPST"
+        },
+        {
+          "ticker": "FUTU"
+        },
+        {
+          "ticker": "IBKR"
+        },
+        {
+          "ticker": "GS"
+        },
+        {
+          "ticker": "HSBC"
+        },
+        {
+          "ticker": "BMNR"
+        },
+        {
+          "ticker": "HOOD"
+        },
+        {
+          "ticker": "MS"
+        },
+        {
+          "ticker": "SCHW"
+        },
+        {
+          "ticker": "SOFI"
+        },
+        {
+          "ticker": "WULF"
+        },
+        {
+          "ticker": "MARA"
+        },
+        {
+          "ticker": "CLSK"
+        },
+        {
+          "ticker": "RIOT"
+        },
+        {
+          "ticker": "IREN"
+        }
+      ]
+    },
+    {
+      "ticker": "XLE",
+      "constituents": [
+        {
+          "ticker": "MPC"
+        },
+        {
+          "ticker": "COP"
+        },
+        {
+          "ticker": "XOM"
+        },
+        {
+          "ticker": "KMI"
+        },
+        {
+          "ticker": "EOG"
+        },
+        {
+          "ticker": "EQT"
+        },
+        {
+          "ticker": "VLO"
+        },
+        {
+          "ticker": "LNG"
+        },
+        {
+          "ticker": "PSX"
+        },
+        {
+          "ticker": "CVX"
+        },
+        {
+          "ticker": "CNQ"
+        },
+        {
+          "ticker": "OXY"
+        },
+        {
+          "ticker": "DVN"
+        },
+        {
+          "ticker": "FANG"
+        },
+        {
+          "ticker": "OKE"
+        },
+        {
+          "ticker": "WMB"
+        },
+        {
+          "ticker": "BKR"
+        },
+        {
+          "ticker": "HAL"
+        },
+        {
+          "ticker": "SLB"
+        },
+        {
+          "ticker": "SEI"
+        }
+      ]
+    },
+    {
+      "ticker": "XLV",
+      "constituents": [
+        {
+          "ticker": "MRNA"
+        },
+        {
+          "ticker": "AMGN"
+        },
+        {
+          "ticker": "ISRG"
+        },
+        {
+          "ticker": "LLY"
+        },
+        {
+          "ticker": "PFE"
+        },
+        {
+          "ticker": "GILD"
+        },
+        {
+          "ticker": "HIMS"
+        },
+        {
+          "ticker": "REGN"
+        },
+        {
+          "ticker": "VRTX"
+        },
+        {
+          "ticker": "TXG"
+        },
+        {
+          "ticker": "NVO"
+        },
+        {
+          "ticker": "CRSP"
+        },
+        {
+          "ticker": "TWST"
+        },
+        {
+          "ticker": "IRON"
+        },
+        {
+          "ticker": "TEM"
+        }
+      ]
+    },
+    {
+      "ticker": "XLC",
+      "constituents": [
+        {
+          "ticker": "TME"
+        },
+        {
+          "ticker": "WBD"
+        },
+        {
+          "ticker": "NTES"
+        },
+        {
+          "ticker": "META"
+        },
+        {
+          "ticker": "MANU"
+        },
+        {
+          "ticker": "GOOGL"
+        },
+        {
+          "ticker": "GOOG"
+        },
+        {
+          "ticker": "BILI"
+        },
+        {
+          "ticker": "NFLX"
+        },
+        {
+          "ticker": "BIDU"
+        },
+        {
+          "ticker": "DJT"
+        },
+        {
+          "ticker": "NBIS"
+        }
+      ]
+    },
+    {
+      "ticker": "XLY",
+      "constituents": [
+        {
+          "ticker": "YUMC"
+        },
+        {
+          "ticker": "ABNB"
+        },
+        {
+          "ticker": "PDD"
+        },
+        {
+          "ticker": "JD"
+        },
+        {
+          "ticker": "BABA"
+        },
+        {
+          "ticker": "AMZN"
+        },
+        {
+          "ticker": "TSLA"
+        },
+        {
+          "ticker": "BKNG"
+        },
+        {
+          "ticker": "NIO"
+        },
+        {
+          "ticker": "LI"
+        },
+        {
+          "ticker": "SE"
+        },
+        {
+          "ticker": "XPEV"
+        },
+        {
+          "ticker": "HSAI"
+        }
+      ]
+    },
+    {
+      "ticker": "XLP",
+      "constituents": [
+        {
+          "ticker": "ELF"
+        },
+        {
+          "ticker": "PG"
+        },
+        {
+          "ticker": "KO"
+        },
+        {
+          "ticker": "DAR"
+        }
+      ]
+    },
+    {
+      "ticker": "XLI",
+      "constituents": [
+        {
+          "ticker": "LMT"
+        },
+        {
+          "ticker": "PWR"
+        },
+        {
+          "ticker": "RTX"
+        },
+        {
+          "ticker": "GEV"
+        },
+        {
+          "ticker": "LHX"
+        },
+        {
+          "ticker": "NOC"
+        },
+        {
+          "ticker": "HII"
+        },
+        {
+          "ticker": "GD"
+        },
+        {
+          "ticker": "ZTO"
+        },
+        {
+          "ticker": "ETN"
+        },
+        {
+          "ticker": "DAL"
+        },
+        {
+          "ticker": "BWXT"
+        },
+        {
+          "ticker": "FIX"
+        },
+        {
+          "ticker": "VRT"
+        },
+        {
+          "ticker": "BE"
+        },
+        {
+          "ticker": "RKLB"
+        },
+        {
+          "ticker": "FCEL"
+        },
+        {
+          "ticker": "LUNR"
+        },
+        {
+          "ticker": "RDW"
+        },
+        {
+          "ticker": "SMR"
+        }
+      ]
+    },
+    {
+      "ticker": "XLB",
+      "constituents": [
+        {
+          "ticker": "LYB"
+        },
+        {
+          "ticker": "FCX"
+        },
+        {
+          "ticker": "NEM"
+        },
+        {
+          "ticker": "CF"
+        },
+        {
+          "ticker": "AA"
+        },
+        {
+          "ticker": "SQM"
+        },
+        {
+          "ticker": "ALB"
+        },
+        {
+          "ticker": "MP"
+        },
+        {
+          "ticker": "MOS"
+        }
+      ]
+    },
+    {
+      "ticker": "XLU",
+      "constituents": [
+        {
+          "ticker": "VST"
+        },
+        {
+          "ticker": "CEG"
+        },
+        {
+          "ticker": "OKLO"
+        }
+      ]
+    },
+    {
+      "ticker": "XLRE",
+      "constituents": []
+    },
+    {
+      "ticker": "SMH",
+      "constituents": [
+        {
+          "ticker": "QRVO"
+        },
+        {
+          "ticker": "ADI"
+        },
+        {
+          "ticker": "TXN"
+        },
+        {
+          "ticker": "ON"
+        },
+        {
+          "ticker": "MCHP"
+        },
+        {
+          "ticker": "MPWR"
+        },
+        {
+          "ticker": "NTAP"
+        },
+        {
+          "ticker": "RMBS"
+        },
+        {
+          "ticker": "CRDO"
+        },
+        {
+          "ticker": "ASML"
+        },
+        {
+          "ticker": "NXPI"
+        },
+        {
+          "ticker": "KLAC"
+        },
+        {
+          "ticker": "AMAT"
+        },
+        {
+          "ticker": "LRCX"
+        },
+        {
+          "ticker": "WOLF"
+        },
+        {
+          "ticker": "NVDA"
+        },
+        {
+          "ticker": "ALAB"
+        },
+        {
+          "ticker": "AMD"
+        },
+        {
+          "ticker": "TSM"
+        },
+        {
+          "ticker": "LSCC"
+        },
+        {
+          "ticker": "AVGO"
+        },
+        {
+          "ticker": "MRVL"
+        },
+        {
+          "ticker": "TER"
+        },
+        {
+          "ticker": "QCOM"
+        },
+        {
+          "ticker": "MU"
+        },
+        {
+          "ticker": "CAMT"
+        },
+        {
+          "ticker": "MKSI"
+        },
+        {
+          "ticker": "TSEM"
+        },
+        {
+          "ticker": "VICR"
+        },
+        {
+          "ticker": "ONTO"
+        },
+        {
+          "ticker": "SWKS"
+        },
+        {
+          "ticker": "AMKR"
+        },
+        {
+          "ticker": "VSH"
+        },
+        {
+          "ticker": "ARM"
+        },
+        {
+          "ticker": "HIMX"
+        },
+        {
+          "ticker": "SIMO"
+        },
+        {
+          "ticker": "INTC"
+        },
+        {
+          "ticker": "SNDK"
+        },
+        {
+          "ticker": "STX"
+        },
+        {
+          "ticker": "ICHR"
+        },
+        {
+          "ticker": "WDC"
+        },
+        {
+          "ticker": "UCTT"
+        },
+        {
+          "ticker": "NVTS"
+        },
+        {
+          "ticker": "AEHR"
+        }
+      ]
+    }
+  ],
+  "subsectors": [
+    {
+      "name": "油气上游",
+      "constituents": [
+        {
+          "ticker": "COP"
+        },
+        {
+          "ticker": "CNQ"
+        },
+        {
+          "ticker": "EOG"
+        },
+        {
+          "ticker": "FANG"
+        },
+        {
+          "ticker": "CVX"
+        },
+        {
+          "ticker": "XOM"
+        },
+        {
+          "ticker": "DVN"
+        },
+        {
+          "ticker": "XLE"
+        },
+        {
+          "ticker": "OXY"
+        },
+        {
+          "ticker": "EQT"
+        }
+      ]
+    },
+    {
+      "name": "国防军工",
+      "constituents": [
+        {
+          "ticker": "LMT"
+        },
+        {
+          "ticker": "NOC"
+        },
+        {
+          "ticker": "LHX"
+        },
+        {
+          "ticker": "RTX"
+        },
+        {
+          "ticker": "GD"
+        },
+        {
+          "ticker": "HII"
+        }
+      ]
+    },
+    {
+      "name": "医药/医疗器械",
+      "constituents": [
+        {
+          "ticker": "LLY"
+        },
+        {
+          "ticker": "REGN"
+        },
+        {
+          "ticker": "PFE"
+        },
+        {
+          "ticker": "AMGN"
+        },
+        {
+          "ticker": "XLV"
+        },
+        {
+          "ticker": "GILD"
+        },
+        {
+          "ticker": "ISRG"
+        },
+        {
+          "ticker": "NVO"
+        },
+        {
+          "ticker": "VRTX"
+        }
+      ]
+    },
+    {
+      "name": "油服/炼油/中游",
+      "constituents": [
+        {
+          "ticker": "PSX"
+        },
+        {
+          "ticker": "KMI"
+        },
+        {
+          "ticker": "MPC"
+        },
+        {
+          "ticker": "LNG"
+        },
+        {
+          "ticker": "OKE"
+        },
+        {
+          "ticker": "HAL"
+        },
+        {
+          "ticker": "VLO"
+        },
+        {
+          "ticker": "SLB"
+        },
+        {
+          "ticker": "BKR"
+        },
+        {
+          "ticker": "WMB"
+        }
+      ]
+    },
+    {
+      "name": "互联网/消费",
+      "constituents": [
+        {
+          "ticker": "ABNB"
+        },
+        {
+          "ticker": "ELF"
+        },
+        {
+          "ticker": "TME"
+        },
+        {
+          "ticker": "BKNG"
+        },
+        {
+          "ticker": "NFLX"
+        },
+        {
+          "ticker": "WBD"
+        },
+        {
+          "ticker": "SHOP"
+        },
+        {
+          "ticker": "MANU"
+        },
+        {
+          "ticker": "META"
+        },
+        {
+          "ticker": "SE"
+        },
+        {
+          "ticker": "UBER"
+        },
+        {
+          "ticker": "GOOGL"
+        },
+        {
+          "ticker": "AMZN"
+        }
+      ]
+    },
+    {
+      "name": "云计算/SaaS",
+      "constituents": [
+        {
+          "ticker": "INTU"
+        },
+        {
+          "ticker": "CRM"
+        },
+        {
+          "ticker": "SAP"
+        },
+        {
+          "ticker": "WDAY"
+        },
+        {
+          "ticker": "IBM"
+        },
+        {
+          "ticker": "ADBE"
+        },
+        {
+          "ticker": "HUBS"
+        },
+        {
+          "ticker": "NOW"
+        },
+        {
+          "ticker": "TEAM"
+        },
+        {
+          "ticker": "SHOP"
+        },
+        {
+          "ticker": "MSFT"
+        },
+        {
+          "ticker": "GOOGL"
+        },
+        {
+          "ticker": "AMZN"
+        },
+        {
+          "ticker": "ORCL"
+        },
+        {
+          "ticker": "MDB"
+        },
+        {
+          "ticker": "DDOG"
+        },
+        {
+          "ticker": "SNOW"
+        },
+        {
+          "ticker": "NET"
+        },
+        {
+          "ticker": "BAND"
+        },
+        {
+          "ticker": "OKTA"
+        }
+      ]
+    },
+    {
+      "name": "中概",
+      "constituents": [
+        {
+          "ticker": "YUMC"
+        },
+        {
+          "ticker": "TME"
+        },
+        {
+          "ticker": "NTES"
+        },
+        {
+          "ticker": "ZTO"
+        },
+        {
+          "ticker": "JD"
+        },
+        {
+          "ticker": "PDD"
+        },
+        {
+          "ticker": "LI"
+        },
+        {
+          "ticker": "BABA"
+        },
+        {
+          "ticker": "NIO"
+        },
+        {
+          "ticker": "BIDU"
+        },
+        {
+          "ticker": "XPEV"
+        },
+        {
+          "ticker": "FUTU"
+        },
+        {
+          "ticker": "BILI"
+        }
+      ]
+    },
+    {
+      "name": "稀土/金属/材料",
+      "constituents": [
+        {
+          "ticker": "CF"
+        },
+        {
+          "ticker": "LYB"
+        },
+        {
+          "ticker": "NEM"
+        },
+        {
+          "ticker": "MOS"
+        },
+        {
+          "ticker": "AA"
+        },
+        {
+          "ticker": "FCX"
+        },
+        {
+          "ticker": "ALB"
+        },
+        {
+          "ticker": "SQM"
+        },
+        {
+          "ticker": "MP"
+        }
+      ]
+    },
+    {
+      "name": "金融科技/券商",
+      "constituents": [
+        {
+          "ticker": "MA"
+        },
+        {
+          "ticker": "V"
+        },
+        {
+          "ticker": "PYPL"
+        },
+        {
+          "ticker": "JPM"
+        },
+        {
+          "ticker": "AXP"
+        },
+        {
+          "ticker": "GS"
+        },
+        {
+          "ticker": "UPST"
+        },
+        {
+          "ticker": "COIN"
+        },
+        {
+          "ticker": "SCHW"
+        },
+        {
+          "ticker": "MS"
+        },
+        {
+          "ticker": "IBKR"
+        },
+        {
+          "ticker": "FUTU"
+        },
+        {
+          "ticker": "SOFI"
+        },
+        {
+          "ticker": "AFRM"
+        },
+        {
+          "ticker": "HOOD"
+        }
+      ]
+    },
+    {
+      "name": "汽车/消费硬件",
+      "constituents": [
+        {
+          "ticker": "AAPL"
+        },
+        {
+          "ticker": "LI"
+        },
+        {
+          "ticker": "NIO"
+        },
+        {
+          "ticker": "XPEV"
+        },
+        {
+          "ticker": "TSLA"
+        },
+        {
+          "ticker": "HSAI"
+        },
+        {
+          "ticker": "OUST"
+        }
+      ]
+    },
+    {
+      "name": "生物科技",
+      "constituents": [
+        {
+          "ticker": "MRNA"
+        },
+        {
+          "ticker": "XBI"
+        },
+        {
+          "ticker": "CRSP"
+        },
+        {
+          "ticker": "TEM"
+        },
+        {
+          "ticker": "ARKG"
+        },
+        {
+          "ticker": "TXG"
+        },
+        {
+          "ticker": "TWST"
+        }
+      ]
+    },
+    {
+      "name": "AI应用/数据",
+      "constituents": [
+        {
+          "ticker": "AI"
+        },
+        {
+          "ticker": "PATH"
+        },
+        {
+          "ticker": "TEM"
+        },
+        {
+          "ticker": "DXYZ"
+        },
+        {
+          "ticker": "HIMS"
+        },
+        {
+          "ticker": "BBAI"
+        },
+        {
+          "ticker": "PLTR"
+        },
+        {
+          "ticker": "SOUN"
+        },
+        {
+          "ticker": "U"
+        },
+        {
+          "ticker": "INOD"
+        }
+      ]
+    },
+    {
+      "name": "网络安全",
+      "constituents": [
+        {
+          "ticker": "GEN"
+        },
+        {
+          "ticker": "CHKP"
+        },
+        {
+          "ticker": "BB"
+        },
+        {
+          "ticker": "ZS"
+        },
+        {
+          "ticker": "BUG"
+        },
+        {
+          "ticker": "FTNT"
+        },
+        {
+          "ticker": "CRWD"
+        },
+        {
+          "ticker": "S"
+        },
+        {
+          "ticker": "NET"
+        },
+        {
+          "ticker": "PANW"
+        }
+      ]
+    },
+    {
+      "name": "模拟/功率半导体",
+      "constituents": [
+        {
+          "ticker": "SWKS"
+        },
+        {
+          "ticker": "NXPI"
+        },
+        {
+          "ticker": "TXN"
+        },
+        {
+          "ticker": "ADI"
+        },
+        {
+          "ticker": "QRVO"
+        },
+        {
+          "ticker": "ON"
+        },
+        {
+          "ticker": "HIMX"
+        },
+        {
+          "ticker": "MPWR"
+        },
+        {
+          "ticker": "LSCC"
+        },
+        {
+          "ticker": "VSH"
+        },
+        {
+          "ticker": "NVTS"
+        },
+        {
+          "ticker": "WOLF"
+        },
+        {
+          "ticker": "VICR"
+        }
+      ]
+    },
+    {
+      "name": "AI芯片-GPU/ASIC",
+      "constituents": [
+        {
+          "ticker": "QCOM"
+        },
+        {
+          "ticker": "MCHP"
+        },
+        {
+          "ticker": "NVDA"
+        },
+        {
+          "ticker": "TSM"
+        },
+        {
+          "ticker": "AVGO"
+        },
+        {
+          "ticker": "AMD"
+        },
+        {
+          "ticker": "INTC"
+        },
+        {
+          "ticker": "ARM"
+        },
+        {
+          "ticker": "ALAB"
+        },
+        {
+          "ticker": "MRVL"
+        },
+        {
+          "ticker": "RMBS"
+        },
+        {
+          "ticker": "CRDO"
+        }
+      ]
+    },
+    {
+      "name": "AI电力/核能",
+      "constituents": [
+        {
+          "ticker": "BWXT"
+        },
+        {
+          "ticker": "VST"
+        },
+        {
+          "ticker": "GEV"
+        },
+        {
+          "ticker": "CEG"
+        },
+        {
+          "ticker": "SMR"
+        },
+        {
+          "ticker": "OKLO"
+        },
+        {
+          "ticker": "BE"
+        },
+        {
+          "ticker": "FCEL"
+        }
+      ]
+    },
+    {
+      "name": "加密/数字资产",
+      "constituents": [
+        {
+          "ticker": "CRCL"
+        },
+        {
+          "ticker": "COIN"
+        },
+        {
+          "ticker": "HOOD"
+        },
+        {
+          "ticker": "BMNR"
+        },
+        {
+          "ticker": "MSTR"
+        },
+        {
+          "ticker": "WULF"
+        },
+        {
+          "ticker": "RIOT"
+        },
+        {
+          "ticker": "CLSK"
+        },
+        {
+          "ticker": "MARA"
+        },
+        {
+          "ticker": "IREN"
+        },
+        {
+          "ticker": "CIFR"
+        }
+      ]
+    },
+    {
+      "name": "航天/卫星",
+      "constituents": [
+        {
+          "ticker": "SPCX"
+        },
+        {
+          "ticker": "RDW"
+        },
+        {
+          "ticker": "NASA"
+        },
+        {
+          "ticker": "LUNR"
+        },
+        {
+          "ticker": "ASTS"
+        },
+        {
+          "ticker": "RKLB"
+        }
+      ]
+    },
+    {
+      "name": "存储",
+      "constituents": [
+        {
+          "ticker": "NTAP"
+        },
+        {
+          "ticker": "MU"
+        },
+        {
+          "ticker": "WDC"
+        },
+        {
+          "ticker": "SNDK"
+        },
+        {
+          "ticker": "STX"
+        },
+        {
+          "ticker": "SIMO"
+        }
+      ]
+    },
+    {
+      "name": "量子计算",
+      "constituents": [
+        {
+          "ticker": "QUBT"
+        },
+        {
+          "ticker": "RGTI"
+        },
+        {
+          "ticker": "QBTS"
+        },
+        {
+          "ticker": "IONQ"
+        }
+      ]
+    },
+    {
+      "name": "半导体设备/检测",
+      "constituents": [
+        {
+          "ticker": "ASML"
+        },
+        {
+          "ticker": "TSEM"
+        },
+        {
+          "ticker": "AMKR"
+        },
+        {
+          "ticker": "KLAC"
+        },
+        {
+          "ticker": "CAMT"
+        },
+        {
+          "ticker": "LRCX"
+        },
+        {
+          "ticker": "MKSI"
+        },
+        {
+          "ticker": "AMAT"
+        },
+        {
+          "ticker": "TER"
+        },
+        {
+          "ticker": "ONTO"
+        },
+        {
+          "ticker": "UCTT"
+        },
+        {
+          "ticker": "AEHR"
+        },
+        {
+          "ticker": "ICHR"
+        }
+      ]
+    },
+    {
+      "name": "光通信/网络设备",
+      "constituents": [
+        {
+          "ticker": "APH"
+        },
+        {
+          "ticker": "CSCO"
+        },
+        {
+          "ticker": "NOK"
+        },
+        {
+          "ticker": "GLW"
+        },
+        {
+          "ticker": "ANET"
+        },
+        {
+          "ticker": "POET"
+        },
+        {
+          "ticker": "AXTI"
+        },
+        {
+          "ticker": "FN"
+        },
+        {
+          "ticker": "LITE"
+        },
+        {
+          "ticker": "COHR"
+        },
+        {
+          "ticker": "CIEN"
+        },
+        {
+          "ticker": "AAOI"
+        }
+      ]
+    },
+    {
+      "name": "数据中心/AI基建",
+      "constituents": [
+        {
+          "ticker": "ETN"
+        },
+        {
+          "ticker": "PWR"
+        },
+        {
+          "ticker": "VRT"
+        },
+        {
+          "ticker": "FIX"
+        },
+        {
+          "ticker": "DELL"
+        },
+        {
+          "ticker": "IREN"
+        },
+        {
+          "ticker": "APLD"
+        },
+        {
+          "ticker": "SMCI"
+        },
+        {
+          "ticker": "HPE"
+        },
+        {
+          "ticker": "NBIS"
+        },
+        {
+          "ticker": "CRWV"
+        },
+        {
+          "ticker": "CIFR"
+        }
+      ]
+    }
+  ],
+  "theme_trend": [
+    {
+      "theme": "医药生物",
+      "tickers": [
+        "AMGN",
+        "CRSP",
+        "GILD",
+        "HIMS",
+        "IRON",
+        "ISRG",
+        "LLY",
+        "MRNA",
+        "NVO",
+        "PFE",
+        "REGN",
+        "TEM",
+        "TWST",
+        "TXG",
+        "VRTX"
+      ]
+    },
+    {
+      "theme": "网络安全",
+      "tickers": [
+        "BB",
+        "BUG",
+        "CHKP",
+        "CRWD",
+        "FTNT",
+        "GEN",
+        "NET",
+        "PANW",
+        "S",
+        "ZS"
+      ]
+    },
+    {
+      "theme": "存储",
+      "tickers": [
+        "MU",
+        "NTAP",
+        "RMBS",
+        "SIMO",
+        "SNDK",
+        "STX",
+        "WDC"
+      ]
+    },
+    {
+      "theme": "AI算力-芯片",
+      "tickers": [
+        "ALAB",
+        "AMD",
+        "ARM",
+        "AVGO",
+        "CBRS",
+        "CRDO",
+        "INTC",
+        "MPWR",
+        "MRVL",
+        "NVDA",
+        "NVTS",
+        "POET",
+        "QCOM",
+        "TSEM",
+        "TSM",
+        "WOLF"
+      ]
+    },
+    {
+      "theme": "其他",
+      "tickers": [
+        "KMEM",
+        "LYTE",
+        "NCLD",
+        "RAM",
+        "SKHY",
+        "SKUU"
+      ]
+    },
+    {
+      "theme": "半导体设备/材料/光通信",
+      "tickers": [
+        "AAOI",
+        "ADI",
+        "AEHR",
+        "AMAT",
+        "AMKR",
+        "ANET",
+        "ASML",
+        "ASX",
+        "AXTI",
+        "CAMT",
+        "CIEN",
+        "COHR",
+        "CSCO",
+        "EUV",
+        "FN",
+        "HIMX",
+        "ICHR",
+        "KLAC",
+        "LITE",
+        "LRCX",
+        "LSCC",
+        "MCHP",
+        "MKSI",
+        "NXPI",
+        "ON",
+        "ONTO",
+        "QRVO",
+        "SWKS",
+        "TER",
+        "TTMI",
+        "TXN",
+        "UCTT",
+        "VICR",
+        "VSH"
+      ]
+    },
+    {
+      "theme": "太空/量子/前沿",
+      "tickers": [
+        "ASTS",
+        "FLY",
+        "IONQ",
+        "LUNR",
+        "QBTS",
+        "QUBT",
+        "RDW",
+        "RGTI",
+        "RKLB",
+        "SPCX",
+        "UMAC"
+      ]
+    },
+    {
+      "theme": "AI基础设施/电力",
+      "tickers": [
+        "AGIX",
+        "AIPO",
+        "APLD",
+        "BE",
+        "BWXT",
+        "CEG",
+        "CIFR",
+        "CRWV",
+        "ETN",
+        "FCEL",
+        "GEV",
+        "HPE",
+        "IREN",
+        "NBIS",
+        "OKLO",
+        "PWR",
+        "SEI",
+        "SMCI",
+        "SMR",
+        "VST"
+      ]
+    },
+    {
+      "theme": "中概",
+      "tickers": [
+        "BABA",
+        "BIDU",
+        "BILI",
+        "FUTU",
+        "HSAI",
+        "JD",
+        "LI",
+        "NIO",
+        "NTES",
+        "PDD",
+        "SE",
+        "TME",
+        "XPEV",
+        "YUMC",
+        "ZTO"
+      ]
+    },
+    {
+      "theme": "消费/工业/其他",
+      "tickers": [
+        "ABNB",
+        "BKNG",
+        "CSPI",
+        "DAL",
+        "DJT",
+        "ELF",
+        "FIX",
+        "KO",
+        "MANU",
+        "NFLX",
+        "PG",
+        "UBER",
+        "VRT",
+        "WBD"
+      ]
+    },
+    {
+      "theme": "材料/化工/贵金属",
+      "tickers": [
+        "AA",
+        "ALB",
+        "CF",
+        "DAR",
+        "FCX",
+        "GLW",
+        "LYB",
+        "MOS",
+        "MP",
+        "NEM",
+        "SQM"
+      ]
+    },
+    {
+      "theme": "软件/云/AI应用",
+      "tickers": [
+        "ADBE",
+        "AI",
+        "AMZN",
+        "BAND",
+        "BBAI",
+        "CRM",
+        "DDOG",
+        "DELL",
+        "DXYZ",
+        "FIG",
+        "GOOG",
+        "GOOGL",
+        "HUBS",
+        "IBM",
+        "INOD",
+        "INTU",
+        "MDB",
+        "META",
+        "MSFT",
+        "NOK",
+        "NOW",
+        "OKTA",
+        "ORCL",
+        "PATH",
+        "PLTR",
+        "SAP",
+        "SHOP",
+        "SNOW",
+        "SOUN",
+        "TEAM",
+        "U",
+        "WDAY"
+      ]
+    },
+    {
+      "theme": "金融科技/券商/加密",
+      "tickers": [
+        "AFRM",
+        "AXP",
+        "BMNR",
+        "BRK-B",
+        "CLSK",
+        "COIN",
+        "CRCL",
+        "ETH",
+        "GS",
+        "HOOD",
+        "HSBC",
+        "IBKR",
+        "JPM",
+        "MA",
+        "MARA",
+        "MS",
+        "MSTR",
+        "PYPL",
+        "RIOT",
+        "SCHW",
+        "SOFI",
+        "UPST",
+        "V",
+        "WULF",
+        "XYZ"
+      ]
+    },
+    {
+      "theme": "能源(油气)",
+      "tickers": [
+        "BKR",
+        "CNQ",
+        "COP",
+        "CVX",
+        "DVN",
+        "EOG",
+        "EQT",
+        "FANG",
+        "HAL",
+        "KMI",
+        "LNG",
+        "MPC",
+        "OKE",
+        "OXY",
+        "PSX",
+        "SLB",
+        "VLO",
+        "WMB",
+        "XOM"
+      ]
+    },
+    {
+      "theme": "国防军工",
+      "tickers": [
+        "GD",
+        "HII",
+        "LHX",
+        "LMT",
+        "NOC",
+        "RTX"
+      ]
+    }
+  ],
+  "crowding": [
+    {
+      "theme": "能源(油气)",
+      "tickers": [
+        "BKR",
+        "CNQ",
+        "COP",
+        "CVX",
+        "DVN",
+        "EOG",
+        "EQT",
+        "FANG",
+        "HAL",
+        "KMI",
+        "LNG",
+        "MPC",
+        "OKE",
+        "OXY",
+        "PSX",
+        "SLB",
+        "VLO",
+        "WMB",
+        "XOM"
+      ]
+    },
+    {
+      "theme": "医药生物",
+      "tickers": [
+        "AMGN",
+        "CRSP",
+        "GILD",
+        "HIMS",
+        "IRON",
+        "ISRG",
+        "LLY",
+        "MRNA",
+        "NVO",
+        "PFE",
+        "REGN",
+        "TEM",
+        "TWST",
+        "TXG",
+        "VRTX"
+      ]
+    },
+    {
+      "theme": "软件/云/AI应用",
+      "tickers": [
+        "ADBE",
+        "AI",
+        "AMZN",
+        "BAND",
+        "BBAI",
+        "CRM",
+        "DDOG",
+        "DELL",
+        "FIG",
+        "GOOG",
+        "GOOGL",
+        "HUBS",
+        "IBM",
+        "INOD",
+        "INTU",
+        "MDB",
+        "META",
+        "MSFT",
+        "NOK",
+        "NOW",
+        "OKTA",
+        "ORCL",
+        "PATH",
+        "PLTR",
+        "SAP",
+        "SHOP",
+        "SNOW",
+        "SOUN",
+        "TEAM",
+        "U",
+        "WDAY"
+      ]
+    },
+    {
+      "theme": "消费/工业/其他",
+      "tickers": [
+        "ABNB",
+        "BKNG",
+        "CSPI",
+        "DAL",
+        "DJT",
+        "ELF",
+        "FIX",
+        "KO",
+        "MANU",
+        "NFLX",
+        "PG",
+        "UBER",
+        "VRT",
+        "WBD"
+      ]
+    },
+    {
+      "theme": "材料/化工/贵金属",
+      "tickers": [
+        "AA",
+        "ALB",
+        "CF",
+        "DAR",
+        "FCX",
+        "GLW",
+        "LYB",
+        "MOS",
+        "MP",
+        "NEM",
+        "SQM"
+      ]
+    },
+    {
+      "theme": "网络安全",
+      "tickers": [
+        "BB",
+        "CHKP",
+        "CRWD",
+        "FTNT",
+        "GEN",
+        "NET",
+        "PANW",
+        "S",
+        "ZS"
+      ]
+    },
+    {
+      "theme": "半导体设备/材料/光通信",
+      "tickers": [
+        "AAOI",
+        "ADI",
+        "AEHR",
+        "AMAT",
+        "AMKR",
+        "ANET",
+        "ASML",
+        "ASX",
+        "AXTI",
+        "CAMT",
+        "CIEN",
+        "COHR",
+        "CSCO",
+        "FN",
+        "HIMX",
+        "ICHR",
+        "KLAC",
+        "LITE",
+        "LRCX",
+        "LSCC",
+        "MCHP",
+        "MKSI",
+        "NXPI",
+        "ON",
+        "ONTO",
+        "QRVO",
+        "SWKS",
+        "TER",
+        "TTMI",
+        "TXN",
+        "UCTT",
+        "VICR",
+        "VSH"
+      ]
+    },
+    {
+      "theme": "存储",
+      "tickers": [
+        "MU",
+        "NTAP",
+        "RMBS",
+        "SIMO",
+        "SNDK",
+        "STX",
+        "WDC"
+      ]
+    },
+    {
+      "theme": "金融科技/券商/加密",
+      "tickers": [
+        "AFRM",
+        "AXP",
+        "BMNR",
+        "BRK-B",
+        "CLSK",
+        "COIN",
+        "CRCL",
+        "ETH",
+        "GS",
+        "HOOD",
+        "HSBC",
+        "IBKR",
+        "JPM",
+        "MA",
+        "MARA",
+        "MS",
+        "MSTR",
+        "PYPL",
+        "RIOT",
+        "SCHW",
+        "SOFI",
+        "UPST",
+        "V",
+        "WULF",
+        "XYZ"
+      ]
+    },
+    {
+      "theme": "AI基础设施/电力",
+      "tickers": [
+        "APLD",
+        "BE",
+        "BWXT",
+        "CEG",
+        "CIFR",
+        "CRWV",
+        "ETN",
+        "FCEL",
+        "GEV",
+        "HPE",
+        "IREN",
+        "NBIS",
+        "OKLO",
+        "PWR",
+        "SEI",
+        "SMCI",
+        "SMR",
+        "VST"
+      ]
+    },
+    {
+      "theme": "太空/量子/前沿",
+      "tickers": [
+        "ASTS",
+        "IONQ",
+        "LUNR",
+        "QBTS",
+        "QUBT",
+        "RDW",
+        "RGTI",
+        "RKLB",
+        "UMAC"
+      ]
+    },
+    {
+      "theme": "AI算力-芯片",
+      "tickers": [
+        "ALAB",
+        "AMD",
+        "ARM",
+        "AVGO",
+        "CRDO",
+        "INTC",
+        "MPWR",
+        "MRVL",
+        "NVDA",
+        "NVTS",
+        "POET",
+        "QCOM",
+        "TSEM",
+        "TSM",
+        "WOLF"
+      ]
+    },
+    {
+      "theme": "中概",
+      "tickers": [
+        "BABA",
+        "BIDU",
+        "BILI",
+        "FUTU",
+        "HSAI",
+        "JD",
+        "LI",
+        "NIO",
+        "NTES",
+        "PDD",
+        "SE",
+        "TME",
+        "XPEV",
+        "YUMC",
+        "ZTO"
+      ]
+    },
+    {
+      "theme": "国防军工",
+      "tickers": [
+        "GD",
+        "HII",
+        "LHX",
+        "LMT",
+        "NOC",
+        "RTX"
+      ]
+    }
+  ],
+  "option_pool": []
+}

@@ -17,6 +17,7 @@ import {
   removeWatchItem,
 } from '../api'
 import { dirClass, fmt2, fmtPctSigned } from '../format'
+import { createSeqGuard } from '../utils/asyncGuard'
 import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, MinutePoint, RankRow } from '../types'
@@ -85,43 +86,54 @@ const minuteError = ref('')
 const dailyError = ref('')
 const loading = ref(false)
 
-async function loadMinute() {
+// 请求序号守卫：快速切换板块时，旧板块的响应可能晚于新板块返回并覆盖结果。
+const chartGuard = createSeqGuard()
+
+async function loadMinute(my?: number) {
+  const seq = my ?? chartGuard.next()
   minuteError.value = ''
   try {
-    minutePoints.value = await fetchMinute(boardMarket.value, boardCode.value)
+    const pts = await fetchMinute(boardMarket.value, boardCode.value)
+    if (chartGuard.stale(seq)) return
+    minutePoints.value = pts
   } catch (e) {
+    if (chartGuard.stale(seq)) return
     minutePoints.value = []
     minuteError.value = formatError(e)
   }
 }
 
-async function loadDaily() {
+async function loadDaily(my?: number) {
+  const seq = my ?? chartGuard.next()
   dailyError.value = ''
   try {
     // 日K只展示最近 250 根：取近 2 年（/bars 单页 800 根即可覆盖，避免全历史分页）；
     // 长期停牌取不到再退回全历史。
     const since = new Date(Date.now() - 2 * 365 * 86400_000).toISOString().slice(0, 10)
     let bars = await fetchBars(boardMarket.value, boardCode.value, 'DAY', since, undefined)
-    if (bars.length === 0)
+    if (chartGuard.stale(seq)) return
+    if (bars.length === 0) {
       bars = await fetchBars(boardMarket.value, boardCode.value, 'DAY', undefined, undefined)
+      if (chartGuard.stale(seq)) return
+    }
     if (bars.length === 0) throw new Error('该板块无日K数据')
-    dailyBars.value = bars.slice(-250)
+    dailyBars.value = bars
   } catch (e) {
+    if (chartGuard.stale(seq)) return
     dailyBars.value = []
     dailyError.value = formatError(e)
   }
 }
 
-// 请求序号守卫：快速切换板块时，旧板块的响应可能晚于新板块返回并覆盖结果。
-let chartSeq = 0
-
 async function loadCharts() {
-  const my = ++chartSeq
+  // 序号必须下传给 loadMinute/loadDaily：它们内部各自直接写响应式状态，
+  // 若只在本函数的 await 之后比对，早已写入的数据撤不回来（旧实现即此问题）。
+  const my = chartGuard.next()
   loading.value = true
   try {
-    await Promise.all([loadMinute(), loadDaily()])
+    await Promise.all([loadMinute(my), loadDaily(my)])
   } finally {
-    if (my === chartSeq) loading.value = false
+    if (!chartGuard.stale(my)) loading.value = false
   }
 }
 
@@ -178,27 +190,29 @@ const membersLoading = ref(false)
 const MEMBER_FETCH_COUNT = 1000
 
 /** 请求序号守卫：升/降序快速连点、或 props.code 切换时，旧响应直接丢弃。 */
-let memberSeq = 0
+const memberGuard = createSeqGuard()
 
 async function loadMembers() {
-  const my = ++memberSeq
+  const my = memberGuard.next()
   membersLoading.value = true
   membersError.value = ''
   try {
     const rows = await fetchBoardMembers(props.code, MEMBER_FETCH_COUNT, memberOrder.value)
     // 响应已过期（顺序已再切换 / 板块已切换）：不得覆盖新请求的结果
-    if (my !== memberSeq) return
+    if (memberGuard.stale(my)) return
     members.value = rows
   } catch (e) {
-    if (my !== memberSeq) return
+    if (memberGuard.stale(my)) return
     members.value = []
     membersError.value = formatError(e)
   } finally {
-    if (my === memberSeq) membersLoading.value = false
+    if (!memberGuard.stale(my)) membersLoading.value = false
   }
 }
 
 function toggleMemberOrder() {
+  // 请求在飞时忽略连点：全量成分股是重请求，重复触发只会互相取消
+  if (membersLoading.value) return
   memberOrder.value = memberOrder.value === 'DESC' ? 'ASC' : 'DESC'
   loadMembers()
 }
@@ -491,7 +505,7 @@ function openMember(r: RankRow) {
 .chip.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .chart-msg {
   padding: 40px 0;

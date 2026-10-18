@@ -359,10 +359,10 @@ function openBoard(r: HotspotRow) {
 .hotspot-view {
   height: 100%;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-3);
 }
 .view-head,
 .toolbar,
@@ -415,7 +415,7 @@ function openBoard(r: HotspotRow) {
 .seg button.on {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   position: relative;
   z-index: 1;
 }
@@ -535,22 +535,22 @@ function openBoard(r: HotspotRow) {
   vertical-align: -2px;
 }
 .sw.u1 {
-  background: rgba(239, 65, 70, 0.26);
+  background: color-mix(in srgb, var(--up) 26%, transparent);
 }
 .sw.u2 {
-  background: rgba(239, 65, 70, 0.5);
+  background: color-mix(in srgb, var(--up) 50%, transparent);
 }
 .sw.u3 {
-  background: rgba(239, 65, 70, 0.82);
+  background: color-mix(in srgb, var(--up) 82%, transparent);
 }
 .sw.d1 {
-  background: rgba(24, 160, 88, 0.26);
+  background: color-mix(in srgb, var(--down) 26%, transparent);
 }
 .sw.d2 {
-  background: rgba(24, 160, 88, 0.5);
+  background: color-mix(in srgb, var(--down) 50%, transparent);
 }
 .sw.d3 {
-  background: rgba(24, 160, 88, 0.82);
+  background: color-mix(in srgb, var(--down) 82%, transparent);
 }
 .lg-sep {
   color: var(--border);

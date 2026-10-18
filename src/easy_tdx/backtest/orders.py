@@ -46,6 +46,12 @@ class OrderSimulator:
     slippage_model: SlippageModel | None = None
 
     def __post_init__(self) -> None:
+        if self.reject_policy not in ("reduce", "skip"):
+            raise ValueError(
+                f"reject_policy 取值应为 'reduce' 或 'skip'，得到 '{self.reject_policy}'。"
+                " 注意：旧 docstring 曾误写作 'reject'，传该值此前会被静默忽略"
+                " —— 两个分支都不命中，直接落到末尾产生一笔超额买入。"
+            )
         # datetime → 行号查找表（惰性构建一次）。v1.28 之前每个信号都对整列
         # datetime 做 strftime 扫描（O(信号数×bar 数)，占全流程 ~85% 墙钟），
         # 网格寻优每点都跑一遍 simulate，是实测最大瓶颈。
@@ -440,9 +446,12 @@ class OrderSimulator:
                 )
             elif self.reject_policy == "reduce":
                 # reduce 模式：重新计算可买数量
+                # 分母必须含 (1 + commission)，与 _calculate_buy_size 同口径。
+                # 旧式 `available_cash / price` 只预留了最低佣金，整手取整后的
+                # 成交额 + 实际佣金会超出可用现金 → 结算后现金为负。
                 available_cash = cash - self.min_commission - slippage
                 if available_cash > price:
-                    reduced_size = int(available_cash / price / 100) * 100
+                    reduced_size = int(available_cash / (price * (1 + self.commission)) / 100) * 100
                     if reduced_size > 0:
                         commission = self._calculate_commission(reduced_size, price, is_sell=False)
                         slippage = self._compute_slippage(reduced_size, price, is_sell=False)

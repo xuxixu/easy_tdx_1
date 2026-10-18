@@ -39,6 +39,7 @@ onBeforeUnmount(() => {
 const sseLabel: Record<string, string> = {
   connecting: '连接中',
   open: '实时',
+  retrying: '重连中',
   closed: '离线',
 }
 </script>
@@ -71,6 +72,8 @@ const sseLabel: Record<string, string> = {
           <RouterLink to="/sentiment" active-class="active">市场情绪</RouterLink>
           <RouterLink to="/watchlist" active-class="active">自选行情</RouterLink>
           <RouterLink to="/ccpm" active-class="active">期货持仓排名</RouterLink>
+          <RouterLink to="/us-options" active-class="active">美股期权</RouterLink>
+          <RouterLink to="/us-radar" active-class="active">美股观测雷达</RouterLink>
           <div class="nav-group">分析</div>
           <RouterLink to="/backtest" active-class="active">单标的回测</RouterLink>
           <RouterLink to="/portfolio" active-class="active">组合回测</RouterLink>
@@ -134,7 +137,7 @@ const sseLabel: Record<string, string> = {
   letter-spacing: 0.2px;
 }
 .sidebar {
-  width: 176px;
+  width: 186px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -142,63 +145,79 @@ const sseLabel: Record<string, string> = {
   border-right: 1px solid var(--border);
 }
 .brand {
-  padding: 14px 16px 12px;
+  padding: 16px 18px 14px;
   border-bottom: 1px solid var(--border);
 }
 .brand-name {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text);
 }
 .brand-sub {
   display: block;
-  margin-top: 2px;
+  margin-top: 3px;
   font-size: 11px;
   color: var(--text-dim);
+  letter-spacing: 0.2px;
 }
+/* 版本号做成小标签：原先是一串灰色小字，和信息栏混在一起分不出主次 */
 .brand-ver {
-  margin-left: 4px;
-  font-size: 10px;
-  opacity: 0.75;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 .side-nav {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  /* 左右留 8px：选中项做成圆角块（而非通栏），视觉上更像现代终端侧栏 */
+  padding: 4px 8px 16px;
 }
 .nav-group {
-  padding: 10px 16px 4px;
-  font-size: 11px;
+  padding: 16px 10px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
   color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.2px;
+}
+/* 分组之间加一条极淡分隔线：5 个分组连着排时不容易看清边界 */
+.nav-group:not(:first-child) {
+  margin-top: 6px;
+  border-top: 1px solid var(--hairline);
 }
 .side-nav a {
   display: block;
-  padding: 7px 16px;
+  padding: 7.5px 10px;
+  border-radius: 6px;
   color: var(--text-muted);
   text-decoration: none;
   font-size: 13px;
-  border-left: 2px solid transparent;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
 }
 .side-nav a:hover {
   color: var(--text);
   background: var(--bg-elevated);
 }
 .side-nav a.active {
+  /* 淡色底 + accent 文字：比「通栏 + 左侧竖条」更收敛，长列表里不抢注意力 */
   color: var(--accent);
-  border-left-color: var(--accent);
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  font-weight: 500;
 }
 .nav-disabled {
   display: block;
-  padding: 7px 16px;
+  padding: 7.5px 10px;
+  border-radius: 6px;
   font-size: 13px;
   color: var(--text-dim);
-  opacity: 0.4;
+  opacity: 0.42;
   cursor: not-allowed;
-  border-left: 2px solid transparent;
 }
 .side-footer {
   display: flex;
@@ -221,6 +240,20 @@ const sseLabel: Record<string, string> = {
 }
 .dot.connecting {
   background: var(--warn);
+}
+/* 退避重连中：与「连接中」区分开（呼吸动画），否则用户只看到「离线」 */
+.dot.retrying {
+  background: var(--warn);
+  animation: sse-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sse-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 .sse-ts {
   margin-left: auto;
