@@ -2,7 +2,7 @@
 // 个股预览对话框：头部实时报价 + 加/移除自选 + 左侧五档盘口
 // + 右侧 分时/分钟K/日K tab（K 线 tab 支持技术指标切换）。
 // 报价来自全局 SSE store；图表按需拉取，分时/日K 独立容错，
-// 指数代码在个股 /bars 拿不到时自动回退 /bars/index。
+// 指数代码在个股 /bars 拿不到时回退 /bars/index（仅 A 股，见 loadDaily/loadIntra）。
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -20,7 +20,7 @@ import {
 } from '../api'
 import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol, fmtVolShares } from '../format'
 import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
-import { US_SESSION_FILTERS, inUsSessionFilter, isExMarket, isUsDst, type USSessionFilter , INDEX_ETF_PROXY} from '../market'
+import { US_SESSION_FILTERS, inUsSessionFilter, isAShare, isExMarket, isUsDst, type USSessionFilter , INDEX_ETF_PROXY} from '../market'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, Category, MinutePoint, SecurityQuote } from '../types'
 import IndicatorChips from './IndicatorChips.vue'
@@ -223,8 +223,12 @@ async function loadDaily(my?: number) {
     if (seq !== chartSeq) return
     if (bars.length === 0) bars = await fetchBars(props.market, props.code, 'DAY', undefined, undefined)
     if (seq !== chartSeq) return
-    // 指数（或 /bars 空数据的服务器）回退指数接口
-    if (bars.length === 0) bars = await fetchIndexBars(props.market, props.code, 250)
+    // 指数（或 /bars 空数据的服务器）回退指数接口。仅 A 股：/bars/index 走标准
+    // 协议 + baostock，且 FastAPI 层要求 6 位代码；港美股指数（HSI/SPX 等 3-5
+    // 字符）在 /bars 已由 http 指数源覆盖，回退只会拿到 422。
+    if (bars.length === 0 && isAShare(props.market)) {
+      bars = await fetchIndexBars(props.market, props.code, 250)
+    }
     if (seq !== chartSeq) return
     if (bars.length === 0) throw new Error('无日K数据（可能为新股或代码有误）')
     dailyBars.value = bars
@@ -272,7 +276,11 @@ async function loadIntra(my?: number) {
     const proxy = INDEX_ETF_PROXY[props.code]
     const target = proxy ?? { market: props.market, code: props.code }
     let bars = await fetchBars(target.market, target.code, t.category, undefined, undefined, t.want)
-    if (bars.length === 0) bars = await fetchIndexBars(props.market, props.code, t.want, t.category)
+    // 同上：/bars/index 只服务 A 股（且要 6 位代码）；港美股指数分钟 K 由
+    // /bars 的 http 指数分支或 ETF 代理覆盖，回退会拿到 422。
+    if (bars.length === 0 && isAShare(props.market)) {
+      bars = await fetchIndexBars(props.market, props.code, t.want, t.category)
+    }
     if (bars.length === 0) throw new Error(`无${t.label}数据（该市场/指数可能不支持此周期）`)
     if (seq !== chartSeq) return
     intraProxy.value = proxy?.label ?? ''

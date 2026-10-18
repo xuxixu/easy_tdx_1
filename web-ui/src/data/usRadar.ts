@@ -99,7 +99,11 @@ export interface NewsRow {
   note: string
 }
 
-/** 信号位行：左侧雷达 / 兑现信号 / 信号专列共用 */
+/** 信号位行：左侧雷达 / 兑现信号 / 信号专列共用。
+ *
+ * 快照里这些行实际是「观测池行」的窄子集（与 WatchRow 同源，含
+ * ma5/bias5/signals/sup 等），并没有 `quality` 字段；组件只读下面声明的
+ * 字段，`quality` 保留为可选仅为兼容旧快照。 */
 export interface SignalRow {
   ticker: string
   theme: string
@@ -108,7 +112,7 @@ export interface SignalRow {
   w1: Num
   rsi: Num
   vol_ratio: Num
-  quality: string
+  quality?: string
   ma5: Num
   /** 相对 MA5 的乖离 % */
   bias5: Num
@@ -471,7 +475,21 @@ export interface RadarData {
   daily: DailyBlock
   left: LeftBlock
   exits: ExitsBlock
-  theme_trend: { rows: (Omit<ThemeRow, 'up_ratio'> & { state: string; pct_trend: Num; pct_aligned: Num })[]; conclusion: string }
+  /** 题材趋势筛选：行形状比 ThemeRow 窄（无 m1/m3/laggers），字段以快照实况为准 */
+  theme_trend: {
+    rows: {
+      theme: string
+      n: number
+      w1: Num
+      /** 上升 / 震荡 / 下行 */
+      state: string
+      pct_trend: Num
+      pct_aligned: Num
+      leaders: string[]
+      tickers: string[]
+    }[]
+    conclusion: string
+  }
   /** 无基本面数据源时为 null */
   quality: QualityBlock | null
   crowding: CrowdingBlock

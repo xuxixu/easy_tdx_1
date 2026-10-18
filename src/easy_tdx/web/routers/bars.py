@@ -118,6 +118,9 @@ def _resample_pairs(df: pd.DataFrame, count: int, factor: int = 2) -> pd.DataFra
         ("close", "last"),
         ("vol", "sum"),
         ("amount", "sum"),
+        # 数据源标记列（_with_source 打的 tdx/qq/ak）：resample 后若丢掉，
+        # 120/240 分钟线的响应就查不到来源，前端 SourceBadge 会莫名消失。
+        ("source", "last"),
     ):
         if col in out.columns:
             agg[col] = how
