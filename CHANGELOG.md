@@ -2,6 +2,39 @@
 
 本文件记录 easy-tdx 的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [未发布] — 2026-10-18
+
+### 美股观测雷达（`/us-radar`）+ 本地实算数据管线
+
+新增整页式「美股观测雷达」，把过去只能逐个标的去查的美股盘后信息收成一份分区快照：每日三板斧 · 指数走势、大盘环境、油价 · 地缘风险、板块轮动、细分板块轮动、涨跌驱动归因、题材趋势筛选、拥挤度 · 机构集中度、基本面质地分层、国会山持仓、左侧雷达 · 回踩支撑、兑现 / 风控信号、焦点个股、期权结构 · 代表股、量能异动、新闻实质判断、周期复盘 · 回测、自选总表。
+
+- **数据管线**（新增 [src/easy_tdx/radar/](src/easy_tdx/radar)：`bars.py` / `build.py` / `indicators.py` / `signals.py` / `universe.py`，入口 [scripts/build_us_radar.py](scripts/build_us_radar.py)）：观测池 291 只（板块 ETF 12 + 宏观 ETF 6 + 个股），指标走项目自己的 `easy_tdx.ta`（TA-Lib 内核），不另造一套均线 MACD；产出 `web-ui/public/data/us-radar.json`（565 KB，`asOf 2026-10-16`）与人工维护的 `us-radar.universe.json`（观测池只增不覆盖——重跑构建不会冲掉人工调整）。
+- **缺源即如实标注**：[build.py](src/easy_tdx/radar/build.py) 把取不到源的区写成 `null` 并登记到 `meta.degraded`（本轮 8 个：期权链、基本面、机构持股 / 空头、国会交易、新闻、原油期货、逐标的归因、VIX / 罗素2000），前端对应区渲染「数据源不可用 + 原因」而不是编造占位数据，页头汇总「N 区缺源」徽标。
+- **指数走势卡**（[RadarIndexTrend.vue](web-ui/src/components/radar/RadarIndexTrend.vue)）：标普500 / 纳斯达克 / 道琼斯用 SPY / QQQ / DIA 代理分时（美股指数无原生分时），恒生指数 / 恒生科技用**指数原生分时**；代理在界面明示，且昨收基准取代理自身的 `pre_close`（同量级——用指数昨收会把曲线压到图底）。
+- 快照走运行时 `fetch('/data/us-radar.json')` 而非 `import` 进主 chunk：565 KB 的数据不该让首屏买单（这份数据本就是「整体替换」而非「按需引用」）。
+
+### 海外看板：指数分钟 K（15 分钟～4 小时）与港股指数原生分时
+
+- **港股指数原生分时**（[market_gateway.py](src/easy_tdx/web/market_gateway.py)）：HSI / HSCEI / HSTECH 走腾讯分时源（332 点），个股弹窗里不必再用 ETF 代理。
+- **指数分钟 K 聚合**（`_index_minute_bars`）：港股指数的 15m / 30m / 60m / 120m / 240m 由当日分时聚合而来（实测 `MIN_15` → 23 根、`MIN_120` → 3 根、`MIN_240` → 1 根，`source=qq`）。
+- **边界（重要）**：指数分钟 K 没有免费的**历史**源，聚合出的是**当日**序列（查看多日只能在当日盘中）；美股指数（SPX / IXIC / DJI）在免费源下只有 1 个快照点，故前端仍以 SPY / QQQ / DIA 代理并在界面明示。`_resample_pairs` 保留 `source` 列，120 / 240 分钟 bar 的来源徽标不再丢失。
+
+### 美股期权页（`/us-options`）
+
+期权链结构的成交量口径视图：到期月切换、行权价筛选、PCR（量）= 看跌成交量 / 看涨成交量、最密集行权价——用期权成交交叉验证价格判断。**当前是示例数据**并在页头如实标注：项目后端尚无期权链数据源（Yahoo Finance options 对本机 IP 返回 403，akshare 不覆盖美股期权）。页面按真实接口的返回形状写好，接上源即可用。
+
+### 前后端契约对齐修复
+
+对全仓代码审查报告的遗留项逐个核对，修掉 5 处前端与后端口径不一致：
+
+- **`/bars/index` 回退范围**（[StockDialog.vue](web-ui/src/components/StockDialog.vue)）：该接口按设计只接受 6 位 A 股代码（标准协议 + baostock 兜底），前端却在港美股取数失败时也回退到它 → 必然 422。回退改为仅 A 股市场触发，不放宽后端（放宽会把协议边界搅浑）。
+- **120 / 240 分钟 bar 丢 `source`**（[bars.py](src/easy_tdx/web/routers/bars.py) `_resample_pairs`）：重采样只带 OHLCV，来源列被丢掉 → 前端来源徽标在这两个周期恒为空。现保留 `source`。
+- **雷达类型漂移**（[usRadar.ts](web-ui/src/data/usRadar.ts)）：`SignalRow.quality` 改为可选、`theme_trend` 类型与快照实际形状对齐。
+- **`/minute` 丢 `avg_price` / `pre_close`**（[api.ts](web-ui/src/api.ts)、[IntradayChart.vue](web-ui/src/components/IntradayChart.vue)）：后端外盘分时带官方均价与昨收，前端只取 `datetime/price/vol` 全丢了 → 均价线从前端近似 Σprice×vol 算起、y 轴基准还得另打一次 `/quotes`。现两列随载荷透传：均价线优先用行情源官方 VWAP（无该列才回落本地近似），单日 y 轴基准在报价缺失时回落分时自带的昨收；`StockDialog` / `OverseasDashboard` 的 ETF 代理昨收也优先读分时自带值（省一次请求）。
+- **文档漂移**（[overseas.py](src/easy_tdx/web/routers/overseas.py)）：`/overseas/symbols` 的 `keyword` 说明写成「留空返回全部」，实现返回的是空列表——描述已改正（纯文档，随下次后端启动生效）。
+
+**验证**（本轮）：后端 `pytest` **2082 项全绿**（新增 [test_radar_indicators.py](tests/unit/test_radar_indicators.py)、[test_market_gateway.py](tests/unit/test_market_gateway.py)、[test_symbol_index.py](tests/unit/test_symbol_index.py)），`ruff check` / `ruff format --check` 通过、`mypy --strict` 零错误；前端 `vue-tsc` 零错误、node:test **80 项**全过；真机复核 `/us-radar` 各分区出数（5 张指数卡与 8 个缺源区均如预期）。
+
 ## [未发布] — 2026-10-12
 
 ### 代码审查第三轮：回测正确性三项修复 + 一键寻优费率口径补齐

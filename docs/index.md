@@ -49,6 +49,8 @@
 
 - [architecture.md](./architecture.md) — 七层架构图 / 源码树 / 分层要点
 - [development.md](./development.md) — 环境初始化 / 测试 / CI / 发布流程 / 文档规范
+- [code-review.md](./code-review.md) — 全仓代码审查报告（2026-10-12）：数据管线 / 回测 / Web / 指标
+- [CODE_REVIEW_2026-10-18.md](./CODE_REVIEW_2026-10-18.md) — 全仓代码审查报告 · 第三轮（2026-10-18，含探针实证与回归验证）
 
 ## 协议与逆向
 
@@ -97,6 +99,8 @@ indicator-bias-signal
 dzh-indicators
 architecture
 development
+code-review
+CODE_REVIEW_2026-10-18
 packaging
 protocol-reverse-engineering
 protocol-unknown-fields
