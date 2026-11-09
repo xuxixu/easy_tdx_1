@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -18,7 +18,7 @@ _ET = timezone(timedelta(hours=-5))
 
 def _et(y: int, mo: int, d: int, h: int, mi: int = 0) -> datetime:
     """构造"真实美东时钟"时间（夏令按 UTC-4 换算，测试日均为夏令）。"""
-    return datetime(y, mo, d, h, mi, tzinfo=timezone.utc) + timedelta(hours=4)
+    return datetime(y, mo, d, h, mi, tzinfo=UTC) + timedelta(hours=4)
 
 
 def test_us_session_four_states():
@@ -61,7 +61,7 @@ def test_is_us_trading_minutes():
     assert is_us_trading_minutes(datetime(2026, 10, 9, 21, 30, tzinfo=bj)) is True
     assert is_us_trading_minutes(datetime(2026, 10, 9, 21, 29, tzinfo=bj)) is False
     # 冬令：2026-01-15 美东 09:30 = UTC 14:30
-    winter = datetime(2026, 1, 15, 14, 30, tzinfo=timezone.utc)
+    winter = datetime(2026, 1, 15, 14, 30, tzinfo=UTC)
     assert is_us_trading_minutes(winter) is True
     assert is_us_trading_minutes(winter - timedelta(minutes=1)) is False
 

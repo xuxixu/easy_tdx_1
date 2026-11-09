@@ -23,6 +23,7 @@ import { useQuoteStore } from '../stores/quotes'
 import type { Bar, MinutePoint, RankRow } from '../types'
 import IndicatorChips from './IndicatorChips.vue'
 import IntradayChart from './IntradayChart.vue'
+import LoadingState from './LoadingState.vue'
 import StockKline from './StockKline.vue'
 import StockDialog from './StockDialog.vue'
 
@@ -279,7 +280,7 @@ function openMember(r: RankRow) {
                 />
               </template>
             </div>
-            <div v-if="loading" class="chart-msg">加载中…</div>
+            <LoadingState v-if="loading" label="行情加载中…" :lines="4" />
             <template v-else>
               <template v-if="tab === 'minute'">
                 <div v-if="minuteError" class="chart-msg error">分时：{{ minuteError }}</div>
@@ -307,7 +308,7 @@ function openMember(r: RankRow) {
               </button>
             </div>
             <div v-if="membersError" class="chart-msg error">{{ membersError }}</div>
-            <div v-else-if="membersLoading" class="chart-msg">成分股加载中…</div>
+            <LoadingState v-else-if="membersLoading" label="成分股加载中…" compact :lines="3" />
             <div v-else class="members-list">
               <div
                 v-for="(r, i) in members"

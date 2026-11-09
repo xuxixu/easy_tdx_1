@@ -86,7 +86,7 @@ class PortfolioTracker:
         if hasattr(trade_dt, "strftime"):
             try:
                 key: object = int(trade_dt.strftime("%Y%m%d"))
-            except (ValueError, AttributeError):
+            except ValueError, AttributeError:
                 return None
         else:
             key = trade_dt

@@ -410,7 +410,7 @@ def test_baostock_client_not_installed_raises_with_hint(monkeypatch: pytest.Monk
     monkeypatch.setitem(sys.modules, "baostock", None)
     from easy_tdx.sources.baostock import BaostockClient
 
-    with pytest.raises(RuntimeError, match="easy-tdx\[baostock\]"):
+    with pytest.raises(RuntimeError, match=r"easy-tdx\[baostock\]"):
         BaostockClient().get_stock_kline(1, "600519", period="DAILY")
 
 

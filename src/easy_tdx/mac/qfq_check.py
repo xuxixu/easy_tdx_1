@@ -163,7 +163,7 @@ def _xdxr_event_dates(xdxr_df: pd.DataFrame | None) -> list[pd.Timestamp]:
     for v in cat1["date"]:
         try:
             dates.append(pd.Timestamp(str(v)))
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             continue
     return sorted(set(dates))
 

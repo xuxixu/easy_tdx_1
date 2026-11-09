@@ -318,6 +318,71 @@ def test_latest_rank_exhausted(isolated_config, monkeypatch) -> None:
         CcpmClient().latest_rank("IF", max_back=2)
 
 
+def test_latest_rank_budget_caps_per_request_timeout(isolated_config, monkeypatch) -> None:
+    """回溯把「剩余预算」透传成每次 HTTP 的单次超时，且不超过默认 timeout。
+
+    这是 60s 卡死的回归点：旧实现每次请求都固定 self.timeout（15s），
+    16 天回溯最坏 240s；Web 路由的 to_thread 里 wait_for 又取消不了线程。
+    """
+    from easy_tdx.ccpm import CcpmClient, CcpmNoDataError
+    from easy_tdx.ccpm import client as ccpm_client
+
+    seen: list[float] = []
+
+    def fake(url: str, timeout: float) -> str:
+        seen.append(timeout)
+        raise CcpmNoDataError("非交易日")
+
+    monkeypatch.setattr(ccpm_client, "_fetch_xml", fake)
+    c = CcpmClient(timeout=15.0)
+    # 极小预算：第一次拿满，之后 remaining 递减，最终因预算耗尽抛 CcpmError。
+    with pytest.raises(Exception):
+        c.latest_rank("IF", max_back=15, total_timeout=0.05)
+    assert seen, "至少发起过一次请求"
+    assert all(t <= 15.0 for t in seen), "单次超时不得超过默认 timeout"
+    assert seen[-1] <= seen[0], "剩余预算应递减"
+
+
+def test_latest_rank_budget_exhausted_raises_bounded_error(isolated_config, monkeypatch) -> None:
+    """预算耗尽时抛带「预算」字样的 CcpmError（路由会转 503），而非无限等待。"""
+    from easy_tdx.ccpm import CcpmClient, CcpmError, CcpmNoDataError
+    from easy_tdx.ccpm import client as ccpm_client
+
+    def always_no(url: str, timeout: float) -> str:
+        raise CcpmNoDataError("非交易日")
+
+    monkeypatch.setattr(ccpm_client, "_fetch_xml", always_no)
+    # total_timeout=0 → 循环第一次就判定 remaining<=0，一次 HTTP 都不发。
+    c = CcpmClient(timeout=1.0)
+    with pytest.raises(CcpmError, match="预算"):
+        c.latest_rank("IF", max_back=15, total_timeout=0.0)
+
+
+def test_latest_rank_budget_bounds_wall_clock(isolated_config, monkeypatch) -> None:
+    """模拟每天 HTTP 都慢：整体墙钟时间必须落在预算附近，而不是 N×单次耗时。
+
+    fake 按传入的 timeout 参数 sleep（等价于 urllib 真的等这么久才超时），
+    这是「to_thread 内线程会自己结束」这一修复目标的直接证据。
+    """
+    import time
+
+    from easy_tdx.ccpm import CcpmClient, CcpmError, CcpmNoDataError
+    from easy_tdx.ccpm import client as ccpm_client
+
+    def slow(url: str, timeout: float) -> str:
+        time.sleep(timeout)
+        raise CcpmNoDataError("超时后视为非交易日")
+
+    monkeypatch.setattr(ccpm_client, "_fetch_xml", slow)
+    c = CcpmClient(timeout=15.0)
+    t0 = time.monotonic()
+    with pytest.raises(CcpmError, match="预算"):
+        c.latest_rank("IF", max_back=15, total_timeout=0.15)
+    elapsed = time.monotonic() - t0
+    # 预算 0.15s：单次 min(15, remaining) 会吃光预算，随后立刻退出。
+    assert elapsed < 1.0, f"预算未生效，实际耗时 {elapsed:.2f}s"
+
+
 # ---------------------------------------------------------------------------
 # Web 路由
 # ---------------------------------------------------------------------------

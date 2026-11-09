@@ -5,6 +5,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { fetchLimitUpEcology, fetchSymbolName, fetchVipdocSetting, formatError, saveVipdocSetting } from '../api'
+import LoadingState from '../components/LoadingState.vue'
 import StockDialog from '../components/StockDialog.vue'
 import type { LimitUpEntry } from '../types'
 
@@ -192,7 +193,11 @@ function pctClass(pct: number): string {
       加载失败：{{ error }}
       <button @click="load">重试</button>
     </div>
-    <div v-else-if="loading" class="loading">扫描本地 vipdoc 日线（全市场，约需数秒）…</div>
+    <LoadingState
+      v-else-if="loading"
+      label="扫描本地 vipdoc 日线…"
+      hint="全市场离线回算连板/首板/炸板/跌停，约需数秒"
+    />
 
     <template v-else-if="resp">
       <div v-if="resp.total === 0" class="err card">

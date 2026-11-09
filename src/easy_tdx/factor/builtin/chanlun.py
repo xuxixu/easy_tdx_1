@@ -97,7 +97,7 @@ class ChanlunMMD(Factor):
                 mmd_index = getattr(k, "k_index", -1)
                 try:
                     mmd_index = int(mmd_index)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
                 value = self._MMD_MAP.get(str(mmd_type), 0.0)
                 if 0 <= mmd_index < len(df):

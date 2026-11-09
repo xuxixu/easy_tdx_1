@@ -23,7 +23,7 @@ def parse_financial_file_list(data: bytes) -> list[tuple[str, str, int]]:
         if len(parts) >= 3:
             try:
                 size = int(parts[2])
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 continue
             results.append((parts[0], parts[1], size))
     return results

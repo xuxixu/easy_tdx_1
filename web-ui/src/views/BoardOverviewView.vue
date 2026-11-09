@@ -15,6 +15,7 @@ import BoardDialog from '../components/BoardDialog.vue'
 import BoardRankRail from '../components/BoardRankRail.vue'
 import BoardStatStrip from '../components/BoardStatStrip.vue'
 import BoardTiles from '../components/BoardTiles.vue'
+import LoadingState from '../components/LoadingState.vue'
 import type { BoardFlipEvent, BoardOverviewRow, MarketStat } from '../types'
 
 const props = defineProps<{
@@ -293,7 +294,7 @@ function openBoard(r: BoardOverviewRow) {
       加载失败：{{ error }}
       <button @click="refreshAll">重试</button>
     </div>
-    <div v-else-if="loading" class="loading">板块数据加载中…</div>
+    <LoadingState v-else-if="loading" label="板块数据加载中…" hint="拉取行业/概念板块行情与资金流" />
 
     <!-- 主区 + 右栏 -->
     <div v-show="!error && !loading" class="content">

@@ -7,6 +7,7 @@ import { fetchCcpmProducts, fetchCcpmRank, formatError } from '../api'
 import { createSeqGuard } from '../utils/asyncGuard'
 import type { CcpmProductMeta, CcpmRankResponse, CcpmRankRow } from '../types'
 import HelpCollapse from '../components/HelpCollapse.vue'
+import LoadingState from '../components/LoadingState.vue'
 import RiskDisclaimer from '../components/RiskDisclaimer.vue'
 
 const products = ref<CcpmProductMeta[]>([])
@@ -194,7 +195,11 @@ const dayLabel = computed(() => {
       <span v-if="!autoDate" class="err-tip">（可勾选「自动取最近交易日」自动回溯）</span>
     </div>
 
-    <div v-if="!error && loading" class="empty">采集中，正在从中金所官网拉取…</div>
+    <LoadingState
+      v-if="!error && loading"
+      label="正在采集中金所数据…"
+      hint="首次采集会实时抓取官网，通常数秒；同日再次查看走本地缓存"
+    />
 
     <template v-if="resp && !loading">
       <div class="result-head">

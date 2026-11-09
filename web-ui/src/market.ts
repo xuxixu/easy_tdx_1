@@ -262,6 +262,77 @@ export function toHhmm(dt: string): string {
 }
 
 /**
+ * 分时图 x 轴刻度的取样参数。
+ */
+export interface HourTickOptions {
+  /** 绘图区宽度（px，扣掉左右轴标签后的可用宽度）。 */
+  plotWidth: number
+  /** 单档 "hh:mm" 的估算文字宽度（px）。 */
+  labelWidth: number
+  /** 刻度数硬上限（含首尾），默认 7。 */
+  maxTicks?: number
+}
+
+/**
+ * 分时图 x 轴刻度取样：以「整点」为锚，返回**点的索引**。
+ *
+ * 为什么按整点而不是固定索引：各市场分时点数与时段都不同（A 股 240 点
+ * 09:30-14:59、港股 330 点 09:30-15:59 且午休断开、美股 390 点北京时间
+ * 22:30-04:59 跨零点）。旧实现写死 ``[0, 60, 120, 121, 180, 239]`` 只对
+ * A 股成立，港股/美股会落到毫无意义的分钟上。整点取样天然适配任何时段。
+ *
+ * 两条硬约束：
+ * 1. 首尾两个点必留——开盘价与最新价的位置必须有时间参照；
+ * 2. 相邻刻度至少隔一个 ``labelWidth``——否则窄图里 "hh:mm" 会叠成一团。
+ *    整点候选并不等距：美股首点 22:30 与次档 23:00 只差半小时，按等距
+ *    抽稀后仍可能撞上，故先按 ``maxTicks`` 抽稀、再按像素间距剔除。
+ *
+ * @param times 已归一化的 ``HH:MM`` 序列（见 :func:`toHhmm`）。
+ */
+export function pickHourTicks(times: string[], opts: HourTickOptions): number[] {
+  const n = times.length
+  if (n === 0) return []
+  const last = n - 1
+  const cands = [0]
+  for (let i = 1; i <= last; i++) {
+    if (times[i].endsWith(':00')) cands.push(i)
+  }
+  if (cands[cands.length - 1] !== last) cands.push(last)
+
+  const cap = Math.max(2, Math.floor(opts.maxTicks ?? 7))
+  let picked = cands
+  if (cands.length > cap) {
+    if (cap === 2) {
+      picked = [cands[0], cands[cands.length - 1]]
+    } else {
+      // 在候选里等距取 cap 个：按比例舍入，两端必被取到。
+      const step = (cands.length - 1) / (cap - 1)
+      picked = []
+      for (let k = 0; k < cap; k++) {
+        const idx = cands[Math.round(k * step)]
+        if (picked[picked.length - 1] !== idx) picked.push(idx)
+      }
+    }
+  }
+
+  // 像素间距过滤：末点优先（挤到前一个时顶掉前一个），首点始终保留。
+  const pxPerIdx = last > 0 ? opts.plotWidth / last : opts.plotWidth
+  const minGapPx = opts.labelWidth + 8
+  const out = [picked[0]]
+  for (let k = 1; k < picked.length; k++) {
+    const idx = picked[k]
+    const isLast = idx === picked[picked.length - 1] && k === picked.length - 1
+    if ((idx - out[out.length - 1]) * pxPerIdx < minGapPx) {
+      if (isLast && out.length > 1) out[out.length - 1] = idx
+      continue
+    }
+    out.push(idx)
+  }
+  return out
+}
+
+
+/**
  * 各市场看板默认展示的指数。
  *
  * 沪/深默认上证指数（深市沿用上证作为大盘代表）；北交所北证50；

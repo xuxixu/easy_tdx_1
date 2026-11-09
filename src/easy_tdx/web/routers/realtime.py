@@ -86,7 +86,7 @@ async def realtime_websocket(websocket: WebSocket, symbol: str) -> None:
         while True:
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=_HEARTBEAT_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 _enqueue({"type": "ping"})
                 continue
 

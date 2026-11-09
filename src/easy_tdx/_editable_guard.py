@@ -40,7 +40,7 @@ site-packages 里的静态资源碎片，源码全部不可达（所以 easy_tdx
     pip uninstall easy-tdx -y && pip install -e . --no-deps
 
 若以上排查不符合你的情况，请带报错提 issue：
-    https://github.com/handsomejustin/easy_tdx/issues
+    https://github.com/xuxixu/easy_tdx_1/issues
 """
 
 

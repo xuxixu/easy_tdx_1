@@ -10,6 +10,7 @@ import AiInterpretModal from '../components/AiInterpretModal.vue'
 import EquityChart from '../components/EquityChart.vue'
 import EvaluatePanel from '../components/EvaluatePanel.vue'
 import GradeDetails from '../components/GradeDetails.vue'
+import LoadingState from '../components/LoadingState.vue'
 import MetricTable from '../components/MetricTable.vue'
 import PortfolioCompareChart from '../components/PortfolioCompareChart.vue'
 import PortfolioSummaryTable from '../components/PortfolioSummaryTable.vue'
@@ -258,7 +259,7 @@ const portfolioTrades = computed<PortfolioTrade[]>(() => {
           v-model:params="params"
           :strategies="store.strategies"
         />
-        <p v-else class="loading-text">加载策略中…</p>
+        <LoadingState v-else label="策略列表加载中…" compact :lines="2" />
       </section>
 
       <section class="panel-section">
@@ -397,9 +398,13 @@ const portfolioTrades = computed<PortfolioTrade[]>(() => {
           class="report-section"
         >
           <h3>Walk-Forward 样本外验证</h3>
-          <p v-if="store.portfolioWfRunning" class="loading-text">
-            验证中…（标的数 × 窗口数 次回测，约需十几秒）
-          </p>
+          <LoadingState
+            v-if="store.portfolioWfRunning"
+            label="Walk-Forward 验证中…"
+            hint="标的数 × 窗口数 次回测，约需十几秒"
+            compact
+            :lines="2"
+          />
           <div v-else-if="store.portfolioWfError" class="error-banner">
             ⚠ {{ store.portfolioWfError }}
           </div>
@@ -414,9 +419,13 @@ const portfolioTrades = computed<PortfolioTrade[]>(() => {
           class="report-section"
         >
           <h3>一条龙评估</h3>
-          <p v-if="store.portfolioEvaluateRunning" class="loading-text">
-            评估中…（组合回测 + 组合WF + 跨标的适配性 + 基准对比，可能需要一两分钟）
-          </p>
+          <LoadingState
+            v-if="store.portfolioEvaluateRunning"
+            label="一条龙评估中…"
+            hint="组合回测 + 组合WF + 跨标的适配性 + 基准对比，可能需要一两分钟"
+            compact
+            :lines="2"
+          />
           <div v-else-if="store.portfolioEvaluateError" class="error-banner">
             ⚠ {{ store.portfolioEvaluateError }}
           </div>

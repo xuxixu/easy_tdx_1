@@ -84,7 +84,7 @@ def _num(v: Any, digits: int | None = None) -> float | None:
         return None
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not np.isfinite(f):
         return None
@@ -147,8 +147,13 @@ def _rsi_cls(m: ind.SymbolMetrics) -> str:
 _CONS_FIELDS: Final = ("close", "d1", "w1", "m1", "rsi", "vol_ratio", "trend", "aligned")
 
 
-def _cons_row(u: uni.Universe, met: dict[str, ind.SymbolMetrics], frames: dict[str, pd.DataFrame],
-              t: str, fields: tuple[str, ...]) -> dict[str, Any]:
+def _cons_row(
+    u: uni.Universe,
+    met: dict[str, ind.SymbolMetrics],
+    frames: dict[str, pd.DataFrame],
+    t: str,
+    fields: tuple[str, ...],
+) -> dict[str, Any]:
     """下钻成分行：总表指标的一个子集 + 信号 + 题材。"""
     m = met[t]
     row: dict[str, Any] = {"ticker": t, "theme": u.theme_of.get(t, "")}
@@ -218,12 +223,16 @@ def _build_indices() -> tuple[list[dict[str, Any]], list[str]]:
             missing.append(name)
             continue
         row = _quote_row(f"^{display.lstrip('^')}", name, m)
-        row.update({
-            "from_hi": _num(m.from_hi, 1),
-            "above50": m.above50,
-            "rsi": _num(m.rsi),
-            "ma50_dist": _num((m.close / m.ma50 - 1.0) * 100.0, 2) if np.isfinite(m.ma50) else None,
-        })
+        row.update(
+            {
+                "from_hi": _num(m.from_hi, 1),
+                "above50": m.above50,
+                "rsi": _num(m.rsi),
+                "ma50_dist": _num((m.close / m.ma50 - 1.0) * 100.0, 2)
+                if np.isfinite(m.ma50)
+                else None,
+            }
+        )
         out.append(row)
     return out, missing
 
@@ -254,12 +263,16 @@ def _build_sectors(
             cons.append(_cons_row(u, met, frames, t, _CONS_FIELDS))
         cons.sort(key=lambda r: _sort_desc(r, "m1"))
         row = _quote_row(code, name, m)
-        row.update({
-            "above50": m.above50,
-            "from_hi": _num(m.from_hi, 1),
-            "rs_1m": _num(m.m1 - spy_m1) if (np.isfinite(m.m1) and np.isfinite(spy_m1)) else None,
-            "constituents": cons,
-        })
+        row.update(
+            {
+                "above50": m.above50,
+                "from_hi": _num(m.from_hi, 1),
+                "rs_1m": _num(m.m1 - spy_m1)
+                if (np.isfinite(m.m1) and np.isfinite(spy_m1))
+                else None,
+                "constituents": cons,
+            }
+        )
         out.append(row)
     return out
 
@@ -303,20 +316,22 @@ def _build_subsectors(
         cons = [_cons_row(u, met, frames, t, _CONS_FIELDS) for t in present]
         cons.sort(key=lambda r: _sort_desc(r, "w1"))
 
-        rows.append({
-            "name": name,
-            "n": len(present),
-            "d1": _num(_med(d1)),
-            "w1": _num(_med(w1)),
-            "m1": _num(_med(m1)),
-            "m3": _num(_med(m3)),
-            "trend_pct": _num(trend_n / len(present) * 100.0, 1),
-            "aligned_pct": _num(aligned_n / len(present) * 100.0, 1),
-            "vol_ratio": _num(_med(vols)),
-            "leaders": [{"ticker": t, "w1": _num(met[t].w1)} for t in lead[:3]],
-            "laggers": [{"ticker": t, "w1": _num(met[t].w1)} for t in reversed(lead[-3:])],
-            "constituents": cons,
-        })
+        rows.append(
+            {
+                "name": name,
+                "n": len(present),
+                "d1": _num(_med(d1)),
+                "w1": _num(_med(w1)),
+                "m1": _num(_med(m1)),
+                "m3": _num(_med(m3)),
+                "trend_pct": _num(trend_n / len(present) * 100.0, 1),
+                "aligned_pct": _num(aligned_n / len(present) * 100.0, 1),
+                "vol_ratio": _num(_med(vols)),
+                "leaders": [{"ticker": t, "w1": _num(met[t].w1)} for t in lead[:3]],
+                "laggers": [{"ticker": t, "w1": _num(met[t].w1)} for t in reversed(lead[-3:])],
+                "constituents": cons,
+            }
+        )
     rows.sort(key=lambda r: _sort_desc(r, "w1"))
     return rows
 
@@ -332,18 +347,20 @@ def _build_watchlist(
         if not m:
             continue
         row = _metrics_fields(m)
-        row.update({
-            "ticker": t,
-            "theme": u.theme_of.get(t, ""),
-            "gics": u.gics_of.get(t, ""),
-            "signals": sigs_for(t, frames),
-            "quality": "",
-            "quality_score": None,
-            "quality_flags": "",
-            "inst": None,
-            "short": None,
-            "rs_1m": None,
-        })
+        row.update(
+            {
+                "ticker": t,
+                "theme": u.theme_of.get(t, ""),
+                "gics": u.gics_of.get(t, ""),
+                "signals": sigs_for(t, frames),
+                "quality": "",
+                "quality_score": None,
+                "quality_flags": "",
+                "inst": None,
+                "short": None,
+                "rs_1m": None,
+            }
+        )
         rows.append(row)
     return rows
 
@@ -355,8 +372,13 @@ def _build_exits(
 ) -> dict[str, Any]:
     """12 兑现 / 风控信号：按规则把池子分进七档。"""
     groups: dict[str, Any] = {
-        "overext": [], "dist_candle": [], "breakdown_vol": [], "panic_watch": [],
-        "breakout_vol": [], "breakout_weak": [], "lost_ma5": [],
+        "overext": [],
+        "dist_candle": [],
+        "breakdown_vol": [],
+        "panic_watch": [],
+        "breakout_vol": [],
+        "breakout_weak": [],
+        "lost_ma5": [],
     }
     for t in u.equities:
         m = met.get(t)
@@ -413,7 +435,7 @@ def _build_left(u: uni.Universe, met: dict[str, ind.SymbolMetrics]) -> dict[str,
         "buy_spec": [],
         "watch": watch,
         "rule": "左侧买点 = 上升趋势 + 距规律支撑簇(6个月局部低点、触碰≥2) ≤3% + 质地合格；"
-                "本轮质地项因无基本面源未参与，故买点列表为「未做质地过滤」的宽松集合。",
+        "本轮质地项因无基本面源未参与，故买点列表为「未做质地过滤」的宽松集合。",
         "conclusion": f"回踩到位 {len(buy)} 只、观察梯队 {len(watch)} 只；失效位取支撑价下方 3%。",
     }
 
@@ -440,17 +462,19 @@ def _build_themes(u: uni.Universe, met: dict[str, ind.SymbolMetrics]) -> list[di
             key=lambda t: -(met[t].m1 if np.isfinite(met[t].m1) else -999),
         )
         trend_pct = sum(1.0 if met[t].trend else 0.0 for t in present) / len(present) * 100.0
-        rows.append({
-            "theme": name,
-            "n": len(present),
-            "w1": _med("w1"),
-            "m1": _med("m1"),
-            "m3": _med("m3"),
-            "up_ratio": _num(trend_pct, 1),
-            "leaders": by_m1[:3],
-            "laggers": by_m1[-2:][::-1],
-            "tickers": present,
-        })
+        rows.append(
+            {
+                "theme": name,
+                "n": len(present),
+                "w1": _med("w1"),
+                "m1": _med("m1"),
+                "m3": _med("m3"),
+                "up_ratio": _num(trend_pct, 1),
+                "leaders": by_m1[:3],
+                "laggers": by_m1[-2:][::-1],
+                "tickers": present,
+            }
+        )
     return rows
 
 
@@ -463,14 +487,16 @@ def _build_anomalies(u: uni.Universe, met: dict[str, ind.SymbolMetrics]) -> list
             continue
         if not np.isfinite(m.d1) or abs(m.d1) < 3.0:
             continue
-        rows.append({
-            "ticker": t,
-            "theme": u.theme_of.get(t, ""),
-            "close": _num(m.close, 2),
-            "d1": _num(m.d1),
-            "vol_ratio": _num(m.vol_ratio),
-            "signals": sigs_for(t, {}),
-        })
+        rows.append(
+            {
+                "ticker": t,
+                "theme": u.theme_of.get(t, ""),
+                "close": _num(m.close, 2),
+                "d1": _num(m.d1),
+                "vol_ratio": _num(m.vol_ratio),
+                "signals": sigs_for(t, {}),
+            }
+        )
     rows.sort(key=lambda r: _sort_desc(r, "d1"))
     return rows
 
@@ -498,11 +524,15 @@ def _build_crowding(u: uni.Universe, met: dict[str, ind.SymbolMetrics]) -> list[
         avg_vol = float(np.mean(vol)) if vol else float("nan")
 
         # 三项分位各占 1/3
-        score = float(np.mean([
-            _pctile(m3, avg_m3) if m3 else 50.0,
-            trend_pct,
-            min(avg_vol / 2.0, 1.0) * 100.0,
-        ]))
+        score = float(
+            np.mean(
+                [
+                    _pctile(m3, avg_m3) if m3 else 50.0,
+                    trend_pct,
+                    min(avg_vol / 2.0, 1.0) * 100.0,
+                ]
+            )
+        )
         if score >= 75:
             state = "极高"
         elif score >= 60:
@@ -512,22 +542,24 @@ def _build_crowding(u: uni.Universe, met: dict[str, ind.SymbolMetrics]) -> list[
         else:
             state = "低"
         lead = sorted(present, key=lambda t: -(met[t].m3 if np.isfinite(met[t].m3) else -999))
-        rows.append({
-            "theme": name,
-            "n": len(present),
-            "inst_n": 0,
-            "inst_pct": None,
-            "high_inst_share": None,
-            "m3": _num(avg_m3),
-            "trend_pct": _num(trend_pct, 1),
-            "vol_ratio": _num(avg_vol),
-            "crowding": _num(score, 1),
-            "state": state,
-            "quality_n": 0,
-            "spec_n": 0,
-            "leaders": [t for t in lead[:3]],
-            "tickers": present,
-        })
+        rows.append(
+            {
+                "theme": name,
+                "n": len(present),
+                "inst_n": 0,
+                "inst_pct": None,
+                "high_inst_share": None,
+                "m3": _num(avg_m3),
+                "trend_pct": _num(trend_pct, 1),
+                "vol_ratio": _num(avg_vol),
+                "crowding": _num(score, 1),
+                "state": state,
+                "quality_n": 0,
+                "spec_n": 0,
+                "leaders": [t for t in lead[:3]],
+                "tickers": present,
+            }
+        )
     rows.sort(key=lambda r: _sort_desc(r, "crowding"))
     return rows
 
@@ -552,18 +584,20 @@ def _build_divergence(subs: list[dict[str, Any]]) -> dict[str, Any]:
         wa, wb = ra["w1"], rb["w1"]
         sp1 = (da - db) if (da is not None and db is not None) else None
         sp2 = (wa - wb) if (wa is not None and wb is not None) else None
-        fired = bool(
-            (sp1 is not None and abs(sp1) >= 4.0) or (sp2 is not None and abs(sp2) >= 5.0)
+        fired = bool((sp1 is not None and abs(sp1) >= 4.0) or (sp2 is not None and abs(sp2) >= 5.0))
+        rows.append(
+            {
+                "name": f"{a} vs {b}",
+                "a_label": a,
+                "b_label": b,
+                "a_d1": da,
+                "b_d1": db,
+                "spread1": _num(sp1),
+                "spread2": _num(sp2),
+                "fired": fired,
+                "direction": "A强于B" if (sp1 or 0) > 0 else "B强于A",
+            }
         )
-        rows.append({
-            "name": f"{a} vs {b}",
-            "a_label": a, "b_label": b,
-            "a_d1": da, "b_d1": db,
-            "spread1": _num(sp1),
-            "spread2": _num(sp2),
-            "fired": fired,
-            "direction": "A强于B" if (sp1 or 0) > 0 else "B强于A",
-        })
     return {
         "rule": "同一板块/产业链内两组标的：日收益差 ≥4 个百分点，或两日累计差 ≥5 个百分点触发。",
         "rows": rows,
@@ -622,13 +656,21 @@ def build_snapshot(
         m = met.get(t)
         if not m:
             continue
-        daily_rows.append({
-            "ticker": t, "close": _num(m.close, 2),
-            "d1": _num(m.d1), "w1": _num(m.w1),
-            "ma5": _num(m.ma5, 1), "ma20": _num(m.ma20, 1), "ma50": _num(m.ma50, 1),
-            "rsi": _num(m.rsi), "aligned": m.aligned,
-            "from_hi": _num(m.from_hi, 1), "vol_ratio": _num(m.vol_ratio),
-        })
+        daily_rows.append(
+            {
+                "ticker": t,
+                "close": _num(m.close, 2),
+                "d1": _num(m.d1),
+                "w1": _num(m.w1),
+                "ma5": _num(m.ma5, 1),
+                "ma20": _num(m.ma20, 1),
+                "ma50": _num(m.ma50, 1),
+                "rsi": _num(m.rsi),
+                "aligned": m.aligned,
+                "from_hi": _num(m.from_hi, 1),
+                "vol_ratio": _num(m.vol_ratio),
+            }
+        )
 
     watchlist = _build_watchlist(u, met, frames)
     exits_rows = _build_exits(u, met, frames)
@@ -639,40 +681,58 @@ def build_snapshot(
 
     # 13 焦点个股：只填可算的形态栏；期权与基本面留 null
     focus_names = {
-        "INTC": "Intel Corporation", "AMD": "Advanced Micro Devices, Inc.",
-        "META": "Meta Platforms, Inc.", "NVDA": "NVIDIA Corporation",
+        "INTC": "Intel Corporation",
+        "AMD": "Advanced Micro Devices, Inc.",
+        "META": "Meta Platforms, Inc.",
+        "NVDA": "NVIDIA Corporation",
     }
     focus_pick = [t for t in ("INTC", "AMD", "META", "NVDA") if t in met][:4]
     focus_stocks = []
     for t in focus_pick:
         m = met[t]
-        focus_stocks.append({
-            "ticker": t,
-            "name": focus_names.get(t, t),
-            "reason": "池内代表（按成交额/波动择取）",
-            "signals": sigs_for(t, frames),
-            "price": {
-                "close": _num(m.close, 2), "d1": _num(m.d1), "w1": _num(m.w1),
-                "m1": _num(m.m1), "m3": _num(m.m3),
-                "from_hi": _num(m.from_hi, 1), "vol_ratio": _num(m.vol_ratio),
-            },
-            "technicals": {
-                "ma20": _num(m.ma20, 2), "ma50": _num(m.ma50, 2), "above50": m.above50,
-                "hi20": _num(m.hi20, 2), "dist_hi20": _num((m.close / m.hi20 - 1.0) * 100.0, 2)
-                if np.isfinite(m.hi20) else None,
-                "text": f"收盘 {m.close:.2f}，MA50 {'上方' if m.above50 else '下方'}；"
-                        f"RSI {m.rsi:.1f}，量比 {m.vol_ratio:.2f}，"
-                        f"距6月高点 {m.from_hi:.1f}%。",
-            },
-            "options": None,
-            "fundamentals": {
-                "fwd_pe": None, "target_mean": None, "target_range": "", "analysts": "",
-                "mktcap": "", "rev_growth": "", "margin_note": "", "short_pct": None,
-            },
-            "catalysts": [],
-            "risks": [],
-            "conclusion": "",
-        })
+        focus_stocks.append(
+            {
+                "ticker": t,
+                "name": focus_names.get(t, t),
+                "reason": "池内代表（按成交额/波动择取）",
+                "signals": sigs_for(t, frames),
+                "price": {
+                    "close": _num(m.close, 2),
+                    "d1": _num(m.d1),
+                    "w1": _num(m.w1),
+                    "m1": _num(m.m1),
+                    "m3": _num(m.m3),
+                    "from_hi": _num(m.from_hi, 1),
+                    "vol_ratio": _num(m.vol_ratio),
+                },
+                "technicals": {
+                    "ma20": _num(m.ma20, 2),
+                    "ma50": _num(m.ma50, 2),
+                    "above50": m.above50,
+                    "hi20": _num(m.hi20, 2),
+                    "dist_hi20": _num((m.close / m.hi20 - 1.0) * 100.0, 2)
+                    if np.isfinite(m.hi20)
+                    else None,
+                    "text": f"收盘 {m.close:.2f}，MA50 {'上方' if m.above50 else '下方'}；"
+                    f"RSI {m.rsi:.1f}，量比 {m.vol_ratio:.2f}，"
+                    f"距6月高点 {m.from_hi:.1f}%。",
+                },
+                "options": None,
+                "fundamentals": {
+                    "fwd_pe": None,
+                    "target_mean": None,
+                    "target_range": "",
+                    "analysts": "",
+                    "mktcap": "",
+                    "rev_growth": "",
+                    "margin_note": "",
+                    "short_pct": None,
+                },
+                "catalysts": [],
+                "risks": [],
+                "conclusion": "",
+            }
+        )
 
     # 17 周期复盘：这是本轮唯一「完全实算」的判读区
     scannable = {k: v for k, v in frames.items() if k in met}
@@ -683,17 +743,26 @@ def build_snapshot(
         out = []
         for h in hits:
             n = h.samples - h.pending
-            out.append({
-                "signal": h.signal,
-                "samples": h.samples,
-                "pending": h.pending,
-                "avg5": _num(h.avg5), "med5": _num(h.med5), "hit5": _num(h.hit5, 1),
-                "direction": h.direction,
-                "ci": _num(h.ci, 1),
-                "avg10": _num(h.avg10), "med10": _num(h.med10), "hit10": _num(h.hit10, 1),
-                "note": (f"样本仅 {n} 次，95%置信±{abs(h.ci):.0f}pp，读数仅供参考"
-                         if 0 < n < sig.MIN_SAMPLE else ""),
-            })
+            out.append(
+                {
+                    "signal": h.signal,
+                    "samples": h.samples,
+                    "pending": h.pending,
+                    "avg5": _num(h.avg5),
+                    "med5": _num(h.med5),
+                    "hit5": _num(h.hit5, 1),
+                    "direction": h.direction,
+                    "ci": _num(h.ci, 1),
+                    "avg10": _num(h.avg10),
+                    "med10": _num(h.med10),
+                    "hit10": _num(h.hit10, 1),
+                    "note": (
+                        f"样本仅 {n} 次，95%置信±{abs(h.ci):.0f}pp，读数仅供参考"
+                        if 0 < n < sig.MIN_SAMPLE
+                        else ""
+                    ),
+                }
+            )
         return out
 
     trend_total = sum(1 for m in met.values() if m.above50)
@@ -709,21 +778,27 @@ def build_snapshot(
             "builtAt": datetime.now().strftime("%Y-%m-%d"),
             "delay": "日线为官方收盘，次日构建",
             "universe": f"观测池 {len(watchlist)} 只（实算）+ {len(failed)} 只取数失败；"
-                        f"板块 ETF {len(sectors)} 个 + 宏观 ETF {len(macro)} 个",
+            f"板块 ETF {len(sectors)} 个 + 宏观 ETF {len(macro)} 个",
             "degraded": degraded,
             "failed_symbols": failed,
             "source": "新浪日线（akshare stock_us_daily）+ 新浪真指数（akshare）",
         },
         "regime": {
             "summary": f"{as_of_str} 收盘：{len(gainers[:3])} 只领涨、"
-                       f"{len([m for m in met.values() if m.aligned])} 只多头排列。",
+            f"{len([m for m in met.values() if m.aligned])} 只多头排列。",
             "stance": f"池内 {above50_pct:.0f}% 标的站上 MA50（上升趋势口径）。",
             "breadth": f"{trend_total}/{len(met)} 只站上 MA50。",
         },
         "index": idx_rows,
         "tnx": {
-            "ticker": "TNX", "name": "10Y美债收益率", "close": None,
-            "d1": None, "w1": None, "m1": None, "m3": None, "vol_ratio": None,
+            "ticker": "TNX",
+            "name": "10Y美债收益率",
+            "close": None,
+            "d1": None,
+            "w1": None,
+            "m1": None,
+            "m3": None,
+            "vol_ratio": None,
         },
         "macro": macro,
         "sectors": sectors,
@@ -738,7 +813,8 @@ def build_snapshot(
             "conclusion": "；".join(
                 f"{r['ticker']} {r['close']:.2f}（日 {r['d1']:+.2f}% / 周 {r['w1']:+.2f}%，"
                 f"{'多头排列' if r['aligned'] else '均线未排齐'}）"
-                for r in daily_rows if r["close"] is not None
+                for r in daily_rows
+                if r["close"] is not None
             ),
             "playbook": "",
         },
@@ -747,11 +823,18 @@ def build_snapshot(
         "theme_trend": {
             "rows": [
                 {
-                    "theme": th["theme"], "n": th["n"],
-                    "state": "上升" if (th["up_ratio"] or 0) >= 60 else
-                             "下行" if (th["up_ratio"] or 100) < 40 else "震荡",
-                    "w1": th["w1"], "pct_trend": th["up_ratio"], "pct_aligned": th["up_ratio"],
-                    "leaders": th["leaders"], "tickers": th["tickers"],
+                    "theme": th["theme"],
+                    "n": th["n"],
+                    "state": "上升"
+                    if (th["up_ratio"] or 0) >= 60
+                    else "下行"
+                    if (th["up_ratio"] or 100) < 40
+                    else "震荡",
+                    "w1": th["w1"],
+                    "pct_trend": th["up_ratio"],
+                    "pct_aligned": th["up_ratio"],
+                    "leaders": th["leaders"],
+                    "tickers": th["tickers"],
                 }
                 for th in themes
             ],
@@ -797,8 +880,12 @@ def build_snapshot(
         "subsectors": "ok" if subs else "empty",
         "watchlist": "ok" if watchlist else "empty",
         "review": "ok" if stats_main else "empty",
-        "options": "degraded", "quality": "degraded", "news": "degraded",
-        "congress": "degraded", "geo_oil": "degraded", "drivers": "degraded",
+        "options": "degraded",
+        "quality": "degraded",
+        "news": "degraded",
+        "congress": "degraded",
+        "geo_oil": "degraded",
+        "drivers": "degraded",
     }
     report = BuildReport(
         as_of=as_of_str,

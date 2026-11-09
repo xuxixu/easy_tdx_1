@@ -9,6 +9,7 @@ import BoardDialog from '../components/BoardDialog.vue'
 import HotspotCorrelation from '../components/HotspotCorrelation.vue'
 import HotspotMatrix from '../components/HotspotMatrix.vue'
 import HotspotStatStrip from '../components/HotspotStatStrip.vue'
+import LoadingState from '../components/LoadingState.vue'
 import type { HotspotResp, HotspotRow } from '../types'
 
 // boardType 可由路由 props 注入（/styles → FG 风格轮动），页内仍可自由切换
@@ -310,7 +311,7 @@ function openBoard(r: HotspotRow) {
       <button @click="load(true)">重试</button>
     </div>
 
-    <div v-else-if="loading" class="loading">加载中…</div>
+    <LoadingState v-else-if="loading" label="热点矩阵加载中…" />
 
     <!-- 主区：统计卡 + 图例 + 矩阵 / 相关性 -->
     <template v-else-if="resp && viewMode === 'matrix'">

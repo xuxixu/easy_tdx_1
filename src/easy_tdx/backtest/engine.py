@@ -318,7 +318,7 @@ class BacktestEngine:
             """把 index 标签换算成位置索引；无法换算时返回 None。"""
             try:
                 return int(df.index.get_loc(label))
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 return None
 
         try:
@@ -327,7 +327,7 @@ class BacktestEngine:
                 pos = _to_pos(mask.idxmax())
                 if pos is not None:
                     return pos
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
         if hasattr(dt_col, "dt"):
             dt_ints = dt_col.dt.strftime("%Y%m%d").astype(int)

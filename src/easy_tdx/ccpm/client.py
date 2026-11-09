@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -262,9 +263,16 @@ class CcpmClient:
         df = client.latest_rank("IF")             # 自动回溯最近有数据的交易日
     """
 
-    def __init__(self, *, timeout: float = 15.0, use_cache: bool = True) -> None:
+    def __init__(
+        self, *, timeout: float = 15.0, use_cache: bool = True, total_timeout: float = 20.0
+    ) -> None:
         self.timeout = timeout
         self.use_cache = use_cache
+        # 自动回溯（latest_rank）的整体时间预算。官网非交易日会 302，逐日回溯
+        # 最多 16 次、每次 HTTP 最长 self.timeout 秒，最坏可拖到 240s——Web 路由
+        # 把这段放在 asyncio.to_thread 里，超时后线程仍会继续跑（wait_for 取消不了
+        # 线程），所以必须在**线程内部**用「剩余预算」约束每一次请求，线程才会真结束。
+        self.total_timeout = total_timeout
 
     def get_rank(
         self,
@@ -272,6 +280,7 @@ class CcpmClient:
         trade_date: str | date | datetime | None = None,
         *,
         refresh: bool = False,
+        timeout: float | None = None,
     ) -> pd.DataFrame:
         """获取某品种某交易日的成交持仓排名（前 20 名会员 × 全部合约）。
 
@@ -298,8 +307,10 @@ class CcpmClient:
                 yyyymm=d.strftime("%Y%m"), dd=d.strftime("%d"), product=meta.code
             )
             try:
-                rows = parse_xml(_fetch_xml(url, self.timeout))
-            except (CcpmError, CcpmNoDataError):
+                # timeout 由 latest_rank 按「剩余总预算」传入；单次调用（get_rank
+                # 或 CLI 指定日期）仍用 self.timeout，行为不变。
+                rows = parse_xml(_fetch_xml(url, timeout if timeout is not None else self.timeout))
+            except CcpmError, CcpmNoDataError:
                 raise
             except Exception as e:  # noqa: BLE001 — HTTP/网络统一转领域异常
                 raise CcpmError(f"中金所 ccpm 抓取失败: {e}") from e
@@ -308,21 +319,51 @@ class CcpmClient:
         return pd.DataFrame(rows, columns=WIDE_COLUMNS)
 
     def latest_rank(
-        self, product: str, *, max_back: int = 15, refresh: bool = False
+        self,
+        product: str,
+        *,
+        max_back: int = 15,
+        refresh: bool = False,
+        total_timeout: float | None = None,
     ) -> pd.DataFrame:
         """自动回溯到最近一个有数据的交易日（从今天起最多往回找 ``max_back`` 天）。
 
         节假日/周末/当日未发布（约 16:15 前）会自然回退到上一交易日，
         春节等长假（≤8 个自然日）也在默认回溯范围内。
+
+        整个回溯受 ``total_timeout`` 秒预算约束：剩余预算会作为每次 HTTP 的
+        单次超时传入，保证 **线程内部** 也能及时结束（Web 路由把本方法放在
+        ``asyncio.to_thread`` 里，外部 ``wait_for`` 超时并不能终止线程）。
+        预算耗尽抛 :class:`CcpmError`，由路由统一转 503，页面不再无限转圈。
         """
+        budget = self.total_timeout if total_timeout is None else total_timeout
+        deadline = time.monotonic() + budget
         d = _today_shanghai()
         last_err: Exception | None = None
+        # 区分两种退出：预算耗尽（超时）vs 走完 max_back 仍无交易日。
+        timed_out = False
         for _ in range(max_back + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
             try:
-                return self.get_rank(product, d, refresh=refresh)
+                # 单次超时取「剩余预算」与 self.timeout 的较小值：既不让单日
+                # 慢请求吃光整体预算，也不把正常请求压得比默认 timeout 更短。
+                return self.get_rank(
+                    product,
+                    d,
+                    refresh=refresh,
+                    timeout=min(self.timeout, remaining),
+                )
             except CcpmNoDataError as e:
                 last_err = e
                 d = d - timedelta(days=1)
+        if timed_out:
+            raise CcpmError(
+                f"回溯 {str(product).upper()} 成交持仓数据超过 {budget:g}s 预算"
+                "（官网连接超时或长时间无交易日）"
+            ) from last_err
         raise CcpmError(
             f"最近 {max_back + 1} 个自然日内未找到 {str(product).upper()} 的成交持仓数据"
         ) from last_err

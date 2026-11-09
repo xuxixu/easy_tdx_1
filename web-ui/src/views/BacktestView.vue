@@ -11,6 +11,7 @@ import EquityChart from '../components/EquityChart.vue'
 import EvaluatePanel from '../components/EvaluatePanel.vue'
 import GradeDetails from '../components/GradeDetails.vue'
 import KlineChart from '../components/KlineChart.vue'
+import LoadingState from '../components/LoadingState.vue'
 import MetricTable from '../components/MetricTable.vue'
 import StrategyPicker from '../components/StrategyPicker.vue'
 import SymbolPicker from '../components/SymbolPicker.vue'
@@ -306,7 +307,7 @@ const aiTip = computed(() =>
           v-model:strategy="strategy"
           v-model:params="params"
         />
-        <p v-else class="loading-text">加载策略中…</p>
+        <LoadingState v-else label="策略加载中…" compact :lines="2" />
       </section>
 
       <section class="panel-section">
@@ -413,7 +414,13 @@ const aiTip = computed(() =>
           class="report-section"
         >
           <h3>Walk-Forward 样本外验证</h3>
-          <p v-if="store.wfRunning" class="loading-text">验证中…（逐窗独立回测，约需数秒）</p>
+          <LoadingState
+            v-if="store.wfRunning"
+            label="Walk-Forward 验证中…"
+            hint="逐窗独立回测，约需数秒"
+            compact
+            :lines="2"
+          />
           <div v-else-if="store.wfError" class="error-banner">⚠ {{ store.wfError }}</div>
           <WalkForwardPanel v-else-if="store.wfResult" :wf="store.wfResult" />
         </section>
@@ -424,9 +431,13 @@ const aiTip = computed(() =>
           class="report-section"
         >
           <h3>一条龙评估</h3>
-          <p v-if="store.evaluateRunning" class="loading-text">
-            评估中…（回测 + WF + 适配性 + 基准对比，约需数秒）
-          </p>
+          <LoadingState
+            v-if="store.evaluateRunning"
+            label="一条龙评估中…"
+            hint="回测 + WF + 适配性 + 基准对比，约需数秒"
+            compact
+            :lines="2"
+          />
           <div v-else-if="store.evaluateError" class="error-banner">⚠ {{ store.evaluateError }}</div>
           <EvaluatePanel v-else-if="store.evaluateResult" :report="store.evaluateResult" />
         </section>

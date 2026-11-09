@@ -1,10 +1,12 @@
-// 美股观测雷达（US Market Observation Radar）——整页静态快照的数据层与口径工具。
+// 美股观测雷达（US Market Observation Radar）——整页快照的数据层与口径工具。
 //
-// 数据形态：构建时点的一次性快照，走 GET /data/us-radar.json 拉取
+// 数据形态：一份快照 JSON，走 GET /data/us-radar.json 拉取
 // （放在 public/ 而不是 import 进主 chunk：一份 465KB 的 JSON 不该让首屏买单，
 //  且这份数据本来就是「整体替换」而非「按需引用」）。
 //
-// 替换成真实后端接口时，只改 fetchUsRadar() 里的地址即可，页面与组件无感。
+// 快照由后端 RadarRebuilder 每日收盘后定时重建（开发运行态；EXE 态自动禁用、
+// 沿用打包时的静态快照）。前端轮询 /api/v1/us-radar/version 轻量探测 builtAt，
+// 变了才重拉全文；详见 docs/us-radar-rebuild.md。
 //
 // 字段一律照抄快照的真实形状：缺值用 null 而不是省略字段，前端统一 ?? 兜底。
 // 形如 Num 的类型 = 数据里既有数字也有 null（未触发/无数据）的那类字段。
@@ -645,11 +647,75 @@ export const RADAR_NAV: [string, string][] = [
  * 拉取整份快照。走 public/ 下的静态 JSON：这份数据是「整体替换」的快照而不是
  * 按需接口，放进主 chunk 只会让所有页面为 465KB 买单。
  * 换成后端接口时只改这里的地址。
+ *
+ * `cache: 'no-store'`：后端定时重建会原子替换这个文件，浏览器默认缓存会让
+ * 「打开页面」拿到旧快照——这正是需要绕过缓存的场景（打开即读最新）。
  */
 export async function fetchUsRadar(signal?: AbortSignal): Promise<RadarData> {
-  const resp = await fetch(`${import.meta.env.BASE_URL}data/us-radar.json`, { signal })
+  const resp = await fetch(`${baseUrl()}data/us-radar.json`, {
+    cache: 'no-store',
+    signal,
+  })
   if (!resp.ok) {
     throw new Error(`雷达快照加载失败：HTTP ${resp.status}`)
   }
   return (await resp.json()) as RadarData
+}
+
+/** 定时重建器的运行状态（/api/v1/us-radar/status|version 的 rebuild 字段）。 */
+export interface RadarRebuildState {
+  enabled: boolean
+  running: boolean
+  builds: number
+  failures: number
+  built_at: string
+  as_of: string
+  last_error: string
+  last_success: number | null
+  interval_sec: number
+}
+
+/** 轻量版本探测结果：只有 built_at 变了才需要重拉 465KB 全文。 */
+export interface RadarVersion {
+  built_at: string
+  as_of: string
+  delay: string
+  source: string
+  rebuild: RadarRebuildState
+}
+
+const RADAR_API = '/api/v1/us-radar'
+
+/** Vite 才有 import.meta.env.BASE_URL；Node test runner / 非 Vite 环境回退到根路径。 */
+function baseUrl(): string {
+  try {
+    return import.meta.env?.BASE_URL ?? '/'
+  } catch {
+    return '/'
+  }
+}
+
+/**
+ * 探测快照版本。走后端轻量接口（只读一个 meta），不下载整份快照。
+ * 接口不可用时（纯静态托管 / 老后端）返回 null，调用方按「无版本信息」降级，
+ * 保持只用静态快照的原行为，不弹错误。
+ */
+export async function fetchUsRadarVersion(signal?: AbortSignal): Promise<RadarVersion | null> {
+  try {
+    // 同 fetchUsRadar：版本探测绝不能吃缓存，否则永远看不到新 built_at。
+    const resp = await fetch(`${RADAR_API}/version`, { cache: 'no-store', signal })
+    if (!resp.ok) return null
+    return (await resp.json()) as RadarVersion
+  } catch {
+    return null
+  }
+}
+
+/** 手动触发一次重建；未启用/已在跑时抛带服务端原因的错误。 */
+export async function triggerUsRadarRebuild(): Promise<void> {
+  const resp = await fetch(`${RADAR_API}/rebuild`, { method: 'POST' })
+  if (!resp.ok) {
+    const body = (await resp.json().catch(() => ({}))) as { detail?: string }
+    throw new Error(body.detail ?? `重建触发失败：HTTP ${resp.status}`)
+  }
 }

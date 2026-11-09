@@ -21,11 +21,12 @@ import {
 } from '../api'
 import { dirClass, fmt2, fmtAmount, fmtPctSigned, fmtVol, fmtVolShares } from '../format'
 import { loadIndicatorParams, saveIndicatorParams, subscribeIndicatorParams, type IndicatorParams } from '../indicatorParams'
-import { US_SESSION_FILTERS, inUsSessionFilter, isAShare, isExMarket, isUsDst, type USSessionFilter , INDEX_ETF_PROXY} from '../market'
+import { US_SESSION_FILTERS, inUsSessionFilter, isAShare, isExMarket, isUsDst, toHhmm, type USSessionFilter , INDEX_ETF_PROXY} from '../market'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, Category, MinutePoint, SecurityQuote } from '../types'
 import IndicatorChips from './IndicatorChips.vue'
 import IntradayChart from './IntradayChart.vue'
+import LoadingState from './LoadingState.vue'
 import StockKline from './StockKline.vue'
 
 const props = defineProps<{
@@ -127,8 +128,11 @@ const sessionFilter = ref<USSessionFilter>('all')
 
 function inSession(datetime: string): boolean {
   if (!isUS.value || sessionFilter.value === 'all') return true
-  if (datetime.length <= 13) return true // 无时分信息（日线）不过滤
-  return inUsSessionFilter(datetime.slice(11, 16), sessionFilter.value, isUsDst())
+  // 美股分钟数据有两套时间写法：A 股路径 "2026-11-06T09:30:00"、tdx 外盘
+  // "22:30:00"。统一用 toHhmm 取 HH:MM；日线/无时分信息返回空串，不参与过滤。
+  const hm = toHhmm(datetime)
+  if (!hm) return true
+  return inUsSessionFilter(hm, sessionFilter.value, isUsDst())
 }
 
 /** 时段过滤后的分时点（美股分时只有当日，dayMarks 单天不受影响）。 */
@@ -496,7 +500,7 @@ function gotoOptimize() {
           <!-- 五档盘口（按市场自适应：无五档数据的市场显示实时快照） -->
           <div class="depth">
             <div class="depth-title">{{ hasDepth ? '五档盘口' : '实时快照' }}</div>
-            <div v-if="!quote && quoteLoading" class="depth-msg">盘口加载中…</div>
+            <LoadingState v-if="!quote && quoteLoading" label="盘口加载中…" compact :lines="2" />
             <div v-else-if="!quote && quoteError" class="depth-msg error">
               {{ quoteError }}
               <button class="chip retry" @click="ensureQuote">重试</button>
@@ -588,7 +592,7 @@ function gotoOptimize() {
                 <span v-if="overlays.length > 1" class="dim ov-multi">叠加 {{ overlays.length }} 项</span>
               </template>
             </div>
-            <div v-if="loading" class="chart-msg">加载中…</div>
+            <LoadingState v-if="loading" label="行情加载中…" :lines="4" />
             <template v-else>
               <template v-if="tab === 'minute'">
                 <div v-if="minuteError" class="chart-msg error">分时：{{ minuteError }}</div>

@@ -5,6 +5,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import echarts, { chartHeatNeutral, DOWN_COLOR, initChart, UP_COLOR, useChartRedraw } from '../echarts-setup'
 import { fetchHotspotCorrelation, formatError } from '../api'
+import LoadingState from './LoadingState.vue'
 import type { HotspotCorrelationResp } from '../types'
 
 const props = defineProps<{
@@ -146,7 +147,11 @@ watch(
 
 <template>
   <div class="corr-wrap card">
-    <div v-if="loading" class="corr-hint dim">等待热点矩阵构建（若行业矩阵已构建则为秒级）…</div>
+    <LoadingState
+      v-if="loading"
+      label="相关性热力图计算中…"
+      hint="等待热点矩阵构建，若行业矩阵已构建则为秒级"
+    />
     <div v-else-if="error" class="corr-hint up">{{ error }}</div>
     <div v-else-if="resp && (resp.boards?.length ?? 0) < 2" class="corr-hint dim">窗口内活跃板块不足 2 个，无法计算相关性</div>
     <div v-else ref="container" class="corr-chart"></div>

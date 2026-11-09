@@ -174,7 +174,7 @@ def _sina_quote(market: str, code: str) -> dict[str, Any] | None:
             "name": parts[1] or parts[0],
             "source": "sina",
         }
-    except (IndexError, ValueError):
+    except IndexError, ValueError:
         return None
 
 
@@ -188,7 +188,7 @@ def _ext_fields(parts: list[str]) -> tuple[float | None, float | None, float | N
     """
     try:
         return float(parts[21]), float(parts[23]), float(parts[22])
-    except (IndexError, ValueError):
+    except IndexError, ValueError:
         return None, None, None
 
 
@@ -205,7 +205,7 @@ def _ext_va_fields(parts: list[str]) -> tuple[float | None, float | None]:
     """
     try:
         return float(parts[27]), float(parts[33])
-    except (IndexError, ValueError):
+    except IndexError, ValueError:
         return None, None
 
 
@@ -317,6 +317,6 @@ def _num(value: Any, div: float = 1.0) -> float | None:
         return None
     try:
         num = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return num / div if div != 1.0 else num

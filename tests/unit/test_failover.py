@@ -20,6 +20,7 @@ from easy_tdx._health import _FAILURE_DECAY, reset_health
 from easy_tdx._reconnect import (
     _FAILOVER_PING_THROTTLE_SEC,
     _WORKING_HOST_MAX_ATTEMPTS,
+    find_working_host_async,
     find_working_host_sync,
     select_best_host_sync,
 )
@@ -187,6 +188,72 @@ class TestFindWorkingHostSync:
     def test_default_max_attempts_constant(self) -> None:
         """默认 max_attempts 常量存在且合理（防回归）。"""
         assert _WORKING_HOST_MAX_ATTEMPTS == 5
+
+
+# --------------------------------------------------------------------------- #
+# find_working_host_async：整体时间预算（空数据故障转移不拖死请求）
+# --------------------------------------------------------------------------- #
+
+
+class TestFindWorkingHostAsyncBudget:
+    def test_timeout_is_none_by_default_keeps_original_behavior(self) -> None:
+        """不传 timeout 时行为不变：仍按 max_attempts 逐台试到通过为止。"""
+        ranked = [("a", 0.01), ("b", 0.02), ("c", 0.03)]
+        calls: list[str] = []
+
+        async def _try(host: str) -> bool:
+            calls.append(host)
+            return host == "c"
+
+        result = asyncio.run(find_working_host_async(ranked, _try, lambda _h: None, "cur"))
+        assert result == "c"
+        assert calls == ["a", "b", "c"]
+
+    def test_timeout_stops_early_when_each_try_is_slow(self) -> None:
+        """每台验证都慢时，超过总预算立刻停止，不再试探剩余候选。"""
+        ranked = [("a", 0.01), ("b", 0.02), ("c", 0.03)]
+        calls: list[str] = []
+
+        async def _try(host: str) -> bool:
+            calls.append(host)
+            await asyncio.sleep(0.05)
+            return False
+
+        result = asyncio.run(
+            find_working_host_async(ranked, _try, lambda _h: None, "cur", timeout=0.06)
+        )
+        assert result is None
+        # 预算 0.06s、每台 0.05s：最多只允许 2 台，第三台不应被调用
+        assert len(calls) <= 2, f"超时后仍在试探：{calls}"
+
+    def test_timeout_none_visits_all_candidates(self) -> None:
+        """对照：不设预算时会走完全部候选（证明上面的提前停止确由预算引起）。"""
+        ranked = [("a", 0.01), ("b", 0.02), ("c", 0.03)]
+        calls: list[str] = []
+
+        async def _try(host: str) -> bool:
+            calls.append(host)
+            await asyncio.sleep(0.01)
+            return False
+
+        result = asyncio.run(find_working_host_async(ranked, _try, lambda _h: None, "cur"))
+        assert result is None
+        assert calls == ["a", "b", "c"]
+
+    def test_zero_timeout_visits_no_candidate(self) -> None:
+        """预算为 0 时一台都不试，直接返回 None。"""
+        ranked = [("a", 0.01), ("b", 0.02)]
+        calls: list[str] = []
+
+        async def _try(host: str) -> bool:
+            calls.append(host)
+            return True
+
+        result = asyncio.run(
+            find_working_host_async(ranked, _try, lambda _h: None, "cur", timeout=0.0)
+        )
+        assert result is None
+        assert calls == []
 
 
 # --------------------------------------------------------------------------- #

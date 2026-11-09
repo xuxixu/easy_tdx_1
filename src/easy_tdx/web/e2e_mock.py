@@ -451,6 +451,10 @@ class MockMacClient:
             closes = _synth_closes("BOARD", name, 30)
             rows.append(
                 {
+                    # market 必填：board-mac/overview 对每行做 int(record["market"])，
+                    # 缺列会 500，前端行业/概念总览页显示「加载失败: 'market'」。
+                    # 真实 AsyncMacClient.get_board_list 带该列（1=SH），此处对齐契约。
+                    "market": 1,
                     "code": f"8810{i % 10}{i:02d}",
                     "name": name,
                     "price": float(closes[-1]),

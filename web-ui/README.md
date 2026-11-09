@@ -6,7 +6,7 @@
 
 ## 快速开始（开发）
 
-需要两个进程：后端 FastAPI（行情 + 回测 API）+ 前端 Vite dev server。
+开发环境基线：Node.js 26 / npm 12（Vue 3.5.39 等版本由 `package-lock.json` 锁定）。需要两个进程：后端 FastAPI（行情 + 回测 API）+ 前端 Vite dev server。
 
 ```bash
 # 1. 启动后端（仓库根目录，使用 venv）

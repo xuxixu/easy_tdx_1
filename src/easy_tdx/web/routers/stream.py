@@ -38,7 +38,7 @@ async def stream_quotes(request: Request) -> StreamingResponse:
 
     qid, queue = streamer.subscribe()
 
-    async def event_gen() -> AsyncGenerator[str, None]:
+    async def event_gen() -> AsyncGenerator[str]:
         try:
             # 首帧 hello：告诉前端连接可用 + 当前订阅规模
             hello = {"type": "hello", "subscribers": streamer.subscriber_count}
@@ -47,7 +47,7 @@ async def stream_quotes(request: Request) -> StreamingResponse:
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=_KEEPALIVE_SECONDS)
                     yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
         finally:
             streamer.unsubscribe(qid)

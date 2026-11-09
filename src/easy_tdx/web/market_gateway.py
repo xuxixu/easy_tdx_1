@@ -272,7 +272,7 @@ class MarketGateway:
 
         if is_ex(token):
             # 真指数（HSI/HSCEI/HSTECH/DJI/IXIC/SPX/NDX）：TDX 无，走 HTTP 源
-            if _is_http_index(token, code):
+            if _routes_to_http(token, code):
                 return await _run_blocking(_http_bars, token, code, category, start, count, adjust)
             client = self._require_ex_client(token)
             period, times = period_times_from_category(category)
@@ -318,15 +318,21 @@ class MarketGateway:
             self._normalize_columns(df, daily_plus=self._is_daily_plus(category)), "tdx"
         )
 
-    async def minute(self, market: str, code: str) -> pd.DataFrame:
-        """取分时数据（分钟级），按市场自动分流。"""
+    async def minute(self, market: str, code: str, query_date: int | None = None) -> pd.DataFrame:
+        """取分时数据（分钟级），按市场自动分流。
+
+        ``query_date``（YYYYMMDD）仅对外盘扩展栈生效，透传给 ``goods_tick_chart``
+        取指定交易日的完整分时——美股盘前「今天」只有 1 根残留快照时用得上。
+        HTTP 真指数旁路（qq 源）不支持按日查询，带 date 时忽略该参数。
+        A 股路径不使用此参数。
+        """
         token = normalize_market(market)
 
         if is_ex(token):
-            if _is_http_index(token, code):
+            if _routes_to_http(token, code):
                 return await _run_blocking(_http_minute, token, code)
             client = self._require_ex_client(token)
-            df = await client.goods_tick_chart(_resolve_ex_or_board(token, code), code)
+            df = await client.goods_tick_chart(_resolve_ex_or_board(token, code), code, query_date)
             return _with_source(self._expand_ex_chart(df), "tdx")
 
         if self.tdx_client is None:
@@ -341,8 +347,8 @@ class MarketGateway:
         token = normalize_market(market)
 
         if is_ex(token):
-            http_codes = [c for c in codes if _is_http_index(token, c)]
-            tdx_codes = [c for c in codes if not _is_http_index(token, c)]
+            http_codes = [c for c in codes if _routes_to_http(token, c)]
+            tdx_codes = [c for c in codes if not _routes_to_http(token, c)]
             frames: list[pd.DataFrame] = []
             if http_codes:
                 frames.append(await _run_blocking(_http_quotes, token, http_codes))
@@ -423,7 +429,7 @@ class MarketGateway:
         token = normalize_market(market)
 
         if is_ex(token):
-            if _is_http_index(token, code):
+            if _routes_to_http(token, code):
                 # 指数无逐笔：返回空表（上层显示"指数无逐笔成交"而不是 503）
                 return pd.DataFrame()
             client = self._require_ex_client(token)
@@ -557,6 +563,17 @@ def _is_http_index(token: str, code: str) -> bool:
         return is_http_index(token, code)
     except Exception:  # noqa: BLE001 — 判断失败按 TDX 路径走，不阻断
         return False
+
+
+def _routes_to_http(token: str, code: str) -> bool:
+    """扩展市场取数是否该旁路到 HTTP 源（bars/minute/quotes/transactions 共用一处判定）。
+
+    判据单一来源：``_is_http_index`` 按 ``(market, code)`` 二元组查 ``QQ_MAP``
+    ——不是"整个市场走旁路"，同一市场里只有 HSI/DJI 等少数真指数命中。
+    四个取数方法因此都必须在 "已确认 is_ex" 之后逐个 code 调本函数，
+    不要在这层按 token 做任何缓存或整市场短路。
+    """
+    return _is_http_index(token, code)
 
 
 async def _run_blocking(func: Any, *args: Any) -> Any:
@@ -822,8 +839,16 @@ def validate_code(code: str, market: str | None = None) -> str:
 
     if market is not None:
         token = normalize_market(market)
-        if token in ("SH", "SZ", "BJ") and not (cleaned.isdigit() and len(cleaned) == 6):
-            raise ValueError(f"A 股代码应为 6 位数字，收到: {code}")
+        if token in ("SH", "SZ", "BJ") and not (
+            # 普通个股/指数：6 位数字
+            (cleaned.isdigit() and len(cleaned) == 6)
+            # 通达信板块指数（880xxx/881xxx/885xxx 系列）是 7 位纯数字、以 88
+            # 开头。板块弹窗的 /minute 与 /bars 都传这类代码，旧校验只放行
+            # 6 位 → 整个图表区 400「A 股代码应为 6 位数字」。港美股板块已有
+            # 特判放行，这里补齐 A 股一侧，口径保持一致。
+            or (cleaned.isdigit() and len(cleaned) == 7 and cleaned.startswith("88"))
+        ):
+            raise ValueError(f"A 股代码应为 6 位数字（板块指数为 88 开头的 7 位），收到: {code}")
         if (
             token == "HK"
             and not (

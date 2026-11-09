@@ -34,7 +34,7 @@ def _real_or_zero(v: Any) -> float:
     NaN 绑定成 NULL 而触发约束冲突，整条写入失败）。"""
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
     if f != f or f in (float("inf"), float("-inf")):
         return 0.0

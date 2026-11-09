@@ -7,6 +7,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchLlmHistory, deleteLlmHistory, clearLlmHistory, formatError } from '../api'
 import type { LlmHistoryItem } from '../types'
+import LoadingState from '../components/LoadingState.vue'
 import RiskDisclaimer from '../components/RiskDisclaimer.vue'
 
 const router = useRouter()
@@ -107,7 +108,7 @@ async function onClearAll() {
     </aside>
 
     <main class="list-panel">
-      <div v-if="loading" class="empty">加载中…</div>
+      <LoadingState v-if="loading" label="解读历史加载中…" compact :lines="3" />
       <div v-else-if="!items.length" class="empty">
         暂无解读记录——到「单标的回测」页跑一次回测，点「🤖 AI 解读 → ✨ 直接解读」即可归档。
       </div>

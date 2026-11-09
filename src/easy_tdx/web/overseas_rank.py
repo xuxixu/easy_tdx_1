@@ -313,7 +313,7 @@ def _dist_counts(change_pct: Any) -> list[int]:
     for v in values:
         try:
             pct = float(v)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if not math.isfinite(pct):
             continue
@@ -331,7 +331,7 @@ def _dist_counts(change_pct: Any) -> list[int]:
 def _num(v: Any) -> float | None:
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if f != f:  # NaN
         return None

@@ -7,10 +7,18 @@ name = "easy-tdx"
 version = "1.32.6"
 description = "通达信 TCP 协议行情数据客户端，支持在线行情、离线数据读取与写入同步"
 readme = "README.md"
-requires-python = ">=3.10"
-# ta-lib 是技术指标引擎的硬依赖（easy_tdx.ta）：PyPI 提供 cp39~cp314 的
+# 以本地开发机环境为准（Python 3.15.1）。依赖下界同步为本地已装版本，
+# 避免 `uv sync` / `pip install` 把环境降级到旧版本。
+requires-python = ">=3.15"
+# ta-lib 是技术指标引擎的硬依赖（easy_tdx.ta）：PyPI 提供 cp39~cp315 的
 # Windows/macOS/Linux 预编译轮子，无需本地编译器。
-dependencies = ["pandas>=2.0,<3", "ta-lib>=0.8,<0.9", "tzdata>=2024.1", "click>=8.0,<9"]
+dependencies = ["pandas>=3.1.1,<4", "ta-lib>=0.8.3,<0.9", "tzdata>=2026.6", "click>=8.5.1,<9"]
+
+[project.urls]
+# 仓库地址单一来源：README 徽章 / _editable_guard 报错指引 / docs 都以此为准。
+Homepage = "https://github.com/xuxixu/easy_tdx_1"
+Issues = "https://github.com/xuxixu/easy_tdx_1/issues"
+Changelog = "https://github.com/xuxixu/easy_tdx_1/blob/main/CHANGELOG.md"
 
 [project.scripts]
 # 经由守卫转发：可编辑安装失效（仓库被移动/.pth 丢失）时打印修复指引（#58），
@@ -18,27 +26,31 @@ dependencies = ["pandas>=2.0,<3", "ta-lib>=0.8,<0.9", "tzdata>=2024.1", "click>=
 easy-tdx = "easy_tdx._editable_guard:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov", "mypy>=1.9", "ruff>=0.4", "scipy>=1.10,<1.16", "httpx>=0.27", "duckdb>=1.0"]
-science = ["scipy>=1.10,<1.16"]
-web = ["fastapi>=0.110,<1", "uvicorn[standard]>=0.29", "pyecharts>=2.0,<3"]
+dev = ["pytest>=9.2.0", "pytest-asyncio>=1.4", "pytest-cov>=7.1", "mypy>=2.4", "ruff>=0.17", "scipy>=1.18.1,<2", "httpx>=0.28.1", "duckdb>=2.0"]
+science = ["scipy>=1.18.1,<2"]
+web = ["fastapi>=0.162.2,<1", "uvicorn[standard]>=0.54.0", "pyecharts>=2.1.0,<3"]
 # 本地 K 线数据仓库（easy-tdx warehouse ...）：DuckDB 单文件列存
-warehouse = ["duckdb>=1.0"]
+warehouse = ["duckdb>=2.0"]
 # baostock 自动兜底数据源（TDX 全部路径失败时的最后一级回退，仅日线及以上）。
 # 可选安装：不装则该回退环自动关闭，核心功能不受影响。
-baostock = ["baostock>=0.9"]
+baostock = ["baostock>=0.9.4"]
 # akshare 真指数历史数据源（美股 .DJI/.IXIC/.INX + 港股 HSI/HSCEI/HSTECH 全历史日K）。
 # 可选安装：不装则指数 K 线回落到腾讯快照（仅最新 1 根），实时报价不受影响。
 # 可用 EASY_TDX_AKSHARE=0 关闭。
-akshare = ["akshare>=1.19"]
+akshare = ["akshare>=1.20.36"]
 # 打包成桌面 EXE 用：系统托盘（pystray）+ 图标生成（Pillow）。
 # 仅 PyInstaller 打包态需要，开发态 ``pip install -e .[web]`` 不强制装。
-packaging = ["pystray>=0.19", "Pillow>=10.0"]
+packaging = ["pystray>=0.19.5", "Pillow>=13.0.0"]
 
 [tool.hatch.build]
 # 前端 dist 是构建产物（在 .gitignore 里），hatchling 默认不打包。
 # artifacts 让它被 sdist 和 wheel 都强制包含。
 artifacts = [
     "web-ui/dist/",
+    # 内置行情服务器池数据文件（config.py 的 _default_pool 读取）。
+    # 仅在 artifacts 里声明即可：hatchling 的通用文件 discover 默认不包含
+    # 非 .py 资源，放进 packages 目录也不会自动进 wheel。
+    "src/easy_tdx/data/hosts.json",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -51,9 +63,7 @@ force-include = { "web-ui/dist" = "easy_tdx/web/dist", "src/easy_tdx/_editable_g
 
 [tool.mypy]
 strict = true
-python_version = "3.12"
-# 跳过未跟踪的本地脚本（依赖外部 unified_config/sqlalchemy/requests，不属于库）
-exclude = ["src/easy_tdx/exchange_margin\\.py"]
+python_version = "3.15"
 
 [[tool.mypy.overrides]]
 module = ["pandas", "tabulate", "matplotlib", "matplotlib.*"]
@@ -78,12 +88,16 @@ module = ["scipy", "scipy.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py315"
 line-length = 100
-extend-exclude = ["*.pyi", "src/easy_tdx/exchange_margin.py"]
+extend-exclude = ["*.pyi"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+# ruff 0.17 新增的 3.12+ 语法迁移建议。这三类会改变运行时语义
+# （StrEnum 的 str() 行为 / type 语句惰性求值 / PEP 695 泛型），
+# 与本次工具链升级无关，显式豁免，避免机械替换引入行为漂移。
+ignore = ["UP040", "UP042", "UP046"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

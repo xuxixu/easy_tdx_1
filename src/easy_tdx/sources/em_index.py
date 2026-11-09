@@ -46,6 +46,8 @@ from typing import Any, Final
 
 import pandas as pd
 
+from easy_tdx._mini_racer_guard import warmup_mini_racer
+
 logger = logging.getLogger(__name__)
 
 _DISABLE_ENV: Final = "EASY_TDX_AKSHARE"
@@ -67,7 +69,13 @@ _US_CANDIDATES: Final[dict[str, tuple[str, ...]]] = {
 
 
 def _akshare() -> Any:
-    """按需加载 akshare（与 ak_index 同写法，避免 mypy import-untyped）。"""
+    """按需加载 akshare（与 ak_index 同写法，避免 mypy import-untyped）。
+
+    import akshare 会把 py_mini_racer 的 V8 装载进进程；akshare 内部在多个
+    工作线程里各自 ``MiniRacer()``，并发首次初始化会触发 V8 进程级崩溃。
+    必须在 import 之前、主线程里完成一次预热（见 _mini_racer_guard）。
+    """
+    warmup_mini_racer()
     try:
         return importlib.import_module("akshare")
     except ImportError as exc:

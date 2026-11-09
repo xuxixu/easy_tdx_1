@@ -53,7 +53,7 @@ class AsyncExTdxConnection:
         async with self._io_lock:
             await self._close_unlocked()
 
-    async def execute(self, cmd: "BaseCommand[T]") -> T:
+    async def execute(self, cmd: BaseCommand[T]) -> T:
         async with self._io_lock:
             if self._writer is None or self._reader is None:
                 raise TdxConnectionError("未连接，请先调用 connect()")
@@ -66,7 +66,7 @@ class AsyncExTdxConnection:
                 header_buf = await self._recv_exact(HEADER_SIZE)
                 header = parse_header(header_buf)
                 raw_body = await self._recv_exact(header.zipsize)
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 await self._close_unlocked()
                 raise TdxConnectionError(f"通信超时: {self.timeout}s") from e
             except (OSError, asyncio.IncompleteReadError, TdxConnectionError) as e:
@@ -82,7 +82,7 @@ class AsyncExTdxConnection:
                 asyncio.open_connection(self.host, self.port),
                 timeout=self.timeout,
             )
-        except (OSError, asyncio.TimeoutError) as e:
+        except (TimeoutError, OSError) as e:
             raise TdxConnectionError(f"无法连接 {self.host}:{self.port}: {e}") from e
         self._reader = reader
         self._writer = writer
@@ -97,7 +97,7 @@ class AsyncExTdxConnection:
             self._reader = None
             self._writer = None
 
-    async def __aenter__(self) -> "AsyncExTdxConnection":
+    async def __aenter__(self) -> AsyncExTdxConnection:
         await self.connect()
         return self
 

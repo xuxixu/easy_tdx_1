@@ -584,6 +584,12 @@ async def index_bars(
 async def minute_time(
     market: str = Query("SH", description="市场: SH(沪) / SZ(深) / BJ(北) / HK(港股) / US(美股)"),
     code: str = Query(..., min_length=1, max_length=12),
+    date: int | None = Query(
+        None,
+        description=(
+            "交易日 YYYYMMDD；仅外盘(港美股)生效，用于取指定日的完整分时（盘前回退上一交易日）"
+        ),
+    ),
     gateway: Any = Depends(get_gateway),
 ) -> DataFrameResponse:
     """获取最近交易日分时数据（盘中=今日实时分时；盘前/周末/节假日=最近交易日历史分时）。
@@ -591,8 +597,12 @@ async def minute_time(
     美股分时的分钟序列原封不动嵌在 ``charts`` 字段里，本端点已展开为
     一行一分钟的平表（``datetime`` / ``price`` / ``avg_price`` / ``vol``），
     与 A 股分时结构对齐，前端图表组件无需两套渲染逻辑。
+
+    ``date`` 指定交易日（YYYYMMDD）：美股盘前 tdx 源对「今天」只回 1 根残留
+    快照，前端可传入上一交易日取回完整 390 根分时。仅对走扩展栈的港美股生效；
+    A 股路径忽略该参数（其历史分时应走 ``/minute/history``）。
     """
-    df = await gateway.minute(market, validate_code(code, market))
+    df = await gateway.minute(market, validate_code(code, market), query_date=date)
     return _df_resp(df)
 
 

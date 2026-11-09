@@ -123,7 +123,7 @@ class MacExClient:
         timeout: float = 15.0,
         ping_timeout: float = 5.0,
         auto_reconnect: bool = True,
-    ) -> "MacExClient":
+    ) -> MacExClient:
         """测量所有 MAC 扩展行情服务器延迟，选最低延迟建立连接。"""
         candidates = hosts or get_mac_ex_hosts()
         ranked = ping_ex_all(candidates, port, ping_timeout)
@@ -161,7 +161,7 @@ class MacExClient:
         """
         self._execute(GetExInstrumentCountCmd())
 
-    def __enter__(self) -> "MacExClient":
+    def __enter__(self) -> MacExClient:
         self.connect()
         return self
 
@@ -195,7 +195,7 @@ class MacExClient:
             self._conn.connect()
             self._login()
 
-    def _execute(self, cmd: "BaseCommand[_T]") -> _T:
+    def _execute(self, cmd: BaseCommand[_T]) -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
         每次重连后必须重新 ``_login()``（MAC 协议扩展行情特有）。登录握手期的
@@ -702,7 +702,7 @@ class AsyncMacExClient(AsyncHeartbeatMixin):
         ping_timeout: float = 5.0,
         auto_reconnect: bool = True,
         heartbeat_interval: float = 60.0,
-    ) -> "AsyncMacExClient":
+    ) -> AsyncMacExClient:
         candidates = hosts or get_mac_ex_hosts()
         ranked = ping_ex_all(candidates, port, ping_timeout)
         best = ranked[0][0] if ranked else candidates[0]
@@ -730,7 +730,7 @@ class AsyncMacExClient(AsyncHeartbeatMixin):
         await self._stop_heartbeat()
         await self._conn.close()
 
-    async def __aenter__(self) -> "AsyncMacExClient":
+    async def __aenter__(self) -> AsyncMacExClient:
         await self.connect()
         return self
 
@@ -750,7 +750,7 @@ class AsyncMacExClient(AsyncHeartbeatMixin):
         """执行 MAC EX 登录命令。"""
         await self._conn.execute(MacExLoginCmd())
 
-    async def _execute(self, cmd: "BaseCommand[_T]") -> _T:
+    async def _execute(self, cmd: BaseCommand[_T]) -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
         每次重连后必须重新 ``_login()``（MAC 协议扩展行情特有）。登录握手期的

@@ -38,7 +38,7 @@ def ping_ex_host(
         if hdr.zipsize > 0:
             _recv_exact_sock(sock, hdr.zipsize)
         return time.monotonic() - t0
-    except (OSError, TdxConnectionError):
+    except OSError, TdxConnectionError:
         return None
     finally:
         try:
@@ -137,7 +137,7 @@ class ExTdxConnection:
                 pass
             self._sock = None
 
-    def execute(self, cmd: "BaseCommand[T]") -> T:
+    def execute(self, cmd: BaseCommand[T]) -> T:
         """执行一条命令：发送请求，接收并解压响应，返回解析结果。"""
         with self._lock:
             if self._sock is None:
@@ -158,7 +158,7 @@ class ExTdxConnection:
             body = decompress_body(header, raw_body)
             return cmd.parse_response(body)
 
-    def __enter__(self) -> "ExTdxConnection":
+    def __enter__(self) -> ExTdxConnection:
         self.connect()
         return self
 

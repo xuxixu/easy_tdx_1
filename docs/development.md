@@ -4,14 +4,16 @@
 
 ## 环境初始化
 
+项目版本基线以本地开发机为准：**Python 3.15.1 / Node.js 26 / Vue 3.5.39**（2026-11 核对）。
+
 ```bash
-git clone git@github.com:awayings/easy_tdx.git && cd easy_tdx
+git clone git@github.com:xuxixu/easy_tdx_1.git && cd easy_tdx_1
 uv sync --all-extras          # 建 .venv 并装全部 extras（普通 uv sync 只装基础依赖）
 ```
 
-CI 不用 uv，走 `pip install -e ".[dev]"` + `pip install -r requirements-dev.txt`。改依赖时两套流程都要考虑：pyproject.toml 只写下界+上界，`uv.lock` 与 `requirements-dev.txt` 才是可复现锁（dev 工具链锁定版本必须兼容 Python 3.10，CI 矩阵跑 3.10/3.12/3.13）。
+`uv` 会按 `requires-python = ">=3.15"` 选用本机 Python 3.15；若机器上只有旧版本，先装 3.15 再同步。CI 不用 uv，走 `pip install -e ".[dev]"` + `pip install -r requirements-dev.txt`。改依赖时两套流程都要考虑：pyproject.toml 只写下界+上界，`uv.lock` 与 `requirements-dev.txt` 才是可复现锁（工具链锁定版本必须能在 Python 3.15 上安装，CI 矩阵跑 3.15）。
 
-前端：`cd web-ui && npm ci && npm run build`（`build` = vue-tsc 类型检查 + vite build）。**`pip install -e .` 要求 `web-ui/dist` 存在**（hatchling `force-include` 把它打进 wheel 的 `easy_tdx/web/dist/`），所以改前端后、跑 Python 测试/安装前必须先构建。
+前端：`cd web-ui && npm ci && npm run build`（`build` = vue-tsc 类型检查 + vite build）。**`pip install -e .` 要求 `web-ui/dist` 存在**（hatchling `force-include` 把它打进 wheel 的 `easy_tdx/web/dist/`），所以改前端后、跑 Python 测试/安装前必须先构建。前端工具链按本机 Node 26 / npm 12 验证；Vue 3.5.39 由 `package-lock.json` 锁定。
 
 ## 测试
 
@@ -41,7 +43,7 @@ ruff check src/ tests/               # E/F/I/UP 规则
 ruff format --check src/ tests/
 ```
 
-mypy/ruff 均排除 `src/easy_tdx/exchange_margin.py`；`ta/` 包全量带类型标注，无需额外 stub（旧版 `MyTT.py` 依赖手写 `MyTT.pyi` 保持 strict，该存根已随引擎更换删除）。
+mypy 与 ruff 覆盖全部 `src/` 代码（此前曾排除一个不存在的本地脚本 `exchange_margin.py`，已清理）。`ta/` 包全量带类型标注，无需额外 stub（旧版 `MyTT.py` 依赖手写 `MyTT.pyi` 保持 strict，该存根已随引擎更换删除）。
 
 本地一键门禁（等价 CI 三 job 的本地版）：
 
@@ -67,9 +69,9 @@ bash scripts/verify_ci.sh --fast     # 只跑静态检查
 ### c. 提交与 CI
 
 - 提交信息带前缀（`feat:` / `fix:` / `test:` / `docs:` / `refactor:`，可带作用域如 `feat(web):`），中文描述。push/PR 到 `main` 触发 `ci.yml`：
-  - test job：ubuntu/windows × py3.10/3.12/3.13 六格矩阵跑单测（覆盖率 ≥60）+ ruff + format
-  - mypy job：strict 模式（py3.13）
-  - frontend job：vue-tsc + Playwright mock E2E
+  - test job：ubuntu/windows × py3.15 两格矩阵跑单测（覆盖率 ≥60）+ ruff + format
+  - mypy job：strict 模式（py3.15）
+  - frontend job：Node 26 + vue-tsc + Playwright mock E2E
 - **集成测试不进 CI**（依赖真实 TDX 服务器），发布前本地 `XMTDX_LIVE=1` 手动跑一遍。
 
 ### d. 发布版本

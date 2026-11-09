@@ -11,9 +11,10 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from easy_tdx.models.enums import KlineCategory
-from easy_tdx.web.market_gateway import MarketGateway, _all_prices_null
+from easy_tdx.web.market_gateway import MarketGateway, _all_prices_null, validate_code
 
 
 def _df(dates: pd.DatetimeIndex) -> pd.DataFrame:
@@ -213,3 +214,74 @@ def test_normalize_ex_quotes_handles_empty():
     gw = MarketGateway()
     assert gw._normalize_ex_quotes(pd.DataFrame()).empty
     assert gw._normalize_ex_quotes(None) is None
+
+
+# ── 4. validate_code：A 股板块指数（板块弹窗图表区）────────────────────────
+
+
+def test_validate_code_accepts_a_share_board_index():
+    """88 开头的 7 位数字是通达信板块指数，/minute 与 /bars 都靠它取数。
+
+    回归点：旧校验对 SH/SZ/BJ 只放行「6 位数字」，板块弹窗传 8810202 时
+    /minute、/bars 双双 400「A 股代码应为 6 位数字」，整个图表区空白。
+    """
+    for market in ("SH", "SZ", "BJ"):
+        assert validate_code("8810202", market) == "8810202"
+        assert validate_code("885001", market) == "885001"  # 6 位也属板块，仍按普通放行
+
+
+def test_validate_code_accepts_normal_a_share():
+    """普通个股 6 位数字不受影响。"""
+    assert validate_code("600519", "SH") == "600519"
+    assert validate_code("000001", "SZ") == "000001"
+
+
+def test_validate_code_rejects_other_7_digit_a_share():
+    """放行「88 开头」而非任意 7 位数字，避免把非法代码放进来。"""
+    with pytest.raises(ValueError, match="6 位数字"):
+        validate_code("1234567", "SH")
+    with pytest.raises(ValueError, match="6 位数字"):
+        validate_code("9910202", "SH")
+
+
+def test_validate_code_board_prefixes_unchanged():
+    """港美股板块（HK0285 / US0467）原有特判不能被本次修改破坏。"""
+    assert validate_code("HK0285", "HK") == "HK0285"
+    assert validate_code("US0467", "US") == "US0467"
+
+
+# ── 5. minute(query_date)：美股盘前回退上一交易日分时 ─────────────────────
+
+
+class _ExChartClient:
+    """记录 goods_tick_chart 的 (market, code, query_date)，返回带 charts 的单行。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, str, object]] = []
+
+    async def goods_tick_chart(self, market, code, query_date=None):  # noqa: ANN001
+        self.calls.append((market, code, query_date))
+        charts = [
+            {"time": "22:30", "price": 100.0, "avg": 100.0, "vol": 1},
+            {"time": "22:31", "price": 100.5, "avg": 100.2, "vol": 2},
+        ]
+        return pd.DataFrame(
+            [{"market": market, "code": code, "name": "X", "pre_close": 99.0, "charts": charts}]
+        )
+
+
+async def test_minute_passes_query_date_to_ex_chart():
+    """带 query_date 时透传给 goods_tick_chart（盘前回退上一交易日取完整分时）。"""
+    client = _ExChartClient()
+    gw = MarketGateway(mac_ex_client=client)
+    out = await gw.minute("US", "SPY", 20261106)
+    assert client.calls == [(74, "SPY", 20261106)]
+    assert len(out) == 2, "charts 应展开为两行分时"
+
+
+async def test_minute_without_query_date_keeps_default():
+    """不传 query_date 时 goods_tick_chart 收 None，保持原有「取当日」行为。"""
+    client = _ExChartClient()
+    gw = MarketGateway(mac_ex_client=client)
+    await gw.minute("US", "SPY")
+    assert client.calls[0][2] is None

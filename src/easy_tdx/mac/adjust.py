@@ -106,7 +106,7 @@ def apply_forward_adjust(
             continue
         try:
             ed = pd.Timestamp(str(r["date"]))
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             continue
         events.append((ed, fh or 0.0, pjk or 0.0, sz or 0.0, pg or 0.0))
     if not events:
@@ -151,7 +151,7 @@ def _to_float(v: object) -> float | None:
         return None
     try:
         f = float(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not np.isfinite(f):
         return None

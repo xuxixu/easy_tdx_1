@@ -28,7 +28,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Final, Literal
 
 USSession = Literal["pre", "open", "after", "night"]
@@ -74,14 +74,14 @@ def _dst_transitions_utc(year: int) -> tuple[datetime, datetime]:
     """
     start_day = _dst_start(year)
     end_day = _dst_end(year)
-    start_utc = datetime(start_day.year, start_day.month, start_day.day, 7, 0, tzinfo=timezone.utc)
-    end_utc = datetime(end_day.year, end_day.month, end_day.day, 6, 0, tzinfo=timezone.utc)
+    start_utc = datetime(start_day.year, start_day.month, start_day.day, 7, 0, tzinfo=UTC)
+    end_utc = datetime(end_day.year, end_day.month, end_day.day, 6, 0, tzinfo=UTC)
     return start_utc, end_utc
 
 
 def _is_dst_at_utc(utc: datetime) -> bool:
     """按 UTC 瞬时判定夏令（精确到切换时刻，而非整日）。"""
-    utc = utc.astimezone(timezone.utc)
+    utc = utc.astimezone(UTC)
     start_utc, end_utc = _dst_transitions_utc(utc.year)
     return start_utc <= utc < end_utc
 
@@ -93,7 +93,7 @@ def is_dst(day: date | None = None) -> bool:
     00:00-02:00 的边界歧义；精确到分钟的判定请用 ``_is_dst_at_utc``。
     """
     day = day or datetime.now(_ET).date()
-    noon_utc = datetime(day.year, day.month, day.day, 17, 0, tzinfo=timezone.utc)
+    noon_utc = datetime(day.year, day.month, day.day, 17, 0, tzinfo=UTC)
     return _is_dst_at_utc(noon_utc)
 
 
@@ -110,7 +110,7 @@ def us_session(now: datetime | None = None) -> USSession:
     Returns:
         ``pre`` / ``open`` / ``after`` / ``night``。
     """
-    utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    utc = (now or datetime.now(UTC)).astimezone(UTC)
     summer = _is_dst_at_utc(utc)
     et = utc - timedelta(hours=4 if summer else 5)
     if et.weekday() >= 5:
@@ -127,7 +127,7 @@ def us_session(now: datetime | None = None) -> USSession:
 
 def us_session_info(now: datetime | None = None) -> dict[str, object]:
     """四态详情（供前端顶栏展示）。"""
-    utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    utc = (now or datetime.now(UTC)).astimezone(UTC)
     session = us_session(now)
     dst = _is_dst_at_utc(utc)
     return {
@@ -148,7 +148,7 @@ def is_us_trading_minutes(dt: datetime, *, dst: bool | None = None) -> bool:
     """
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_BEIJING)
-    utc = dt.astimezone(timezone.utc)
+    utc = dt.astimezone(UTC)
     summer = _is_dst_at_utc(utc) if dst is None else dst
     # 美东时钟 = UTC - 4h（夏令）/ -5h（冬令）
     et = utc - timedelta(hours=4 if summer else 5)

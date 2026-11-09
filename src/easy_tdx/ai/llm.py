@@ -208,7 +208,7 @@ def _clean_float(
         return default
     try:
         f = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.warning(
             "LLM 配置字段 %s 应为数字，收到 %r，回退默认值 %s", field_name, value, default
         )
@@ -227,10 +227,10 @@ def _clean_int(value: Any, field_name: str, default: int, *, minimum: int | None
         return default
     try:
         i = int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         try:
             i = int(float(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             logger.warning(
                 "LLM 配置字段 %s 应为整数，收到 %r，回退默认值 %s", field_name, value, default
             )
@@ -369,7 +369,7 @@ def _extract_error_message(body: str) -> str | None:
     """
     try:
         obj = json.loads(body)
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         return None
     if not isinstance(obj, dict):
         return None

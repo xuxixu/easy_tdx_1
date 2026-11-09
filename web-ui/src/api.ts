@@ -725,9 +725,19 @@ export async function fetchMarketStat(): Promise<MarketStat> {
   }
 }
 
-/** 今日分时（240 点：价格 + 每分钟量）。 */
-export async function fetchMinute(market: string, code: string): Promise<MinutePoint[]> {
+/**
+ * 分时（价格 + 每分钟量）。
+ *
+ * `date`（YYYYMMDD）仅对外盘生效：美股盘前当天只有 1 根残留快照时，传上一
+ * 交易日可取回完整分时用于兜底展示。不传 = 取当日（现状）。
+ */
+export async function fetchMinute(
+  market: string,
+  code: string,
+  date?: number,
+): Promise<MinutePoint[]> {
   const params = new URLSearchParams({ market, code })
+  if (date !== undefined) params.set('date', String(date))
   const resp = await fetch(`${BASE}/minute?${params}`)
   if (!resp.ok) await throwError(resp)
   return toMinutePoints((await resp.json()) as DataFrameResponse)

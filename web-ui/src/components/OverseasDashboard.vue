@@ -41,6 +41,7 @@ import { createSeqGuard } from '../utils/asyncGuard'
 import BoardDialog from './BoardDialog.vue'
 import IndicatorChips from './IndicatorChips.vue'
 import IntradayChart from './IntradayChart.vue'
+import LoadingState from './LoadingState.vue'
 import MoodRadar from './MoodRadar.vue'
 import SourceBadge from './SourceBadge.vue'
 import Sparkline from './Sparkline.vue'
@@ -797,7 +798,7 @@ onBeforeUnmount(() => {
           </span>
           <button class="chip" @click="dialog = { ...focal }">分时/盘口 ⌗</button>
         </div>
-        <div v-if="barsLoading" class="loading">加载中…</div>
+        <LoadingState v-if="barsLoading" label="K 线数据加载中…" :lines="4" />
         <div v-else-if="barsError" class="err">{{ barsError }}</div>
         <!-- 「盘中」：分时图（左）+ 五档盘口（右） -->
         <div v-else-if="minuteMode" class="pp">
@@ -823,7 +824,7 @@ onBeforeUnmount(() => {
               :vol-unit-shares="true"
               height="232px"
             />
-            <div v-else class="loading">分时加载中…</div>
+            <LoadingState v-else label="分时数据加载中…" compact :lines="2" />
           </div>
             <!-- 五档盘口：卖盘在上（高→低）、现价居中、买盘在下（高→低），与交易软件一致 -->
             <div class="pp-depth">
@@ -895,9 +896,13 @@ onBeforeUnmount(() => {
               <span class="dim">共 {{ rank.total }}</span>
             </div>
           </template>
-          <div v-else class="loading">
-            {{ rank?.status === 'building' ? `榜单构建中…${rank.progress ? `（${rank.progress}）` : ''}` : '加载中…' }}
-          </div>
+          <LoadingState
+            v-else
+            :label="rank?.status === 'building' ? '全市场榜单构建中…' : '加载中…'"
+            :progress="rank?.status === 'building' ? rank.progress : null"
+            hint="首次需逐页拉取全市场行情（约 20~70 秒）"
+            :lines="3"
+          />
         </div>
 
         <!-- 市场情绪雷达（量能维无全市场成交数据，固定中性） -->
@@ -937,9 +942,14 @@ onBeforeUnmount(() => {
               <div class="pop-share mono">占 {{ bucketShare(distCounts[hoverBucket]) }}</div>
             </div>
           </div>
-          <div v-else class="loading">
-            {{ rank?.status === 'building' ? '全市场榜单构建中…（首次约 20~70 秒）' : '加载中…' }}
-          </div>
+          <LoadingState
+            v-else
+            :label="rank?.status === 'building' ? '全市场榜单构建中…' : '加载中…'"
+            :progress="rank?.status === 'building' ? rank.progress : null"
+            hint="首次需逐页拉取全市场行情（约 20~70 秒）"
+            compact
+            :lines="2"
+          />
         </div>
 
         <!-- 行业板块（热 + 冷，点击看成分股） -->
@@ -1019,9 +1029,13 @@ onBeforeUnmount(() => {
             <span v-if="rank?.status === 'ready'" class="dim title-sub">（{{ rank.total }} 只）</span>
           </h3>
           <div v-if="rankError" class="err">{{ rankError }}</div>
-          <div v-else-if="!rank || rank.status === 'building'" class="loading">
-            全市场榜单构建中…{{ rank?.progress ? `（${rank.progress}）` : '（首次约 20~70 秒）' }}
-          </div>
+          <LoadingState
+            v-else-if="!rank || rank.status === 'building'"
+            label="全市场榜单构建中…"
+            :progress="rank?.status === 'building' ? rank.progress : null"
+            hint="首次需逐页拉取全市场行情（约 20~70 秒）"
+            :lines="4"
+          />
           <template v-else>
             <span class="rank-tabs">
               <button

@@ -141,6 +141,8 @@ easy-tdx serve                                  # 行情终端 + 回测工作台
 
 ## 安装
 
+环境要求：Python **>= 3.15**（本地开发基线 3.15.1，`pyproject.toml` 已声明）；前端开发另需 Node.js **26** / npm 12（仅构建 `web-ui` 时需要，运行后端不依赖 Node）。
+
 ```bash
 pip install easy-tdx                # 自动注册 easy-tdx CLI 命令
 pip install -e ".[dev]"             # 开发模式（测试 / 静态检查工具链）

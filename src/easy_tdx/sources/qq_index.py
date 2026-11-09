@@ -173,7 +173,7 @@ def _sina_quote(key: tuple[str, str]) -> dict[str, Any]:
         # 用 今收-涨跌额 反推，保证与新浪自带的涨跌额自洽。
         try:
             pre = str(float(close) - float(chg))
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pre = parts[5]
         amount = 0
     return {

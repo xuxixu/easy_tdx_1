@@ -19,6 +19,7 @@ import {
   type OverseasRank,
 } from '../api'
 import { fmtAmount, fmtPctSigned } from '../format'
+import LoadingState from '../components/LoadingState.vue'
 import { marketLabel } from '../market'
 import { useMarketStore } from '../stores/market'
 import { createSeqGuard } from '../utils/asyncGuard'
@@ -542,9 +543,12 @@ onBeforeUnmount(() => {
         加载失败：{{ exError }}
         <button @click="loadEx">重试</button>
       </div>
-      <div v-else-if="!exRank || exRank.status === 'building'" class="loading">
-        全市场快照构建中…{{ exRank?.progress ? `（${exRank.progress}）` : '' }}
-      </div>
+      <LoadingState
+        v-else-if="!exRank || exRank.status === 'building'"
+        label="全市场快照构建中…"
+        :progress="exRank?.progress ?? null"
+        hint="首次构建约 1~3 分钟，完成后自动刷新"
+      />
       <template v-else>
         <div class="stat-strip">
           <div class="stat-card card">
@@ -583,7 +587,7 @@ onBeforeUnmount(() => {
       加载失败：{{ error }}
       <button @click="load">重试</button>
     </div>
-    <div v-else-if="loading" class="loading">加载中…</div>
+    <LoadingState v-else-if="loading" label="情绪数据加载中…" />
 
     <template v-else>
       <!-- 温度卡 -->
@@ -664,7 +668,13 @@ onBeforeUnmount(() => {
           <span v-if="aiModel" class="dim">{{ aiModel }}</span>
         </div>
         <div class="card ai-card">
-          <div v-if="aiBusy" class="dim">模型基于上方情绪 / 量能 / 涨停数据生成中…</div>
+          <LoadingState
+            v-if="aiBusy"
+            label="模型正在生成复盘…"
+            hint="基于上方情绪 / 量能 / 涨停数据，约 1~3 分钟"
+            compact
+            :lines="2"
+          />
           <div v-else-if="aiError" class="up">{{ aiError }}</div>
           <div v-else-if="aiReply" class="ai-reply">{{ aiReply }}</div>
           <div v-else class="dim">

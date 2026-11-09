@@ -104,7 +104,14 @@ def _akshare() -> Any:
     用 importlib 而非 ``import akshare``：它是可选依赖，未安装时整个
     radar 重建应当优雅跳过，而不是让整个包的 import 崩掉。
     akshare 没有 py.typed 标记，直接 import 会让 mypy strict 报错。
+
+    akshare 内部在工作线程里各自 ``py_mini_racer.MiniRacer()``，并发首次
+    初始化 V8 会触发进程级硬崩溃（见模块顶部并发说明）。这里在 import
+    akshare **之前**、主线程里先完成一次 V8 全局预热，之后并发创建即安全。
     """
+    from easy_tdx._mini_racer_guard import warmup_mini_racer
+
+    warmup_mini_racer()
     try:
         return importlib.import_module("akshare")
     except ImportError as exc:  # pragma: no cover - 取决于环境是否装了可选依赖

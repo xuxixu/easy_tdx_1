@@ -51,7 +51,7 @@ def _to_float(v: Any) -> float | None:
         return None
     try:
         return float(v)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

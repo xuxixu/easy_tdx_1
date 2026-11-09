@@ -18,7 +18,7 @@ class FieldBit(IntEnum):
     fmt: str  # 由 __new__ 设置
     desc: str  # 由 __new__ 设置
 
-    def __new__(cls, value: int, fmt: str = "<f", desc: str = "") -> "FieldBit":
+    def __new__(cls, value: int, fmt: str = "<f", desc: str = "") -> FieldBit:
         obj = int.__new__(cls, value)
         obj._value_ = value
         obj.fmt = fmt
@@ -348,20 +348,20 @@ class PresetField(Enum):
     DEBUG = (-1, "", "调试用全字段")
     ALL = tuple(FieldBit)
 
-    def __add__(self, other: object) -> "FieldSelection":
+    def __add__(self, other: object) -> FieldSelection:
         if isinstance(other, FieldBit | PresetField | FieldSelection):
             return FieldSelection(self, other)
         return NotImplemented
 
-    def __or__(self, other: object) -> "FieldSelection":
+    def __or__(self, other: object) -> FieldSelection:
         return self.__add__(other)
 
-    def __radd__(self, other: object) -> "FieldSelection":
+    def __radd__(self, other: object) -> FieldSelection:
         if isinstance(other, FieldBit | FieldSelection):
             return FieldSelection(other, self)
         return NotImplemented
 
-    def __ror__(self, other: object) -> "FieldSelection":
+    def __ror__(self, other: object) -> FieldSelection:
         return self.__radd__(other)
 
 
@@ -376,7 +376,7 @@ class FieldSelection:
 
     __slots__ = ("_fields",)
 
-    def __init__(self, *parts: "FieldBit | PresetField | FieldSelection") -> None:
+    def __init__(self, *parts: FieldBit | PresetField | FieldSelection) -> None:
         seen: set[FieldBit] = set()
         result: list[FieldBit] = []
         for part in parts:
@@ -392,20 +392,20 @@ class FieldSelection:
                     result.append(bit)
         self._fields: tuple[FieldBit, ...] = tuple(result)
 
-    def __add__(self, other: object) -> "FieldSelection":
+    def __add__(self, other: object) -> FieldSelection:
         if isinstance(other, FieldBit | PresetField | FieldSelection):
             return FieldSelection(self, other)
         return NotImplemented
 
-    def __or__(self, other: object) -> "FieldSelection":
+    def __or__(self, other: object) -> FieldSelection:
         return self.__add__(other)
 
-    def __radd__(self, other: object) -> "FieldSelection":
+    def __radd__(self, other: object) -> FieldSelection:
         if isinstance(other, FieldBit | PresetField):
             return FieldSelection(other, self)
         return NotImplemented
 
-    def __ror__(self, other: object) -> "FieldSelection":
+    def __ror__(self, other: object) -> FieldSelection:
         return self.__radd__(other)
 
     def __iter__(self) -> Iterator[FieldBit]:
@@ -425,7 +425,7 @@ class FieldSelection:
         return f"FieldSelection([{', '.join(names)}])"
 
 
-def normalize_fields(fields: "Fields") -> FieldSelection:
+def normalize_fields(fields: Fields) -> FieldSelection:
     """将任意字段选择形式归一化为 FieldSelection。"""
     if fields is None:
         return FieldSelection()
@@ -439,7 +439,7 @@ def normalize_fields(fields: "Fields") -> FieldSelection:
 
 
 def build_bitmap(
-    fields: "Fields",
+    fields: Fields,
     exclude_flags: int = 0,
 ) -> bytearray:
     """将字段选择转换为 20 字节请求位图。
@@ -495,7 +495,7 @@ def build_exclude_flags(exclude_flags: int = 0) -> bytes:
     return exclude_flags.to_bytes(4, "little")
 
 
-def split_control_bytes(fields: "Fields") -> tuple[bytes, list[str]]:
+def split_control_bytes(fields: Fields) -> tuple[bytes, list[str]]:
     """把字段选择拆成 0x122C 风格的控制区 4 字节。
 
     0x122C 请求 = 16 字节位图 + ``(盘口, 排除, 日内, 控制)``，其中字节17

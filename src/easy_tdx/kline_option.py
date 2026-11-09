@@ -33,7 +33,7 @@ def _clean_num(v: Any) -> float | None:
     """
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if f != f or f in (float("inf"), float("-inf")):
         return None

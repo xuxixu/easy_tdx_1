@@ -188,11 +188,16 @@ async def test_mock_mac_quote_list_sort_and_columns() -> None:
 
 
 async def test_mock_mac_board_and_unusual() -> None:
-    """板块列表/异动流：非空、字段齐（看板热度榜与异动雷达）。"""
+    """板块列表/异动流：非空、字段齐（看板热度榜与异动雷达）。
+
+    market 列是硬契约：board-mac/overview 对每行做 int(record["market"])，
+    缺列会让行业/概念总览页整块 500（前端显示「加载失败: 'market'」）。
+    """
     client = MockMacClient()
     boards = await client.get_board_list(count=500)
     assert len(boards) > 0
-    assert {"code", "name", "price", "pre_close"} <= set(boards.columns)
+    assert {"market", "code", "name", "price", "pre_close"} <= set(boards.columns)
+    assert all(int(v) >= 0 for v in boards["market"])
 
     unusual = await client.get_unusual(market=1, count=60)
     assert 0 < len(unusual) <= 12
@@ -235,3 +240,9 @@ def test_app_serves_synthetic_data_in_mock_mode(monkeypatch: pytest.MonkeyPatch)
         rank = client.get("/api/v1/mac/quote-list", params={"count": 10})
         assert rank.status_code == 200
         assert len(rank.json()["data"]) == 10
+
+        # 行业/概念总览页的数据源：整页曾因 mock 板块缺 market 列而 500，
+        # 这里守住「路由能出 rows」这条端到端契约（不只是列存在）。
+        overview = client.get("/api/v1/board-mac/overview", params={"board_type": "HY"})
+        assert overview.status_code == 200
+        assert len(overview.json()["data"]["rows"]) > 0

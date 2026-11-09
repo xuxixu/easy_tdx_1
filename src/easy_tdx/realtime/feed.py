@@ -84,14 +84,14 @@ def _row_to_event(row: pd.Series, timestamp: float) -> MarketEvent | None:
     market_raw = row.get("market")
     try:
         market_int = int(market_raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         market_int = -1
     market_str = _market_int_to_str(market_int)
 
     def _f(key: str) -> float:
         try:
             return float(row.get(key, 0.0) or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0.0
 
     return MarketEvent(

@@ -6,8 +6,10 @@
 // 环境 → 题材 → 个股 → 择时 → 验证 排列，前后区块互为上下文
 // （比如信号专列的预警就来自第 11/12 区块）。拆成独立路由会把这个上下文切断。
 //
-// 数据是构建时点的静态快照（public/data/us-radar.json），不是实时行情——
-// 页脚与页头都已标注，避免被当成可交易的实时终端。
+// 数据是收盘后日线构建的一份快照（public/data/us-radar.json），不是盘中实时
+// 行情——页脚与页头都标注了 asOf，避免被当成可交易的实时终端。开发运行态
+// 由后端 RadarRebuilder 每日收盘后定时重建，前端轮询版本探测自动刷新；
+// EXE/纯静态托管态沿用打包时的快照（见 docs/us-radar-rebuild.md）。
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import RadarCongressBoard from '../components/radar/RadarCongressBoard.vue'
@@ -35,7 +37,15 @@ import RadarTickerBanner from '../components/radar/RadarTickerBanner.vue'
 import RadarUnavailable from '../components/radar/RadarUnavailable.vue'
 import RadarVolumeBoard from '../components/radar/RadarVolumeBoard.vue'
 import RadarWatchlistTable from '../components/radar/RadarWatchlistTable.vue'
-import { fetchUsRadar, type RadarData } from '../data/usRadar'
+import {
+  fetchUsRadar,
+  fetchUsRadarVersion,
+  triggerUsRadarRebuild,
+  type RadarData,
+  type RadarRebuildState,
+} from '../data/usRadar'
+
+import LoadingState from '../components/LoadingState.vue'
 
 import './usRadar.css'
 
@@ -43,14 +53,84 @@ const data = ref<RadarData | null>(null)
 const error = ref('')
 const loading = ref(true)
 
+/** 定时重建状态（null = 后端未提供版本接口，沿用纯静态快照）。 */
+const rebuild = ref<RadarRebuildState | null>(null)
+/** 手动触发重建的瞬时反馈。 */
+const rebuildMsg = ref('')
+const rebuilding = ref(false)
+/** 右上角唯一的「最新时间戳」：每次成功加载/重建完成刷新时更新。 */
+const updatedAt = ref('')
+
 // 用 AbortController：这张 JSON 有 465KB，用户在加载途中切走页面时应当取消，
 // 否则回调仍会回来写已卸载组件的状态。
 let ac: AbortController | null = null
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let alive = true
+/** 已加载快照的 builtAt：版本探测发现它变了才重拉全文。 */
+let loadedBuiltAt = ''
+
+const POLL_MS = 60_000
+/** 重建进行中/刚触发时加密探测，让「完成后自动刷新」尽快生效。 */
+const FAST_MS = 5_000
+
+/** 本地「最后更新」时刻（完整时间戳，右上角主显示）。 */
+function stamp(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/** 应用一份新快照并刷新右上角时间戳。 */
+function applySnapshot(snap: RadarData) {
+  data.value = snap
+  loadedBuiltAt = snap.meta.builtAt ?? ''
+  updatedAt.value = stamp()
+}
+
+function schedulePoll(ms: number) {
+  if (!alive) return
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = setTimeout(() => void poll(), ms)
+}
+
+/** 一次版本探测：built_at 变化就重拉全文；据「是否在重建」动态调整下次间隔。 */
+async function poll() {
+  if (!alive) return
+  const v = await fetchUsRadarVersion()
+  if (v) {
+    rebuild.value = v.rebuild ?? null
+    const remote = v.built_at || ''
+    if (remote && remote !== loadedBuiltAt) {
+      try {
+        applySnapshot(await fetchUsRadar())
+      } catch {
+        // 原子替换的极短窗口全文暂不可读：下轮重试，不弹错。
+      }
+    }
+  }
+  // 接口不可用（纯静态托管）时按常速空转探测，成本仅一次轻量 HEAD 级请求
+  schedulePoll(rebuild.value?.running || rebuilding.value ? FAST_MS : POLL_MS)
+}
 
 onMounted(async () => {
   ac = new AbortController()
+  alive = true
+  let versionOk = false
   try {
-    data.value = await fetchUsRadar(ac.signal)
+    // 打开即读最新：全文 no-store + 版本探测并行，二者都是磁盘上的最新态
+    const [snap, v0] = await Promise.all([
+      fetchUsRadar(ac.signal),
+      fetchUsRadarVersion(ac.signal),
+    ])
+    applySnapshot(snap)
+    if (v0) {
+      versionOk = true
+      rebuild.value = v0.rebuild ?? null
+      // 校对：若原子替换恰好发生在两次请求之间，以版本接口为准再拉一次
+      if (v0.built_at && v0.built_at !== loadedBuiltAt) {
+        applySnapshot(await fetchUsRadar(ac.signal))
+      }
+    }
   } catch (e) {
     // 主动取消不算错误，别弹提示
     if (e instanceof DOMException && e.name === 'AbortError') return
@@ -58,11 +138,40 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+
+  // 「两者结合」：读到已有最新后，后台再触发一次重建（不阻塞页面）。
+  // 未启用（EXE/纯静态）/已在跑/接口不可用时后端返回 409，静默沿用已有数据。
+  if (versionOk && rebuild.value?.enabled && !rebuild.value.running) {
+    void triggerUsRadarRebuild()
+      .then(() => schedulePoll(FAST_MS)) // 加密探测等它完成
+      .catch(() => {
+        /* 静默：可能已在跑或未启用，不打扰读者 */
+      })
+  }
+  schedulePoll(POLL_MS)
 })
 
+/** 手动触发一次后端重建；触发后靠加密轮询自动感知新快照。 */
+async function requestRebuild() {
+  rebuilding.value = true
+  rebuildMsg.value = ''
+  try {
+    await triggerUsRadarRebuild()
+    rebuildMsg.value = '重建已开始，完成后页面会自动更新'
+    schedulePoll(FAST_MS)
+  } catch (e) {
+    rebuildMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    rebuilding.value = false
+  }
+}
+
 onBeforeUnmount(() => {
+  alive = false
   ac?.abort()
   ac = null
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = null
 })
 
 // 分区被写成 null（无可达数据源）时，把 meta.degraded 里登记的原因取出来，
@@ -75,7 +184,14 @@ function why(section: string): string | undefined {
 <template>
   <div class="radar-page">
     <template v-if="data">
-      <RadarHeader :meta="data.meta" />
+      <RadarHeader
+        :meta="data.meta"
+        :updated-at="updatedAt"
+        :rebuild="rebuild"
+        :rebuilding="rebuilding"
+        :rebuilding-msg="rebuildMsg"
+        @rebuild="requestRebuild"
+      />
       <RadarTickerBanner :data="data" />
 
       <main class="radar-main">
@@ -312,7 +428,7 @@ function why(section: string): string | undefined {
       </footer>
     </template>
 
-    <div v-else-if="loading" class="radar-state">正在加载雷达快照…</div>
+    <LoadingState v-else-if="loading" label="雷达快照加载中…" hint="读取最新收盘后构建的观测数据" />
     <div v-else class="radar-state err">
       {{ error || '雷达快照加载失败' }}
       <p class="radar-state-hint">

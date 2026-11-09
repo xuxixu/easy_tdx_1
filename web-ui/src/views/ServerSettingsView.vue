@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingState from '../components/LoadingState.vue'
 import PageShell from '../components/PageShell.vue'
 // 服务器设置页面：列出通达信行情服务器、测速、点选切换。
 // 解决"有些 IP 能连通有些不能"的问题——不同地区/运营商对各服务器连通性不同。
@@ -174,7 +175,9 @@ function latencyText(ms: number | null): string {
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="4" class="empty">加载中...</td>
+            <td colspan="4">
+              <LoadingState label="服务器列表加载中…" compact :lines="2" />
+            </td>
           </tr>
           <tr v-else-if="hosts.length === 0">
             <td colspan="4" class="empty">暂无服务器列表</td>

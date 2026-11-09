@@ -101,7 +101,7 @@ def score_strategy(
         v = performance.get(key, default)
         try:
             return float(v)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return default
 
     components: dict[str, float] = {

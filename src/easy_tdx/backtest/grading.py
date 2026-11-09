@@ -454,7 +454,7 @@ def compute_combined_metrics(equity: list[dict[str, Any]]) -> CombinedMetrics:
         span_days = (last - first).total_seconds() / 86400.0
         if span_days > 0:
             years = span_days / 365.25
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     annual_return = (end_v / start_v) ** (1.0 / years) - 1 if years > 0 and start_v > 0 else 0.0
 
@@ -487,7 +487,7 @@ def compute_combined_metrics(equity: list[dict[str, Any]]) -> CombinedMetrics:
             dd: float | None
             try:
                 dd = None if raw is None else float(raw)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 dd = None
             if dd is None or not math.isfinite(dd):
                 dd = prev_dd
@@ -628,7 +628,7 @@ def _num_opt(v: Any) -> float | None:
         return None
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(f):
         return None

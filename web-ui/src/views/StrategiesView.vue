@@ -24,6 +24,7 @@ import {
 import { buildPortfolioAiPrompt } from '../aiPrompt'
 import { GRADE_META, gradePortfolio } from '../grading'
 import { detectMarket } from '../market'
+import LoadingState from '../components/LoadingState.vue'
 import PageShell from '../components/PageShell.vue'
 import StrategyEditor, { type StrategyForm } from '../components/StrategyEditor.vue'
 import type { Category, MultiStrategyItem, Performance, SavedStrategy } from '../types'
@@ -630,9 +631,7 @@ const aiContext = computed(() => ({
       </p>
     </div>
 
-    <div v-if="loading && strategies.length === 0" class="placeholder">
-      <p>加载中…</p>
-    </div>
+    <LoadingState v-if="loading && strategies.length === 0" label="策略库加载中…" compact :lines="3" />
 
     <div v-if="visibleStrategies.length" class="card-grid">      <article
         v-for="s in visibleStrategies"
@@ -811,9 +810,13 @@ const aiContext = computed(() => ({
         把它当作"今日该买该卖"的<strong>参考信号</strong>，而非"未来必涨"的保证。
       </div>
 
-      <div v-if="store.multiStrategyRunning && !store.multiStrategyResult" class="combo-loading">
-        组合回测中…（逐个策略取行情 + 回测，请稍候）
-      </div>
+      <LoadingState
+        v-if="store.multiStrategyRunning && !store.multiStrategyResult"
+        label="组合回测中…"
+        hint="逐个策略取行情 + 回测，请稍候"
+        compact
+        :lines="2"
+      />
 
       <div v-if="store.multiStrategyResult" class="combo-content">
         <div v-if="comboGrade" class="combo-chart-block">
@@ -844,9 +847,13 @@ const aiContext = computed(() => ({
           class="combo-chart-block"
         >
           <h4>Walk-Forward 样本外验证</h4>
-          <p v-if="store.multiWfRunning" class="empty-text">
-            验证中…（策略数 × 窗口数 次回测，约需十几秒）
-          </p>
+          <LoadingState
+            v-if="store.multiWfRunning"
+            label="Walk-Forward 验证中…"
+            hint="策略数 × 窗口数 次回测，约需十几秒"
+            compact
+            :lines="2"
+          />
           <div v-else-if="store.multiWfError" class="warn-box">
             ⚠ {{ store.multiWfError }}
           </div>
@@ -861,9 +868,13 @@ const aiContext = computed(() => ({
           class="combo-chart-block"
         >
           <h4>一条龙评估</h4>
-          <p v-if="store.multiEvaluateRunning" class="empty-text">
-            评估中…（组合回测 + 组合WF + 跨策略适配性 + 基准对比，可能需要一两分钟）
-          </p>
+          <LoadingState
+            v-if="store.multiEvaluateRunning"
+            label="一条龙评估中…"
+            hint="组合回测 + 组合WF + 跨策略适配性 + 基准对比，可能需要一两分钟"
+            compact
+            :lines="2"
+          />
           <div v-else-if="store.multiEvaluateError" class="warn-box">
             ⚠ {{ store.multiEvaluateError }}
           </div>

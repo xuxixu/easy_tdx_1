@@ -32,7 +32,7 @@ easy-tdx indicator MACD -m SH -c 600519 --table
 easy-tdx serve  # 启动 Web API，浏览器打开 http://localhost:8000/docs
 ```
 
-📖 完整文档看 [README](https://github.com/handsomejustin/easy_tdx) 和 [Wiki](https://github.com/handsomejustin/easy_tdx/wiki)。
+📖 完整文档看 [README](https://github.com/xuxixu/easy_tdx_1) 和 [Wiki](https://github.com/xuxixu/easy_tdx_1/wiki)。
 
 ## 🤝 社区共识
 

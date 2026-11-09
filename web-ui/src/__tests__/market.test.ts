@@ -20,6 +20,7 @@ import {
   isUsDst,
   MARKET_DEFAULT_INDEX,
   MARKET_INDEX_STRIP,
+  pickHourTicks,
   toHhmm,
   usSession,
 } from '../market.ts'
@@ -103,6 +104,25 @@ test('usSession：四态判定（冬令 ET = UTC-5h，2026-01 周三）', () => 
   assert.equal(usSession(new Date('2026-07-15T12:00:00Z')), 'pre', '夏令 ET 08:00 盘前')
 })
 
+test('usSession：北京时间口径下夏令/冬令盘中窗口自动偏移 1 小时', () => {
+  // 看板自动刷新门控用 usSession(now)==='open'，必须随夏令/冬令自动切换。
+  // 北京 = UTC+8。取夏令（7月周三）与冬令（1月周三）同一北京时刻对照。
+  const summerEve = (hhmm: string) => new Date(`2026-07-15T${hhmm}:00+08:00`)
+  const summerNextDay = (hhmm: string) => new Date(`2026-07-16T${hhmm}:00+08:00`)
+  const winterEve = (hhmm: string) => new Date(`2026-01-14T${hhmm}:00+08:00`)
+  const winterNextDay = (hhmm: string) => new Date(`2026-01-15T${hhmm}:00+08:00`)
+  // 夏令 21:30 开盘：21:29 盘前、21:30 起盘中；次日凌晨收盘前仍盘中、收盘后转盘后
+  assert.equal(usSession(summerEve('21:29')), 'pre', '夏令 21:29 未开盘')
+  assert.equal(usSession(summerEve('21:30')), 'open', '夏令 21:30 开盘')
+  assert.equal(usSession(summerNextDay('03:59')), 'open', '夏令次日 03:59 仍盘中')
+  assert.equal(usSession(summerNextDay('04:01')), 'after', '夏令次日 04:01 转盘后')
+  // 冬令整体 +1h：同一 21:30 仍是盘前，22:30 才开盘；收盘也顺延到 05:01
+  assert.equal(usSession(winterEve('21:30')), 'pre', '冬令 21:30 仍在盘前')
+  assert.equal(usSession(winterEve('22:30')), 'open', '冬令 22:30 开盘')
+  assert.equal(usSession(winterNextDay('04:59')), 'open', '冬令次日 04:59 仍盘中')
+  assert.equal(usSession(winterNextDay('05:01')), 'after', '冬令次日 05:01 转盘后')
+})
+
 test('指数条：美股第 4 卡是纳斯达克100真指数（非 ETF 代理）', () => {
   const us = MARKET_INDEX_STRIP.US
   assert.equal(us.length, 4, '美股 4 张指数卡')
@@ -157,4 +177,82 @@ test('toHhmm 与 inUsSessionFilter 联动：带日期的分时也能正确分时
   const inPre = dates.filter((d) => inUsSessionFilter(toHhmm(d), 'pre'))
   assert.deepEqual(inOpen, ['2026-10-16 21:35:00', '2026-10-17 03:59:00'])
   assert.deepEqual(inPre, ['2026-10-16 17:00:00'])
+})
+
+// ── pickHourTicks：分时图 x 轴刻度 ────────────────────────────────────────────
+
+/** 造一段从 hh:mm 起、步长 1 分钟、共 n 个点的 HH:MM 序列（跨零点自动回绕）。 */
+function minuteSeries(startHhmm: string, n: number): string[] {
+  const [h0, m0] = startHhmm.split(':').map(Number)
+  return Array.from({ length: n }, (_, i) => {
+    const t = h0 * 60 + m0 + i
+    const h = Math.floor(t / 60) % 24
+    return `${String(h).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+  })
+}
+
+test('pickHourTicks：A 股 240 点（09:30-14:59）落在整点，首尾必留', () => {
+  // A 股上午 120 点 + 下午 120 点（午休不产生点）；弹窗级别的绘图区宽度。
+  const times = [...minuteSeries('09:30', 120), ...minuteSeries('13:00', 120)]
+  const ticks = pickHourTicks(times, { plotWidth: 992, labelWidth: 36 })
+  assert.deepEqual(
+    ticks.map((i) => times[i]),
+    ['09:30', '10:00', '11:00', '13:00', '14:00', '14:59'],
+  )
+})
+
+test('pickHourTicks：美股跨零点（22:30-04:59）首档与次档只差半小时时不会叠字', () => {
+  const times = minuteSeries('22:30', 390)
+  assert.equal(times[times.length - 1], '04:59')
+
+  // 看板面板（~530px 绘图区）：7 档候选里 22:30/23:00 只隔 21px → 丢掉 23:00。
+  const narrow = pickHourTicks(times, { plotWidth: 532, labelWidth: 36 })
+  assert.deepEqual(
+    narrow.map((i) => times[i]),
+    ['22:30', '00:00', '02:00', '03:00', '04:00', '04:59'],
+  )
+  assert.equal(narrow[0], 0, '首点（开盘）必须有刻度')
+  assert.equal(narrow[narrow.length - 1], times.length - 1, '末点（最新价）必须有刻度')
+
+  // 弹窗（~990px 绘图区）：间距够，整点铺满 7 档。
+  const wide = pickHourTicks(times, { plotWidth: 992, labelWidth: 36 })
+  assert.deepEqual(
+    wide.map((i) => times[i]),
+    ['22:30', '23:00', '00:00', '02:00', '03:00', '04:00', '04:59'],
+  )
+})
+
+test('pickHourTicks：港股午休断档也不会给出不存在的时刻', () => {
+  const times = [...minuteSeries('09:30', 150), ...minuteSeries('13:00', 180)]
+  const labels = pickHourTicks(times, { plotWidth: 992, labelWidth: 36 }).map((i) => times[i])
+  // 午休 12:00-13:00 没有点，刻度自然跳过 12:00。
+  assert.deepEqual(labels, ['09:30', '10:00', '11:00', '13:00', '14:00', '15:00', '15:59'])
+  assert.ok(!labels.some((t) => t.startsWith('12:')), '午休时段不应有刻度')
+})
+
+test('pickHourTicks：窄卡片（观测雷达 ~100px 绘图区）只留 3 档且不重叠', () => {
+  // 走势卡内宽 207px、grid 左右边距 108px → 绘图区约 99px，字号降到 9px。
+  const us = minuteSeries('22:30', 390)
+  assert.deepEqual(
+    pickHourTicks(us, { plotWidth: 99, labelWidth: 27 }).map((i) => us[i]),
+    ['22:30', '02:00', '04:59'],
+  )
+  const hk = [...minuteSeries('09:30', 150), ...minuteSeries('13:00', 180)]
+  assert.deepEqual(
+    pickHourTicks(hk, { plotWidth: 99, labelWidth: 27 }).map((i) => hk[i]),
+    ['09:30', '13:00', '15:59'],
+  )
+})
+
+test('pickHourTicks：maxTicks=2 只留首尾（极小面板）', () => {
+  const times = minuteSeries('22:30', 390)
+  assert.deepEqual(pickHourTicks(times, { plotWidth: 99, labelWidth: 27, maxTicks: 2 }), [
+    0,
+    times.length - 1,
+  ])
+})
+
+test('pickHourTicks：空序列与单点', () => {
+  assert.deepEqual(pickHourTicks([], { plotWidth: 992, labelWidth: 36 }), [])
+  assert.deepEqual(pickHourTicks(['09:30'], { plotWidth: 992, labelWidth: 36 }), [0])
 })

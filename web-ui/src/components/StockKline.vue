@@ -7,7 +7,13 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import echarts, { DOWN_COLOR, initChart, UP_COLOR, useChartRedraw } from '../echarts-setup'
+import echarts, {
+  DOWN_COLOR,
+  chartAxisColor,
+  initChart,
+  UP_COLOR,
+  useChartRedraw,
+} from '../echarts-setup'
 import { fetchKlineOption, formatError } from '../api'
 import {
   DEFAULT_INDICATOR_PARAMS,
@@ -191,7 +197,7 @@ let chart: echarts.ECharts | null = null
 function render() {
   if (!container.value || props.bars.length === 0) return
   chart ??= initChart(container.value)
-  // option 后端已组装好，这里只合并本地项（tooltip + Y 轴 2 位小数）后照画
+  // option 后端已组装好，这里只合并本地项（tooltip + 坐标可读性增强）后照画
   if (!serverOpt.value) return
   const opt = { ...(serverOpt.value as Record<string, unknown>) }
   opt['tooltip'] = {
@@ -199,16 +205,46 @@ function render() {
     axisPointer: { type: 'cross' },
     formatter: makeTooltipFormatter(props.bars),
   }
-  // 价格轴 2 位小数（formatter 是函数，过不了 JSON，后端只给空 axisLabel）
-  if (Array.isArray(opt['yAxis']) && opt['yAxis'].length > 0) {
-    const yAxes = [...(opt['yAxis'] as Array<Record<string, unknown>>)]
-    const y0 = { ...(yAxes[0] ?? {}) }
-    y0['axisLabel'] = {
-      ...((y0['axisLabel'] as Record<string, unknown> | undefined) ?? {}),
-      formatter: (v: number) => fmt2(v),
-    }
-    yAxes[0] = y0
-    opt['yAxis'] = yAxes
+
+  // 坐标可读性增强（提案 A）：后端给的轴/网格用 --border 偏暗，x 轴日期几乎
+  // 看不清；主图/成交量/副图之间也没有明确分隔。这里按当前主题 token 覆盖：
+  //   - 轴标签用 --text-muted（比 --border 亮一档），网格线仍用 --hairline；
+  //   - 各 xAxis 顶部加一条 --border 分隔线，把三块子图在视觉上切开；
+  //   - 底部滑块上移，日期标签与滑块之间留白，不再贴在一起。
+  // 只覆盖显示层，不改数据/轴 index，主题切换时由 useChartRedraw 重建。
+  const axisLabelColor = currentTheme.value.vars['--text-muted'] ?? '#8b919e'
+  const gridColor = chartAxisColor()
+  if (Array.isArray(opt['xAxis'])) {
+    opt['xAxis'] = (opt['xAxis'] as Array<Record<string, unknown>>).map((x) => ({
+      ...x,
+      axisLine: { ...((x['axisLine'] as object | undefined) ?? {}), lineStyle: { color: gridColor } },
+      axisLabel: {
+        ...((x['axisLabel'] as object | undefined) ?? {}),
+        color: axisLabelColor,
+        fontSize: 10,
+        hideOverlap: true,
+      },
+    }))
+  }
+  if (Array.isArray(opt['yAxis'])) {
+    opt['yAxis'] = (opt['yAxis'] as Array<Record<string, unknown>>).map((y, i) => ({
+      ...y,
+      axisLabel: {
+        ...((y['axisLabel'] as object | undefined) ?? {}),
+        color: axisLabelColor,
+        // 价格轴 2 位小数（formatter 是函数，过不了 JSON，后端只给空 axisLabel）
+        ...(i === 0 ? { formatter: (v: number) => fmt2(v) } : {}),
+      },
+      splitLine: {
+        ...((y['splitLine'] as object | undefined) ?? {}),
+        lineStyle: { color: gridColor, type: 'solid' },
+      },
+    }))
+  }
+  if (Array.isArray(opt['dataZoom'])) {
+    opt['dataZoom'] = (opt['dataZoom'] as Array<Record<string, unknown>>).map((z) =>
+      z['type'] === 'slider' ? { ...z, bottom: 10, height: 14 } : z,
+    )
   }
   chart.setOption(opt as never, true)
 }

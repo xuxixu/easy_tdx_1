@@ -200,8 +200,8 @@ def _merge_bar_datetime(df: pd.DataFrame, daily_plus: bool) -> pd.DataFrame:
             + df["minute"].astype(str).str.zfill(2)
         )
         df.insert(0, "datetime", pd.to_datetime(full_str))
-    df.drop(columns=["year", "month", "day", "hour", "minute"], inplace=True)
-    return df
+    # 同 _merge_txn_datetime：inplace 已弃用，返回 drop 后的新对象。
+    return df.drop(columns=["year", "month", "day", "hour", "minute"])
 
 
 def _merge_txn_datetime(df: pd.DataFrame, date_int: int) -> pd.DataFrame:
@@ -214,8 +214,9 @@ def _merge_txn_datetime(df: pd.DataFrame, date_int: int) -> pd.DataFrame:
     base = pd.Timestamp(year=year, month=month, day=day)
     offsets = pd.to_timedelta(df["hour"] * 3600 + df["minute"] * 60, unit="s")
     df.insert(0, "datetime", base + offsets)
-    df.drop(columns=["hour", "minute"], inplace=True)
-    return df
+    # inplace 在 pandas 3.1 已弃用（PDEP-8，pandas 4 移除）；返回 drop 结果，
+    # 与旧行为一致（调用方一律用返回值），只是不再触发弃用告警。
+    return df.drop(columns=["hour", "minute"])
 
 
 def _add_minute_datetime(df: pd.DataFrame, date_int: int) -> pd.DataFrame:

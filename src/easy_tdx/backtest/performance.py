@@ -337,7 +337,7 @@ class PerformanceAnalyzer:
             try:
                 # raw_dt 可能是 int/object dtype 标量；统一经 str 转 int
                 n = int(str(raw_dt))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return None
             # YYYYMMDD 整数 → 真实日期
             try:

@@ -14,3 +14,7 @@ import os
 
 def pytest_configure() -> None:
     os.environ.setdefault("EASY_TDX_NO_TASK_DB", "1")
+    # 测试里每个 TestClient 都会进 lifespan；雷达重建默认开启且快照过期时会
+    # 立刻抓 291 只美股日线，多个测试并发重建会拖死全量套件。统一关闭后台重建，
+    # 专属用例通过显式 enabled=True 覆盖。
+    os.environ.setdefault("EASY_TDX_RADAR_REBUILD", "0")

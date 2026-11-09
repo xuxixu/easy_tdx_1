@@ -115,7 +115,7 @@ def run_with_tray(
 
     try:
         signal.signal(signal.SIGINT, _signal_handler)
-    except (ValueError, OSError):
+    except ValueError, OSError:
         # 非 main 线程或 Windows GUI 子系统下会失败，可忽略
         pass
 

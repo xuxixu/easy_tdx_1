@@ -81,6 +81,11 @@ _DAILY_PLUS = frozenset(
     }
 )
 
+# 空数据故障转移（async）的整体时间预算（秒）。逐台候选都要在 try_fn 内
+# 重跑一次完整取数，休市/服务器异常时 5 台可拖到几十秒，把持锁请求拖死。
+# 设上界后超时即停、回落空结果，由上层降级。单测可 monkeypatch 此常量。
+_FAILOVER_BUDGET_SEC: float = 8.0
+
 
 def _today_in_shanghai() -> int:
     return int(datetime.now(_SHANGHAI_TZ).strftime("%Y%m%d"))
@@ -274,7 +279,7 @@ class TdxClient:
         ping_timeout: float = 5.0,
         auto_reconnect: bool = True,
         heartbeat_interval: float = 15.0,
-    ) -> "TdxClient":
+    ) -> TdxClient:
         """测量 hosts 中所有服务器延迟，选最低延迟的建立连接。
 
         自动将最佳主机保存到 config.json，后续连接默认使用该主机。
@@ -353,7 +358,7 @@ class TdxClient:
             if self._heartbeat_interval > 0:
                 self._conn.start_heartbeat(self._heartbeat_interval)
 
-    def __enter__(self) -> "TdxClient":
+    def __enter__(self) -> TdxClient:
         self.connect()
         return self
 
@@ -369,7 +374,7 @@ class TdxClient:
     # 内部执行：含自动重连 + 跨主机故障转移
     # ------------------------------------------------------------------ #
 
-    def _execute(self, cmd: "BaseCommand[_T]") -> _T:
+    def _execute(self, cmd: BaseCommand[_T]) -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
         两阶段韧性：
@@ -888,7 +893,7 @@ class TdxClient:
             )
         )
 
-    def _find_host_returning_data(self, cmd: "BaseCommand[_T]") -> _T:
+    def _find_host_returning_data(self, cmd: BaseCommand[_T]) -> _T:
         """空数据故障转移：测速后按延迟顺序逐台实测，返回首台有效数据的结果。
 
         泛化版：支持任意返回 ``list``/序列的命令（quotes、K 线 bars 等）。
@@ -923,7 +928,7 @@ class TdxClient:
         return self._execute(cmd)
 
     def _find_host_returning_quotes(
-        self, cmd: "BaseCommand[list[SecurityQuote]]"
+        self, cmd: BaseCommand[list[SecurityQuote]]
     ) -> list[SecurityQuote]:
         """空数据故障转移（quotes 专用薄封装）。
 
@@ -1130,7 +1135,7 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
         ping_timeout: float = 5.0,
         auto_reconnect: bool = True,
         heartbeat_interval: float = 60.0,
-    ) -> "AsyncTdxClient":
+    ) -> AsyncTdxClient:
         """测量 hosts 中所有服务器延迟，选最低延迟的建立连接。
 
         自动将最佳主机保存到 config.json。
@@ -1183,7 +1188,7 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
             await self._conn.connect()
             self._start_heartbeat()
 
-    async def __aenter__(self) -> "AsyncTdxClient":
+    async def __aenter__(self) -> AsyncTdxClient:
         await self.connect()
         return self
 
@@ -1214,7 +1219,7 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
         await self._conn.connect()
         self._start_heartbeat()
 
-    async def _execute(self, cmd: "BaseCommand[_T]") -> _T:
+    async def _execute(self, cmd: BaseCommand[_T]) -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
         两阶段韧性与 sync 版对称：先同主机重试（``_RETRY_DELAYS``），再跨主机
@@ -1627,7 +1632,7 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
             )
         )
 
-    async def _find_host_returning_data(self, cmd: "BaseCommand[_T]") -> _T:
+    async def _find_host_returning_data(self, cmd: BaseCommand[_T]) -> _T:
         """空数据故障转移（async）：与 sync ``_find_host_returning_data`` 对称。
 
         泛化版，支持任意可 ``bool()`` 判空的命令返回值（quotes / K 线 bars）。
@@ -1641,7 +1646,9 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
             # （sync 同模式可正确推断），此处为已知 mypy 限制，非真实类型错误。
             return bool(await self._execute(cmd))  # type: ignore[arg-type]
 
-        new_host = await find_working_host_async(ranked, _try, save_best_host, bad_host)
+        new_host = await find_working_host_async(
+            ranked, _try, save_best_host, bad_host, timeout=_FAILOVER_BUDGET_SEC
+        )
         if new_host is None:
             if self._host != bad_host:
                 await self._areconnect(bad_host)
@@ -1649,7 +1656,7 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
         return await self._execute(cmd)
 
     async def _find_host_returning_quotes(
-        self, cmd: "BaseCommand[list[SecurityQuote]]"
+        self, cmd: BaseCommand[list[SecurityQuote]]
     ) -> list[SecurityQuote]:
         """空数据故障转移（async quotes 专用薄封装）。"""
         return await self._find_host_returning_data(cmd)
@@ -1779,7 +1786,9 @@ class AsyncTdxClient(AsyncHeartbeatMixin):
             await self._areconnect(host)
             return bool(await self._fetch_fund_flow_records(market, code, start, count))
 
-        new_host = await find_working_host_async(ranked, _try, save_best_host, bad_host)
+        new_host = await find_working_host_async(
+            ranked, _try, save_best_host, bad_host, timeout=_FAILOVER_BUDGET_SEC
+        )
         if new_host is None:
             if self._host != bad_host:
                 await self._areconnect(bad_host)

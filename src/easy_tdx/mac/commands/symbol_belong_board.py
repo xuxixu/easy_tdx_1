@@ -15,7 +15,7 @@ def _to_float(value: object) -> float:
     """Safely convert JSON value to float."""
     try:
         return float(value)  # type: ignore[arg-type]
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return 0.0
 
 
@@ -23,7 +23,7 @@ def _to_int(value: object) -> int:
     """Safely convert JSON value to int."""
     try:
         return int(float(value))  # type: ignore[arg-type]
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return 0
 
 

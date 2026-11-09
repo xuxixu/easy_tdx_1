@@ -418,7 +418,7 @@ class _Evaluator:
                 continue
             try:
                 arr = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue  # 非数值列（如文本）跳过
             self._arrays[str(col).lower()] = arr
         self._vars: dict[str, Any] = {}

@@ -92,7 +92,7 @@ class ExTdxClient:
         timeout: float = 15.0,
         ping_timeout: float = 5.0,
         auto_reconnect: bool = True,
-    ) -> "ExTdxClient":
+    ) -> ExTdxClient:
         """测量所有扩展行情服务器延迟，选最低延迟建立连接。自动保存最佳主机。"""
         if hosts is None:
             hosts = get_ex_hosts()
@@ -119,7 +119,7 @@ class ExTdxClient:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> "ExTdxClient":
+    def __enter__(self) -> ExTdxClient:
         self.connect()
         return self
 
@@ -148,7 +148,7 @@ class ExTdxClient:
             self._conn = ExTdxConnection(target, self._port, self._timeout)
             self._conn.connect()
 
-    def _execute(self, cmd: "BaseCommand[_T]") -> _T:
+    def _execute(self, cmd: BaseCommand[_T]) -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
         两阶段韧性与 A 股/MAC 统一（审计 #2）：先同主机重试 4 次，再跨主机
@@ -378,7 +378,7 @@ class AsyncExTdxClient(AsyncHeartbeatMixin):
         ping_timeout: float = 5.0,
         auto_reconnect: bool = True,
         heartbeat_interval: float = 60.0,
-    ) -> "AsyncExTdxClient":
+    ) -> AsyncExTdxClient:
         if hosts is None:
             hosts = get_ex_hosts()
         ranked = ping_ex_all(hosts, port, ping_timeout)
@@ -406,7 +406,7 @@ class AsyncExTdxClient(AsyncHeartbeatMixin):
         await self._stop_heartbeat()
         await self._conn.close()
 
-    async def __aenter__(self) -> "AsyncExTdxClient":
+    async def __aenter__(self) -> AsyncExTdxClient:
         await self.connect()
         return self
 
@@ -436,7 +436,7 @@ class AsyncExTdxClient(AsyncHeartbeatMixin):
         await self._conn.connect()
         self._start_heartbeat()
 
-    async def _execute(self, cmd: "BaseCommand[_T]") -> _T:
+    async def _execute(self, cmd: BaseCommand[_T]) -> _T:
         """执行命令；断线时指数退避重试，同主机耗尽则跨主机故障转移。
 
         健康分联动与 sync 版对称。

@@ -210,7 +210,7 @@ class CninfoClient:
                 date_str = datetime.fromtimestamp(anno_time / 1000, tz=_SHANGHAI_TZ).strftime(
                     "%Y%m%d"
                 )
-            except (OSError, ValueError, OverflowError):
+            except OSError, ValueError, OverflowError:
                 date_str = "unknown"
             filename = f"{date_str}_{anno_id}.PDF"
 

@@ -56,7 +56,7 @@ def ping_host(
         if hdr.zipsize > 0:
             _recv_exact_sock(sock, hdr.zipsize)
         return time.monotonic() - t0
-    except (OSError, TdxConnectionError):
+    except OSError, TdxConnectionError:
         # OSError: 连接/超时层失败；TdxConnectionError: 握手期服务器关闭连接
         # （_recv_exact_sock 抛出，继承自 TdxError 而非 OSError）。
         # 两者均属"服务器不可用"，按 docstring 返回 None，不拖垮整个 ping_all。
@@ -181,7 +181,7 @@ class TdxConnection:
                 pass
             self._sock = None
 
-    def execute(self, cmd: "BaseCommand[T]") -> T:
+    def execute(self, cmd: BaseCommand[T]) -> T:
         """执行一条命令：发送请求，接收并解压响应，返回解析结果。"""
         with self._lock:
             self._last_active = time.monotonic()
@@ -210,7 +210,7 @@ class TdxConnection:
     # context manager
     # ------------------------------------------------------------------ #
 
-    def __enter__(self) -> "TdxConnection":
+    def __enter__(self) -> TdxConnection:
         self.connect()
         return self
 
@@ -292,7 +292,7 @@ class TdxConnection:
                     hdr = parse_header(hdr_buf)
                     if hdr.zipsize > 0:
                         _recv_exact_sock(self._sock, hdr.zipsize)
-                except (OSError, TdxConnectionError):
+                except OSError, TdxConnectionError:
                     # OSError: 发送/接收失败；TdxConnectionError: 心跳期服务器关闭
                     # 连接或流已失步（_recv_exact_sock / parse_header 抛出）。两者
                     # 均说明该连接已失效，作废 socket 让外层检测到并清理，重起心跳线程。

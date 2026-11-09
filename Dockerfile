@@ -1,5 +1,5 @@
 # easy-tdx 容器镜像（配合 docker-compose.yml 使用）
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 WORKDIR /app
 

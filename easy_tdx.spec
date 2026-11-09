@@ -60,6 +60,13 @@ if importlib.util.find_spec("talib") is None:
     )
 binaries = collect_dynamic_libs("talib")
 hiddenimports += collect_submodules("talib")
+# py_mini_racer（akshare 美股代码解码用的内嵌 V8）的 native DLL 不在
+# PyInstaller 静态分析范围：不显式收集，onefile 解压目录里会缺
+# mini_racer.dll，create_app 的 V8 预热与外盘报价兜底都会失败。
+# 仅当该包存在时收集（它是 akshare 的可选传递依赖，缺了也能打，
+# 届时 guard 会优雅跳过预热）。
+if importlib.util.find_spec("py_mini_racer") is not None:
+    binaries += collect_dynamic_libs("py_mini_racer")
 # 系统托盘（打包态专用）：pystray 在 Windows 用 win32 API，Pillow 的
 # 图像格式插件用 importlib 动态加载，两者都需要显式声明。
 hiddenimports += collect_submodules("pystray")

@@ -51,8 +51,8 @@
 ### 前置
 
 - Windows 10/11（PyInstaller 不支持跨平台编译）
-- Python 3.10+
-- Node.js 20+
+- Python 3.15+（本地基线 3.15.1）
+- Node.js 26+（本地基线 26.13 / npm 12）
 - 项目已 `pip install -e ".[web,packaging,baostock]"` 安装到当前环境
   （`baostock` 是 /bars 与 warehouse 的自动兜底数据源，EXE 需一并打进包；`packaging`
   extras 提供 EXE 托盘所需的 pystray/Pillow）

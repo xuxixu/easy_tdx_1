@@ -37,7 +37,7 @@ def category_from_str(s: str) -> Any:
     # 支持纯数字（如 "4" 表示日线）
     try:
         return KlineCategory(int(key))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     try:
         return KlineCategory[KlineCategoryEnum[key].name]
@@ -62,7 +62,7 @@ def board_type_from_str(s: str) -> Any:
         pass
     try:
         return BoardType(int(key))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(m.name for m in BoardType)
     raise ValueError(f"无效板块类型 '{s}'，可选值: {valid}") from None
@@ -95,7 +95,7 @@ def ex_board_type_from_str(s: str) -> Any:
         pass
     try:
         return ExBoardType(int(key))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(m.name for m in ExBoardType)
     raise ValueError(f"无效扩展板块类型 '{s}'，可选值: {valid}") from None
@@ -112,7 +112,7 @@ def board_sort_from_str(s: str) -> Any:
         pass
     try:
         return BoardSortColumn(int(key))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(m.name for m in BoardSortColumn)
     raise ValueError(f"无效板块排序键 '{s}'，可选值: {valid}") from None
@@ -129,7 +129,7 @@ def sort_type_from_str(s: str) -> Any:
         pass
     try:
         return SortType(int(key, 0))  # 支持 hex 如 "0x0E"
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(m.name for m in SortType)
     raise ValueError(f"无效排序字段 '{s}'，可选值: {valid}") from None
@@ -146,7 +146,7 @@ def sort_order_from_str(s: str) -> Any:
         pass
     try:
         return SortOrder(int(key))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(m.name for m in SortOrder)
     raise ValueError(f"无效排序方向 '{s}'，可选值: {valid}") from None
@@ -208,7 +208,7 @@ def adjust_from_str(s: str) -> Any:
         pass
     try:
         return Adjust(int(key))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(a.name for a in Adjust)
     raise ValueError(f"无效复权类型 '{s}'，可选值: {valid}") from None
@@ -225,7 +225,7 @@ def category_mac_from_str(s: str) -> Any:
         pass
     try:
         return Category(int(key))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(m.name for m in Category if m < 10000)
     raise ValueError(f"无效市场分类 '{s}'，可选值: {valid}") from None
@@ -241,7 +241,7 @@ def ex_market_from_str(s: str) -> int:
         pass
     try:
         return int(s)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         pass
     valid = ", ".join(m.name for m in ExMarket)
     raise ValueError(f"无效扩展市场代码 '{s}'，可选值: {valid}") from None
@@ -261,7 +261,7 @@ def filter_types_from_str(s: str) -> list[Any]:
         except KeyError:
             try:
                 result.append(FilterType(int(key)))
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 valid = ", ".join(m.name for m in FilterType)
                 raise ValueError(f"无效过滤标志 '{part}'，可选值: {valid}") from None
     return result

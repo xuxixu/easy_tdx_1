@@ -12,6 +12,7 @@ import { createSeqGuard } from '../utils/asyncGuard'
 import type { Bar } from '../types'
 import StockDialog from './StockDialog.vue'
 import IndicatorChips from './IndicatorChips.vue'
+import LoadingState from './LoadingState.vue'
 import StockKline from './StockKline.vue'
 
 const props = defineProps<{ market: Market }>()
@@ -168,7 +169,7 @@ loadBars()
       <button class="chip" @click="applyCode">查看</button>
       <span v-if="inputError" class="err">{{ inputError }}</span>
     </div>
-    <div v-if="barsLoading" class="loading">加载中…</div>
+    <LoadingState v-if="barsLoading" label="K 线加载中…" :lines="4" />
     <div v-else-if="barsError" class="err">{{ barsError }}</div>
     <StockKline v-else :bars="bars" :params="indParams" />
     <StockDialog

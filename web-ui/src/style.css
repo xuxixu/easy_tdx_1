@@ -248,6 +248,8 @@ a {
   letter-spacing: 0.3px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
+  /* 淡竖线分隔各列：自选等 13 列宽表里，数字密集时不会串列 */
+  border-right: 1px solid var(--hairline);
   white-space: nowrap;
   background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
 }
@@ -256,8 +258,11 @@ a {
   padding: 4px 8px;
   /* 行分隔比表头分隔更淡：一眼能分出「表头区」与「数据区」 */
   border-bottom: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
   white-space: nowrap;
   font-family: var(--font-mono);
+  /* 等宽数字：同一列上下行的小数位对齐，扫列时不会左右跳动 */
+  font-variant-numeric: tabular-nums;
 }
 .qtable tbody tr {
   transition: background 0.12s ease;
@@ -269,4 +274,9 @@ a {
 .qtable td:first-child {
   text-align: left;
   font-family: inherit;
+}
+/* 末列不画竖线，避免贴着容器右边缘多一道 */
+.qtable th:last-child,
+.qtable td:last-child {
+  border-right: none;
 }

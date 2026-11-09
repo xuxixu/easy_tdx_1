@@ -33,6 +33,8 @@ from typing import Any, Final
 
 import pandas as pd
 
+from easy_tdx._mini_racer_guard import warmup_mini_racer
+
 logger = logging.getLogger(__name__)
 
 _DISABLE_ENV: Final = "EASY_TDX_AKSHARE"
@@ -55,7 +57,10 @@ def _akshare() -> Any:
 
     akshare 无 py.typed 标记，直接 import 会让 mypy 报 import-untyped；
     走 importlib 与 baostock 源保持同一套可选依赖写法。
+    import 之前先预热 py_mini_racer 的 V8，避免并发首次初始化时进程级崩溃
+    （见 :mod:`easy_tdx._mini_racer_guard`）。
     """
+    warmup_mini_racer()
     try:
         return importlib.import_module("akshare")
     except ImportError as exc:

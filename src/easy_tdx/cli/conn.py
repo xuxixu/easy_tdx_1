@@ -11,7 +11,7 @@ from ..mac.client import MacClient
 
 
 @contextmanager
-def get_mac_client() -> Generator[MacClient, None, None]:
+def get_mac_client() -> Generator[MacClient]:
     """创建 MAC 客户端上下文（自动选最快服务器）。
 
     使用方式::
@@ -28,7 +28,7 @@ def get_mac_client() -> Generator[MacClient, None, None]:
 
 
 @contextmanager
-def get_tdx_client() -> Generator[TdxClient, None, None]:
+def get_tdx_client() -> Generator[TdxClient]:
     """创建 TDX 客户端上下文（自动选最快服务器）。
 
     用于通达信原生协议命令（F10 公司信息、最新财务快照等），
@@ -48,7 +48,7 @@ def get_tdx_client() -> Generator[TdxClient, None, None]:
 
 
 @contextmanager
-def get_mac_ex_client() -> Generator[MacExClient, None, None]:
+def get_mac_ex_client() -> Generator[MacExClient]:
     """创建扩展市场 MAC 客户端上下文（端口 7727）。"""
     client = MacExClient.from_best_host()
     try:

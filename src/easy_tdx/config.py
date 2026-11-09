@@ -20,6 +20,9 @@
     EASY_TDX_PORT        -- 端口
     EASY_TDX_TIMEOUT     -- 超时秒数
     EASY_TDX_KNOWN_HOSTS -- 逗号分隔的候选主机列表
+    EASY_TDX_MAC_HOSTS   -- 逗号分隔的 MAC 协议候选主机列表
+    EASY_TDX_EX_HOSTS    -- 逗号分隔的扩展行情候选主机列表
+    EASY_TDX_MAC_EX_HOSTS -- 逗号分隔的 MAC 协议扩展行情候选主机列表
     EASY_TDX_CONFIG_DIR  -- 配置文件目录（默认 ~/.easy_tdx）
 """
 
@@ -41,6 +44,11 @@ _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 # ---------------------------------------------------------------------------
 # 源码内嵌默认值（config.json 不存在或字段缺失时的兜底）
 # ---------------------------------------------------------------------------
+#
+# 这些常量现在是「最后一层硬兜底」：默认池改由包内 data/hosts.json 提供
+# （见 _default_pool()），用户还能用 EASY_TDX_HOSTS_FILE 指向自己的文件整体替换，
+# 无需改代码。本文件损坏/缺失/字段非法时一律回落到这里的常量，
+# 因此这里的内容必须与 data/hosts.json 保持同源（tests/unit/test_config_hosts_file.py 对拍守护）。
 
 _FALLBACK_HOSTS: list[str] = [
     "111.229.247.189",
@@ -134,6 +142,65 @@ _FALLBACK_MAC_EX_HOSTS: list[str] = [
 _FALLBACK_PORT = 7709
 _FALLBACK_TIMEOUT = 15.0
 
+#: 允许通过环境变量整体替换默认服务器池的数据文件名。
+_HOSTS_FILE_ENV = "EASY_TDX_HOSTS_FILE"
+
+#: 内置默认池数据文件（packages 声明后会随 wheel 一起安装）。
+_BUILTIN_HOSTS_FILE = Path(__file__).resolve().parent / "data" / "hosts.json"
+
+# 缓存解析结果：解析失败同样缓存（None），避免每次 getter 都去碰一次磁盘。
+# 文件内容属于"启动期配置"，进程内不热更新，与模块级 KNOWN_HOSTS 的既有语义一致。
+_pool_cache_loaded = False
+_pool_cache: dict[str, Any] | None = None
+
+
+def _parse_hosts_file(path: Path) -> dict[str, Any] | None:
+    """读取并校验一个 hosts 数据文件，失败返回 None（调用方回落源码常量）。
+
+    只接受"至少含一个列表字段"的 dict：JSON 语法错误、编码错误、类型不对
+    一律视为不可用——默认服务器池是不可或缺的可用性资产，宁可静默用内置值
+    也不能因为一个坏配置把 ping 变成空列表。
+    """
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except OSError, ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not any(isinstance(v, list) for k, v in data.items() if not k.startswith("_")):
+        return None
+    return cast(dict[str, Any], data)
+
+
+def _default_pool() -> dict[str, Any] | None:
+    """解析默认服务器池数据文件，解析一次后进程内缓存。"""
+    global _pool_cache_loaded, _pool_cache
+    if _pool_cache_loaded:
+        return _pool_cache
+
+    pool: dict[str, Any] | None = None
+    override = os.environ.get(_HOSTS_FILE_ENV)
+    if override:
+        pool = _parse_hosts_file(Path(override))
+    if pool is None:
+        pool = _parse_hosts_file(_BUILTIN_HOSTS_FILE)
+
+    _pool_cache = pool
+    _pool_cache_loaded = True
+    return pool
+
+
+def _pool_list(key: str, fallback: list[str]) -> list[str]:
+    """从默认池取字符串列表；池缺失、字段缺失或类型不符时用源码常量兜底。"""
+    pool = _default_pool()
+    if pool is None:
+        return list(fallback)
+    value = pool.get(key)
+    if not isinstance(value, list):
+        return list(fallback)
+    items = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+    return items or list(fallback)
+
 
 # ---------------------------------------------------------------------------
 # 内部读写
@@ -210,19 +277,22 @@ def get_known_hosts() -> list[str]:
     if env:
         return [h.strip() for h in env.split(",") if h.strip()]
     cfg = _load()
-    return cast(list[str], cfg.get("known_hosts", list(_FALLBACK_HOSTS)))
+    return cast(list[str], cfg.get("known_hosts", _pool_list("known", _FALLBACK_HOSTS)))
 
 
 def get_calc_hosts() -> list[str]:
     """返回计算服务器列表。"""
     cfg = _load()
-    return cast(list[str], cfg.get("calc_hosts", list(_FALLBACK_CALC_HOSTS)))
+    return cast(list[str], cfg.get("calc_hosts", _pool_list("calc", _FALLBACK_CALC_HOSTS)))
 
 
 def get_mac_hosts() -> list[str]:
     """返回 MAC 行情服务器列表。"""
+    env = os.environ.get("EASY_TDX_MAC_HOSTS")
+    if env:
+        return [h.strip() for h in env.split(",") if h.strip()]
     cfg = _load()
-    return cast(list[str], cfg.get("mac_hosts", list(_FALLBACK_MAC_HOSTS)))
+    return cast(list[str], cfg.get("mac_hosts", _pool_list("mac", _FALLBACK_MAC_HOSTS)))
 
 
 def get_best_mac_host() -> str:
@@ -241,8 +311,11 @@ def get_best_mac_host() -> str:
 
 def get_ex_hosts() -> list[str]:
     """返回扩展行情服务器列表。"""
+    env = os.environ.get("EASY_TDX_EX_HOSTS")
+    if env:
+        return [h.strip() for h in env.split(",") if h.strip()]
     cfg = _load()
-    return cast(list[str], cfg.get("ex_hosts", list(_FALLBACK_EX_HOSTS)))
+    return cast(list[str], cfg.get("ex_hosts", _pool_list("ex", _FALLBACK_EX_HOSTS)))
 
 
 def get_best_ex_host() -> str:
@@ -256,8 +329,11 @@ def get_best_ex_host() -> str:
 
 def get_mac_ex_hosts() -> list[str]:
     """返回 MAC 协议扩展行情服务器列表。"""
+    env = os.environ.get("EASY_TDX_MAC_EX_HOSTS")
+    if env:
+        return [h.strip() for h in env.split(",") if h.strip()]
     cfg = _load()
-    return cast(list[str], cfg.get("mac_ex_hosts", list(_FALLBACK_MAC_EX_HOSTS)))
+    return cast(list[str], cfg.get("mac_ex_hosts", _pool_list("mac_ex", _FALLBACK_MAC_EX_HOSTS)))
 
 
 def get_best_mac_ex_host() -> str:

@@ -445,7 +445,7 @@ class SignalScanner:
             with open(self._cache_file, encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return {}
 
     def _save_cache(self, cache: dict[str, Any]) -> None:

@@ -270,7 +270,7 @@ class TaskStore:
         if rj is not None:
             try:
                 result = json.loads(rj)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 logger.warning("任务 %s 的 result_json 解析失败，忽略", task_id)
         return {
             "task_id": task_id,

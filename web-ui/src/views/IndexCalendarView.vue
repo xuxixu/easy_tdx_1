@@ -8,6 +8,7 @@ import { fetchBars, fetchIndexBars, formatError } from '../api'
 import { fmt2, fmtAmount, fmtPctSigned, pctCellStyle } from '../format'
 import { enabledIndices } from '../indexIndicators'
 import { useMarketStore } from '../stores/market'
+import LoadingState from '../components/LoadingState.vue'
 import type { Bar } from '../types'
 import { createSeqGuard } from '../utils/asyncGuard'
 
@@ -272,7 +273,7 @@ onMounted(() => loadIndex(activeIdx.value))
       加载失败：{{ error }}
       <button :disabled="loading" @click="onIndexChange(activeIdx)">重试</button>
     </div>
-    <div v-else-if="loading" class="loading">指数日K加载中…</div>
+    <LoadingState v-else-if="loading" label="指数日K加载中…" hint="拉取约一年的日线与成交额" />
 
     <template v-else>
       <!-- 年度统计条 -->

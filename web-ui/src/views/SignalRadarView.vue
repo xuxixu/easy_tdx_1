@@ -22,6 +22,7 @@ import {
 } from '../api'
 import { toSymbolAuto } from '../market'
 import { useBacktestStore } from '../stores/backtest'
+import LoadingState from '../components/LoadingState.vue'
 import StrategyEditor, { type StrategyForm } from '../components/StrategyEditor.vue'
 import type { SavedStrategy, SignalScanResult, SignalScanRow } from '../types'
 
@@ -422,10 +423,11 @@ function onLoad(r: SignalScanRow) {
     <div v-if="pushMsg" class="push-msg" :class="{ ok: pushMsg.startsWith('✓') }">{{ pushMsg }}</div>
 
     <!-- 扫描中：提交请求内要逐标的取行情，需要等待 -->
-    <div v-if="scanning" class="scanning-box">
-      <span class="spinner"></span>
-      正在扫描：逐标的取最近 800 根 K 线并计算信号（标的较多时约需几十秒，请稍候）…
-    </div>
+    <LoadingState
+      v-if="scanning"
+      label="正在扫描信号…"
+      hint="逐标的取最近 800 根 K 线并计算，标的较多时约需几十秒"
+    />
 
     <!-- 主区 + 右侧策略管理 -->
     <div class="content">

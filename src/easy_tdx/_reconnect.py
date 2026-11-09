@@ -260,12 +260,21 @@ async def find_working_host_async(
     save_fn: SaveFn,
     current_host: str,
     max_attempts: int = _WORKING_HOST_MAX_ATTEMPTS,
+    *,
+    timeout: float | None = None,
 ) -> str | None:
     """按延迟顺序逐台测试候选主机，返回第一台"可用"的（异步）。
 
     与 :func:`find_working_host_sync` 语义一致；``try_fn`` 为 async 函数。
+
+    ``timeout`` 为**整体时间预算**（秒）：空数据故障转移里每台候选都要在
+    ``try_fn`` 内重跑一次完整取数，极端情况下 5 台 × 每台数秒会拖到几十秒
+    （休市/服务器异常时实测 /market/stat 15s、/fund-flow/history 34s）。
+    给定预算后，超时即停止继续试探并返回 None（上层回落到空结果/降级），
+    避免一个请求把整个连接锁占死。``None``（默认）= 不设上界，保持兼容。
     """
     log = logging.getLogger(__name__)
+    deadline = time.monotonic() + timeout if timeout is not None else None
     tried = 0
     # 健康分预过滤（与 sync 版对称）：剔除冷却中的主机。
     ranked_hosts = rank_by_health(ranked_hosts)
@@ -273,6 +282,9 @@ async def find_working_host_async(
         if host == current_host:
             continue
         if tried >= max_attempts:
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            log.warning("空数据故障转移超过 %.1fs 预算，停止继续试探候选主机", timeout)
             break
         tried += 1
         try:

@@ -276,6 +276,10 @@ def load_universe(path: Path | None = None) -> Universe:
     )
     logger.info(
         "观测池 %d 只（快照声明 %d），板块 %d / 细分 %d / 题材 %d",
-        len(u.equities), u.declared_size, len(sector_of), len(subsectors), len(themes),
+        len(u.equities),
+        u.declared_size,
+        len(sector_of),
+        len(subsectors),
+        len(themes),
     )
     return u

@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from ..models.finance import TdxBlock
 
 
-def parse_block_dat(data: bytes, filename: str = "") -> list["TdxBlock"]:
+def parse_block_dat(data: bytes, filename: str = "") -> list[TdxBlock]:
     """解析通达信 .dat 板块文件内容。
 
     格式：

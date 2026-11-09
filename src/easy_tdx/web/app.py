@@ -62,7 +62,7 @@ def _resolve_web_dist_dir() -> Path | None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """管理 TDX 连接生命周期：启动时连接，关闭时断开。
 
     E2E mock 模式（``EASY_TDX_E2E_MOCK=1``，见 :mod:`easy_tdx.web.e2e_mock`）：
@@ -272,7 +272,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("SentimentSampler 启动失败 — 情绪采样不可用", exc_info=True)
 
+    # --- 美股观测雷达定时重建器（日频，同步重建放线程池；EXE/mock 态自动禁用） ---
+    app.state.radar_rebuilder = None
+    try:
+        from easy_tdx.web.radar_rebuilder import RadarRebuilder
+
+        rebuilder = RadarRebuilder()
+        rebuilder.start()
+        app.state.radar_rebuilder = rebuilder
+    except Exception:
+        logger.warning("RadarRebuilder 启动失败 — 雷达沿用静态快照", exc_info=True)
+
     yield
+
+    # --- 停止美股观测雷达重建器 ---
+    rb_svc = getattr(app.state, "radar_rebuilder", None)
+    if rb_svc is not None:
+        try:
+            await rb_svc.stop()
+        except Exception:
+            logger.warning("RadarRebuilder stop failed", exc_info=True)
 
     # --- 停止板块资金采样器 ---
     fund_svc = getattr(app.state, "fund_flow_sampler", None)
@@ -360,6 +379,15 @@ def _create_app(
     if timeout is None:
         timeout = get_timeout()
 
+    # 主线程、任何请求线程创建之前完成 py_mini_racer(V8) 的进程级初始化。
+    # akshare 的内嵌 V8 若在多个工作线程里**同时首次创建**会触发
+    # FATAL:partition_address_space.cc 进程级硬崩溃（try/except 拦不住）。
+    # 这里主动预热一次，之后各线程并发新建实例即安全；未安装 mini-racer
+    # 时 warmup 内部优雅跳过，不引入硬依赖。详见 _mini_racer_guard 模块。
+    from easy_tdx._mini_racer_guard import warmup_mini_racer
+
+    warmup_mini_racer()
+
     app = FastAPI(
         title="easy-tdx API",
         description="通达信行情数据 REST + WebSocket API",
@@ -430,6 +458,7 @@ def _create_app(
     from easy_tdx.web.routers.strategies import router as strategies_router
     from easy_tdx.web.routers.strategy_types import router as strategy_types_router
     from easy_tdx.web.routers.stream import router as stream_router
+    from easy_tdx.web.routers.us_radar import router as us_radar_router
     from easy_tdx.web.routers.watchlist import router as watchlist_router
 
     app.include_router(market_router, prefix="/api/v1")
@@ -473,6 +502,8 @@ def _create_app(
     app.include_router(push_router, prefix="/api/v1")
     # 实时行情 SSE 路由（依赖 lifespan 里的 QuoteStreamer）
     app.include_router(stream_router, prefix="/api/v1")
+    # 美股观测雷达：快照版本探测 / 重建状态 / 手动触发（依赖 lifespan 里的 RadarRebuilder）
+    app.include_router(us_radar_router, prefix="/api/v1")
 
     # --- 前端 dist 托管（生产/打包态同源服务，开发态可缺省） ---
     # 必须在所有 API 路由注册之后：StaticFiles(html=True) 挂在 "/" 会吞掉

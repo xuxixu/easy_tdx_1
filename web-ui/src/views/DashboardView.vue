@@ -14,11 +14,13 @@ import {
   formatError,
 } from '../api'
 import { dirClass, fmtAmount, fmtPctSigned, fmtVol } from '../format'
+import { isUsDst, usSession } from '../market'
 import { useMarketStore } from '../stores/market'
 import { useQuoteStore } from '../stores/quotes'
 import type { Bar, BoardRow, MarketStat, RankRow } from '../types'
 import BoardDialog from '../components/BoardDialog.vue'
 import AShareKlinePanel from '../components/AShareKlinePanel.vue'
+import LoadingState from '../components/LoadingState.vue'
 import MoodRadar from '../components/MoodRadar.vue'
 import OverseasDashboard from '../components/OverseasDashboard.vue'
 import Sparkline from '../components/Sparkline.vue'
@@ -404,16 +406,20 @@ function isTradeSession(now = new Date()): boolean {
     return (m >= 570 && m <= 720) || (m >= 780 && m <= 960)
   }
   if (marketStore.market === 'US') {
-    // 美股夏令 21:30~04:00（跨天）：本地时钟只做粗判
-    return m >= 1290 || m <= 240
+    // 美股盘中用 usSession() 判：内部含夏令/冬令自动切换（美东 3 月第 2 个周日
+    // ~ 11 月第 1 个周日为 EDT），对应北京时间 21:30~04:00（夏令）/
+    // 22:30~05:00（冬令）。旧实现写死 21:30~04:00，冬令时会误判一小时。
+    return usSession(now) === 'open'
   }
   return (m >= 555 && m <= 690) || (m >= 780 && m <= 905)
 }
 
-/** 时段文案（跟随顶栏市场）。 */
+/** 时段文案（跟随顶栏市场 + 美股夏令/冬令）。 */
 const sessionHint = computed(() => {
   if (marketStore.market === 'HK') return '（09:30~12:00, 13:00~16:00）'
-  if (marketStore.market === 'US') return '（21:30~04:00 夏令时）'
+  if (marketStore.market === 'US') {
+    return isUsDst() ? '（21:30~04:00 夏令时）' : '（22:30~05:00 冬令时）'
+  }
   return '（09:15~11:30, 13:00~15:05）'
 })
 
@@ -581,7 +587,7 @@ function openBoard(code: string | undefined, name: string | undefined) {
             <div><span class="dim">总市值</span><span>{{ fmtAmount(stat.total_market_cap) }}</span></div>
           </div>
         </template>
-        <div v-else class="loading">加载中…</div>
+        <LoadingState v-else label="市场统计加载中…" compact :lines="2" />
       </div>
 
       <!-- 市场情绪雷达 -->
@@ -615,7 +621,13 @@ function openBoard(code: string | undefined, name: string | undefined) {
             <div class="pop-share mono">占 {{ bucketShare(dist.counts[hoverBucket]) }}</div>
           </div>
         </div>
-        <div v-else class="loading">{{ distLoading ? '全市场分布计算中…（约 5s）' : '加载中…' }}</div>
+        <LoadingState
+          v-else
+          :label="distLoading ? '全市场分布计算中…' : '加载中…'"
+          :hint="distLoading ? '逐只统计涨跌分布，约 5 秒' : ''"
+          compact
+          :lines="2"
+        />
       </div>
 
       <!-- 行业板块（热 + 冷） -->
@@ -733,8 +745,15 @@ function openBoard(code: string | undefined, name: string | undefined) {
             </tr>
           </tbody>
         </table>
-        <div v-if="!distError && limitRows.length === 0" class="loading">
-          {{ distLoading ? '全市场扫描中…' : '今日暂无 ≥9.8% 个股' }}
+        <LoadingState
+          v-if="!distError && limitRows.length === 0 && distLoading"
+          label="全市场扫描中…"
+          hint="逐只统计涨停与放量个股"
+          compact
+          :lines="2"
+        />
+        <div v-else-if="!distError && limitRows.length === 0" class="loading">
+          今日暂无 ≥9.8% 个股
         </div>
       </div>
 

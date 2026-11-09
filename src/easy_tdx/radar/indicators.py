@@ -291,10 +291,7 @@ def _high_volume_bear_candle(m: SymbolMetrics, df: pd.DataFrame) -> bool:
     o, c = float(last["open"]), float(last["close"])
     body = (o - c) / o * 100.0 if o > 0 else 0.0
     return bool(
-        c < o
-        and body >= _BODY_MIN
-        and m.vol_ratio >= 1.5
-        and m.from_hi >= -_HIGH_PROXIMITY
+        c < o and body >= _BODY_MIN and m.vol_ratio >= 1.5 and m.from_hi >= -_HIGH_PROXIMITY
     )
 
 

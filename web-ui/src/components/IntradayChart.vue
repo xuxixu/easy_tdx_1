@@ -8,6 +8,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import echarts, { chartAxisColor, DOWN_COLOR, initChart, UP_COLOR, useChartRedraw } from '../echarts-setup'
 import { fmt2, fmtVol } from '../format'
+import { pickHourTicks, toHhmm } from '../market'
 import type { MinutePoint } from '../types'
 
 const props = defineProps<{
@@ -23,6 +24,8 @@ const props = defineProps<{
 
 const container = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+/** 上次渲染时的容器宽度：刻度数依赖它，宽度没变就不必重算 option。 */
+let laidOutWidth = -1
 
 const isMultiDay = () => (props.dayMarks?.length ?? 0) > 1
 
@@ -31,6 +34,7 @@ function render() {
   if (props.points.length === 0) return
   chart ??= initChart(container.value)
   chart.setOption(buildOption(), true)
+  laidOutWidth = container.value.clientWidth
 }
 
 function buildOption(): echarts.EChartsCoreOption {
@@ -44,7 +48,11 @@ function buildOption(): echarts.EChartsCoreOption {
   const baseRef = props.preClose && props.preClose > 0 ? props.preClose : embeddedPre
   const base = !multi && baseRef ? baseRef : pts[0]?.price ?? 0
 
-  const times = pts.map((p) => p.datetime.slice(11, 16))
+  // 时间列统一归一化为 HH:MM：
+  // - A 股 /minute 是 "2026-11-06T09:30:00"（带日期）
+  // - 港股/美股（tdx 扩展栈）是 "09:30:00"（纯时间，无日期）
+  // 旧写法 `slice(11, 16)` 只对前者成立，后者会被切成空串，x 轴刻度全丢。
+  const times = pts.map((p) => toHhmm(p.datetime))
   const prices = pts.map((p) => p.price)
 
   // 均价线：行情源直接给了均价（美股/港股 /minute 的 avg_price = 官方 VWAP）就以它
@@ -92,18 +100,37 @@ function buildOption(): echarts.EChartsCoreOption {
     return p.price >= prev ? UP_COLOR : DOWN_COLOR
   })
 
-  // x 轴刻度：单日在关键时点；多日只在每天首点显示 MM-DD
+  // x 轴刻度：
+  // - 单日：以「整点」为锚（HH:00），首尾必留。整点刻度天然适配不同市场：
+  //   A 股 09:30-14:59 得到 09:30/10:00/11:00/13:00/14:00/14:59；
+  //   港股午休 12:00-13:00、美股北京时间 22:30-04:59（跨零点）也成立。
+  //   刻度数按容器宽度收：观测雷达的走势卡只有 ~270px，塞 4 个以上
+  //   "hh:mm" 就会叠成一团（改前就是这个症状）。取样规则见 pickHourTicks。
+  // - 多日：只在每天首点显示 MM-DD；日期按索引取，不能用 times.indexOf，
+  //   否则跨日重复的 09:30 会被映射回第一天。
   const markStarts = new Map((props.dayMarks ?? []).map((m) => [m.start, m.date]))
+  const plotWidth = Math.max((container.value?.clientWidth ?? 960) - 108, 60)
+  // 窄图（观测雷达的走势卡绘图区只有 ~100px）字号降到 9px，否则 5 个字符的
+  // "hh:mm" 怎么排都会撞；刻度数由 pickHourTicks 按文字宽度与像素间距决定。
+  const tickFontSize = plotWidth < 300 ? 9 : 12
+  const singleDayTicks = new Set(
+    multi
+      ? []
+      : pickHourTicks(times, { plotWidth, labelWidth: tickFontSize * 3, maxTicks: 7 }),
+  )
   const labelInterval = multi
     ? (index: number) => markStarts.has(index)
-    : (index: number) => [0, 60, 120, 121, 180, 239].includes(index)
+    : (index: number) => singleDayTicks.has(index)
   const labelFormatter = multi
-    ? (v: string) => {
-        const idx = times.indexOf(v)
-        const d = markStarts.get(idx)
-        return d ? d.slice(5) : ''
-      }
+    ? (_v: string, index: number) => markStarts.get(index)?.slice(5) ?? ''
     : (v: string) => v
+
+  // tooltip 时间：带日期显示 MM-DD HH:MM，纯时间（港股/美股 tdx 源）只显示 HH:MM。
+  const tooltipTime = (dt: string): string => {
+    const date = /^(\d{4}-\d{2}-\d{2})/.exec(dt)?.[1]
+    const hm = toHhmm(dt) || dt
+    return date ? `${date.slice(5)} ${hm}` : hm
+  }
 
   // 成交量格式化：A 股手 / 港美股股
   const fmtVolUnit = (v: number): string => {
@@ -146,7 +173,7 @@ function buildOption(): echarts.EChartsCoreOption {
         const color = pct >= 0 ? UP_COLOR : DOWN_COLOR
         const pctText = base > 0 ? `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : '-'
         return [
-          `${p.datetime.slice(5, 16)}`,
+          `${tooltipTime(p.datetime)}`,
           `价 <b style="color:${color}">${fmt2(p.price)}</b>`,
           `涨跌 <b style="color:${color}">${pctText}</b>`,
           `均 ${fmt2(avgPrices[i])}`,
@@ -174,7 +201,7 @@ function buildOption(): echarts.EChartsCoreOption {
         data: times,
         boundaryGap: false,
         axisTick: { show: false },
-        axisLabel: { interval: labelInterval, formatter: labelFormatter },
+        axisLabel: { interval: labelInterval, formatter: labelFormatter, hideOverlap: true, fontSize: tickFontSize },
       },
     ],
     yAxis: [
@@ -266,7 +293,10 @@ function buildOption(): echarts.EChartsCoreOption {
 }
 
 function resize() {
+  const w = container.value?.clientWidth ?? -1
   chart?.resize()
+  // 宽度变了 = 能塞下的刻度数变了，必须重算 option（不只是拉伸画布）。
+  if (w !== laidOutWidth) render()
 }
 
 // 主题切换：ECharts 主题在建图那一刻就定死了，改 CSS 变量对它无效，

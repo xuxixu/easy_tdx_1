@@ -24,7 +24,16 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
-import { dirCls, driverVerdict, fmtNum, fmtPct, pcrVerdict } from '../data/usRadar.ts'
+import {
+  dirCls,
+  driverVerdict,
+  fmtNum,
+  fmtPct,
+  pcrVerdict,
+  fetchUsRadar,
+  fetchUsRadarVersion,
+  triggerUsRadarRebuild,
+} from '../data/usRadar.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SNAPSHOT = resolve(HERE, '../../public/data/us-radar.json')
@@ -183,4 +192,105 @@ test('快照：复盘两个窗口都有数据，且每条命中率都在 0-100',
       }
     }
   }
+})
+
+// ── 定时重建：版本探测 / 手动触发的降级契约 ─────────────────────────────────
+
+/** 临时替换 globalThis.fetch，用例结束必定还原（含抛异常路径）。 */
+function withFetch(fn: typeof globalThis.fetch, body: () => Promise<void>) {
+  const original = globalThis.fetch
+  globalThis.fetch = fn
+  return body().finally(() => {
+    globalThis.fetch = original
+  })
+}
+
+test('fetchUsRadarVersion：接口不可用时返回 null（降级为纯静态快照，不抛错）', async () => {
+  await withFetch(
+    (async () => {
+      throw new TypeError('network down')
+    }) as typeof globalThis.fetch,
+    async () => {
+      assert.equal(await fetchUsRadarVersion(), null)
+    },
+  )
+  await withFetch(
+    (async () => new Response('', { status: 503 })) as typeof globalThis.fetch,
+    async () => {
+      assert.equal(await fetchUsRadarVersion(), null)
+    },
+  )
+})
+
+test('fetchUsRadarVersion：返回版本与重建状态供前端判断是否重拉', async () => {
+  const payload = {
+    built_at: '2026-11-09',
+    as_of: '2026-11-08 收盘',
+    delay: '日线',
+    source: 'akshare',
+    rebuild: {
+      enabled: true,
+      running: false,
+      builds: 2,
+      failures: 0,
+      built_at: '2026-11-09',
+      as_of: '',
+      last_error: '',
+      last_success: null,
+      interval_sec: 86400,
+    },
+  }
+  await withFetch(
+    (async () => new Response(JSON.stringify(payload), { status: 200 })) as typeof globalThis.fetch,
+    async () => {
+      const v = await fetchUsRadarVersion()
+      assert.equal(v?.built_at, '2026-11-09')
+      assert.equal(v?.rebuild.enabled, true)
+      assert.equal(v?.rebuild.builds, 2)
+    },
+  )
+})
+
+test('triggerUsRadarRebuild：非 2xx 时抛出服务端原因', async () => {
+  await withFetch(
+    (async () =>
+      new Response(JSON.stringify({ detail: '定时重建未启用' }), {
+        status: 409,
+      })) as typeof globalThis.fetch,
+    async () => {
+      await assert.rejects(() => triggerUsRadarRebuild(), /定时重建未启用/)
+    },
+  )
+})
+
+// ── 打开即读最新：取数一律绕过缓存 ──────────────────────────────────────────
+
+test('fetchUsRadar：带 cache:no-store，避免打开页面拿到浏览器缓存的旧快照', async () => {
+  let seen: RequestInit | undefined
+  await withFetch(
+    (async (_u: string | URL | Request, init?: RequestInit) => {
+      seen = init
+      return new Response(JSON.stringify({ meta: { asOf: 'x', builtAt: 'y' } }), {
+        status: 200,
+      })
+    }) as typeof globalThis.fetch,
+    async () => {
+      await fetchUsRadar()
+    },
+  )
+  assert.equal(seen?.cache, 'no-store')
+})
+
+test('fetchUsRadarVersion：同样 no-store，版本探测不能被缓存挡住', async () => {
+  let seen: RequestInit | undefined
+  await withFetch(
+    (async (_u: string | URL | Request, init?: RequestInit) => {
+      seen = init
+      return new Response('', { status: 503 })
+    }) as typeof globalThis.fetch,
+    async () => {
+      await fetchUsRadarVersion()
+    },
+  )
+  assert.equal(seen?.cache, 'no-store')
 })
